@@ -1,0 +1,37 @@
+{
+  "name": "doodlume",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,studio -c green,magenta \"tsx watch server/index.ts\" \"vite --host 127.0.0.1 --port 5173\"",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "start": "tsx server/index.ts",
+    "check": "tsc --noEmit",
+    "test": "tsx --test shared/world.test.ts server/provider.test.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.0.0",
+    "dotenv": "^16.6.0",
+    "fastify": "^5.6.0",
+    "lucide-react": "^0.468.0",
+    "phaser": "^3.90.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "sharp": "^0.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^6.3.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

@@ -1,0 +1,75 @@
+# Doodlume
+
+**Your drawings, alive.** A creative studio for turning original drawings into playable 2D worlds, with paper as the eventual editing surface.
+
+## Current status
+
+The local **studio foundation** is working: three explicitly labeled authored examples, original vector characters, a shared physics engine, drawing/upload input, keyboard and touch controls, and device-local world saves.
+
+The server includes direct Meta and Baseten-hosted Meta interpretation adapters. **Neither live model path has been verified yet because no working provider key is configured.** Example worlds are not model results. The original plan's broader drawing-to-play milestone remains open until the real input → Meta model → original artwork → play path is demonstrated. See [the milestone record](docs/MILESTONE-1.md).
+
+## Run locally
+
+Requires Node.js 22.12 or newer.
+
+```sh
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+Open http://127.0.0.1:5173. The local API runs on port 8787. The examples need no API key. Sound starts muted and only plays after the user enables it.
+
+On this machine the checkout is inside a synced Documents folder. Its ignored `node_modules` is linked to `/Users/sreenath/.cache/doodlume-runtime/node_modules` because macOS offloaded freshly installed dependency files and stalled reads. Source files stay in the project. A normal clone outside synced storage can use `npm ci` directly.
+
+For live interpretation while direct Meta billing is restricted, use the credited Baseten account:
+
+```dotenv
+MODEL_PROVIDER=baseten
+BASETEN_API_KEY=your_key
+BASETEN_MODEL=meta-models/muse-spark-open
+```
+
+Create the key through Baseten Settings → API Keys. If the hackathon portal provides a different Muse Spark Open model slug, set `BASETEN_MODEL` to that exact supported slug. Do not put keys in frontend code or commit them. Restart the server after changing credentials. Baseten's own account access and credits must also be active; the code cannot remove a provider billing restriction.
+
+For direct Meta access, use `MODEL_PROVIDER=meta`, `MODEL_API_KEY=...`, and `META_MODEL=muse-wonder-1.0`. If `MODEL_PROVIDER` is absent, an existing direct Meta key selects Meta; otherwise Baseten is selected. With both keys, explicitly set the intended provider. A failed call never switches billing accounts automatically.
+
+Both adapters send the selected drawing and adventure description to the chosen provider and crop artwork from the uploaded page. Direct Meta uses `https://api.meta.ai/v1/chat/completions` with constrained JSON. Baseten uses `https://inference.baseten.co/v1/chat/completions` with Meta's Muse Spark Open, a JSON-schema instruction, and local response validation. Baseten currently does not support enforced structured output/JSON mode for this model, so its adapter omits that unsupported parameter. Reasoning is set to `low`. These are different model paths whose drawing quality still needs live comparison. The foundation extraction uses white-paper removal, **not SAM segmentation**. It is unsuitable for claiming general photographic extraction quality. No stock world is returned on a failed request.
+
+## Play
+
+- Move: left/right arrows or A/D.
+- Jump: Space, up arrow, or W.
+- Interact: E near a lever, or click the nearby lever.
+- Collect the sunseeds and reach home.
+- Save beside the world name, then reopen through **My worlds**. Saves stay in this browser. They are not cloud storage.
+
+Small screens expose pointer controls. A falling character returns to its spawn while collected items remain collected. All three examples use the same object kinds and engine; scene behavior is not branched by example ID.
+
+## Checks and build
+
+```sh
+npm run test
+npm run build
+```
+
+Only five focused contract/regression tests are included: three world-contract checks and two provider-boundary checks. Browser playthroughs are the main foundation check. The later live input validation should use 5–20 materially different drawings rather than a large unit-test suite.
+
+For a local production build, `npm run build` followed by `npm start` serves the studio at http://127.0.0.1:8787. This service deliberately binds to loopback. Internet hosting, authentication, paired phone capture, and deployment require a later integration pass.
+
+## Source map
+
+- `src/App.tsx`: studio workflow, input, local saves, interpretation acceptance.
+- `src/components/`: game host, modal, sketchpad.
+- `src/game/WorldScene.ts`: generic 2D physics, object behavior, original-art rendering.
+- `shared/world.ts`: world contract and validation; play state remains separate.
+- `server/`: server-side Meta connection and source-art extraction adapter.
+- `public/art/`: original authored SVG assets and labeled example pages.
+
+## Repository handoff
+
+Private development repository: [sreenathmmenon/doodlume](https://github.com/sreenathmmenon/doodlume), on `main`. `.env*`, dependencies, local data, and build output are ignored; `.env.example` contains placeholders only. The local studio and repository are separate from any production deployment.
+
+All implementation and vector art in this repository were created for this project on October 30, 2026. Third-party runtime dependencies are declared in `package.json` and locked in `package-lock.json`. The interface currently loads DM Sans and Manrope through Google Fonts, with local font fallbacks.
+
+Provider references: [Baseten's Muse Spark Open model](https://www.baseten.co/library/muse-spark-open/), [model feature support](https://docs.baseten.co/inference/model-apis/overview), [reasoning controls](https://docs.baseten.co/inference/model-apis/reasoning), and [Meta Model API support](https://dev.meta.ai/help/support/contact-support).
