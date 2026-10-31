@@ -4,9 +4,9 @@
 
 ## Current status
 
-The local **studio foundation** is working: three explicitly labeled authored examples, original vector characters, a shared physics engine, drawing/upload input, keyboard and touch controls, device-local world saves, a manual editor that adds to the same running world without losing progress, paired drawing capture, guided perspective correction, and a first-world designer for drawings and pictures.
+The local studio includes a play-first interface, three labeled authored examples, drawing/photo input, a real Meta Muse Spark Open connection through Fireworks, original-source artwork, keyboard/touch controls, device-local saves, paired drawing capture, perspective correction, and same-world editing with undo. **Add space** extends a world beyond its original page while retaining objects and progress; the validated limits are 12,000 × 5,000 and 160 objects.
 
-The server includes direct Meta, Baseten-hosted Meta and Fireworks-hosted Meta interpretation adapters. **Live model inference remains unverified because no working provider key is configured.** Example worlds are not model results. The original plan's broader drawing-to-play milestone remains open until the real input → Meta model → original artwork → play path is demonstrated. See [the foundation record](docs/MILESTONE-1.md), [same-world editing record](docs/MILESTONE-2.md), and [paper-update record](docs/PAPER-UPDATES.md), and [capture/alignment record](docs/CAPTURE-ALIGNMENT.md).
+Live Fireworks image requests are verified. Across five distinct authored drawing inputs, four generations passed placement validation and one was rejected for an empty object crop. These are input checks, not a recognition benchmark or proof that every route is playable. Direct Meta/SAM 3.1 inference remains blocked/unverified; Baseten returned HTTP 403. A private Modal SAM 2.1 trial was unsuccessful and stopped, and is not integrated into the product. See [model access](docs/MODEL-ACCESS.md) and the [current verification record](docs/LIVE-VALIDATION.md). Examples remain clearly separate from model results.
 
 ## Run locally
 
@@ -20,11 +20,11 @@ npm run dev
 
 Open http://127.0.0.1:5173. The local API runs on port 8787. The examples need no API key. Sound starts muted and only plays after the user enables it.
 
-For a stable runnable preview without development reloads, use `npm run studio`. It builds the app, copies a runnable snapshot into your local cache, and serves both the studio and API at http://127.0.0.1:5173. Credentials are not copied; the server reads the original ignored `.env.local`. Restart this command after source or credential changes.
+For a stable runnable preview without development reloads, use `npm run studio`. It builds the app, copies a runnable snapshot into your local cache, and serves both the studio and API at http://127.0.0.1:5173. Credentials are not copied; the server reads the original ignored `.env.local` and allowlisted provider keys from `~/.env`. Restart this command after source or credential changes.
 
 On this machine the checkout is inside a synced Documents folder. Its ignored `node_modules` is linked to `/Users/sreenath/.cache/doodlume-runtime/node_modules` because macOS offloaded freshly installed dependency files and stalled reads. Source files stay in the project. A normal clone outside synced storage can use `npm ci` directly.
 
-For live interpretation while direct Meta billing is restricted, use the credited Baseten account:
+Baseten is supported, but the current account returned HTTP 403:
 
 ```dotenv
 MODEL_PROVIDER=baseten
@@ -42,7 +42,7 @@ FIREWORKS_API_KEY=your_key
 FIREWORKS_MODEL=accounts/fireworks/models/muse-spark-open
 ```
 
-Fireworks uses its official inference endpoint, the same Meta-only model boundary, prompt schema and local validation. No failure silently changes providers. The configured model must be available to the credited account; no live call has been made without a key. Modal also offers a Muse Spark Open Shared Endpoint, but it is not wired into this application yet. See [the model access record](docs/MODEL-ACCESS.md).
+Fireworks uses its official inference endpoint, the same Meta-only model boundary, prompt schema and local validation. No failure silently changes providers. The owner’s Fireworks account has now completed real image interpretation calls. Modal also offers a Muse Spark Open Shared Endpoint, but it is not wired into this application yet. See [the model access record](docs/MODEL-ACCESS.md).
 
 For direct Meta access, use `MODEL_PROVIDER=meta`, `MODEL_API_KEY=...`, and `META_MODEL=muse-wonder-1.0`. If `MODEL_PROVIDER` is absent, an existing direct Meta key selects Meta; otherwise Baseten is selected. With both keys, explicitly set the intended provider. A failed call never switches billing accounts automatically.
 
@@ -50,11 +50,11 @@ All adapters send the selected drawing and adventure description to the chosen p
 
 ## Pictures and first-world design
 
-Choose **Photo / picture**, then upload a photograph, printed picture or illustration. **Choose objects myself** opens Pick. Place. Play. Mark source artwork, assign its game role, and arrange its position and size separately. Add missing platforms, collectibles, gates, switches or a destination as explicit design choices. Connect each switch to its gate. Rectangle crops preserve the selected photo pixels; the optional oval is a manual trim, not SAM segmentation. The first preview shows actual artwork and extraction labels before you open the game. This manual route processes pixels locally and needs no model access. Worlds are labeled **Chosen by you**, with provenance retained in saves.
+Choose **Photo**, then upload a photograph, printed picture or illustration. **Design it myself** opens the object designer. Mark source artwork, assign its game role, and arrange its position and size separately. Add missing platforms, collectibles, gates, switches or a destination as explicit design choices. Connect each switch to its gate. Rectangle crops preserve the selected photo pixels; the optional oval is a manual trim, not SAM segmentation. The first preview shows actual artwork and extraction labels before you open the game. This manual route processes pixels locally and needs no model access. Worlds are labeled **Chosen by you**, with provenance retained in saves.
 
-**Bring it alive** instead sends the selected picture and adventure intent to the configured Meta model with a picture-specific interpretation prompt. SAM can then isolate identified subjects. If no usable mask is returned, a photo keeps its rectangular crop and its original pale/white pixels; it never uses drawing-specific white-paper removal. The live automatic picture path remains unverified. Missing surfaces or unclear subjects can produce a clarification rather than an invented game.
+**Create world** instead sends the selected picture and adventure intent to the configured Meta model with a picture-specific interpretation prompt. SAM can then isolate identified subjects. If no usable mask is returned, a photo keeps its rectangular crop and its original pale/white pixels; it never uses drawing-specific white-paper removal. The live automatic picture path remains unverified. Missing surfaces or unclear subjects can produce a clarification rather than an invented game.
 
-**Refine objects & layout** corrects the first interpretation's crop, roles, placements, sizes, theme, name and switch targets. Invalid source boxes, missing player/ground, out-of-frame placements and characters embedded in solids block acceptance. Other guidance is advisory; there is no claim that all routes are solved or reachable. Cancellation preserves the existing world. Picture worlds use manual same-world edits after creation; automatic revised-page comparison remains restricted to drawings.
+**Edit objects** corrects the first interpretation's crop, roles, placements, sizes, theme, name and switch targets. Invalid source boxes, missing player/ground, out-of-frame placements and characters embedded in solids block acceptance. Other guidance is advisory; there is no claim that all routes are solved or reachable. Cancellation preserves the existing world. Picture worlds use manual same-world edits after creation; automatic revised-page comparison remains restricted to drawings.
 
 See [the picture workflow record](docs/PICTURE-WORLDS.md). This is a 2D adaptation workflow, not hidden-scene reconstruction, generated game code or a 3D world model.
 
@@ -71,10 +71,10 @@ An original synthesized score and event-specific sound cues run locally after th
 - Move: left/right arrows or A/D.
 - Jump: Space, up arrow, or W. Hold for a higher jump; release for a short hop.
 - Interact: E near a lever, or click the nearby lever.
-- Collect the sunseeds and reach home.
+- Collect the objects in your world and reach its destination.
 - **Use phone camera** pairs a one-photo connection with this studio. Choose Wi-Fi for a physical phone on the same network, or preview pairing on this computer. The phone can choose/take a photo, rotate, preview, and send; it cannot access model keys or studio controls. Wi-Fi mode starts a temporary drawing-only listener on the next port (5174 with `npm run studio`) and closes when captures finish, expire, or are cancelled. It starts only when selected. No internet hosting is configured.
 - **Align page** supports rotation, four-corner crop and perspective correction, and before/after review. Revised pages match the current page shape. Corrections are performed locally in a worker; accepting a photo does not replace the running world.
-- **Keep creating** pauses the current adventure and opens the clearly labeled manual editor. Add bridges, platforms, sunseeds, gates, and levers; choose which gate each lever controls. Optionally draw original object artwork. Preview, then apply and continue from the same position.
+- **Edit world** pauses the current adventure and opens the clearly labeled manual editor. Add bridges, platforms, collectibles, gates, and levers; choose which gate each lever controls. Optionally draw original object artwork. Use **Add space** to extend the map to the right. Preview, apply and continue from the same position. Undoing an expansion requires returning inside the previous boundary.
 - **Update page** opens the current and revised drawings side by side. Draw on the original page without changing its old marks, or upload a revised photo. New strokes can transfer as one original-art object: choose its role, correct placement in preview, check connections, then apply. This manual route needs no API key.
 - For a world originally interpreted by Meta, the same flow can send both pages and stable world metadata to the selected Meta provider. Its proposed additions must be reviewed; this live inference path is implemented but not yet verified. Shifted/perspective photos need reframing or manual placement, not an assumed automatic registration.
 - **Undo** removes the most recent edit while keeping subsequent progress on surviving objects. Edits that would cover the character with a solid object are rejected.
@@ -87,6 +87,7 @@ Small screens expose pointer controls. A falling character returns to its spawn 
 ```sh
 npm run test
 npm run build
+npm run check:secrets
 ```
 
 Only twenty focused contract/regression tests are included: three world-contract checks, three revision checks, two provider-boundary checks, four paper-comparison checks, two page-geometry checks, two capture-session/gateway checks, three segmentation pipeline checks, and one picture-input/review check. Paper-comparison and segmentation tests inject a test-only transport; they validate request/response handling and real image cropping, not Meta recognition accuracy. The SAM wire fixture comes from Meta's published example; it is synthetic test data, not an app inference result. No mocked model response is available in the product. Browser playthroughs are the main foundation check. The later live input validation should use 5–20 materially different drawings rather than a large unit-test suite.
@@ -118,6 +119,8 @@ For a local production build, `npm run build` followed by `npm start` serves the
 
 Private development repository: [sreenathmmenon/doodlume](https://github.com/sreenathmmenon/doodlume), on `main`. `.env*`, dependencies, local data, and build output are ignored; `.env.example` contains placeholders only. The local studio and repository are separate from any production deployment.
 
-All implementation and vector art in this repository were created for this project beginning October 30, 2026. Third-party runtime dependencies are declared in `package.json` and locked in `package-lock.json`. The interface currently loads DM Sans and Manrope through Google Fonts, with local font fallbacks.
+All implementation and vector art in this repository were created for this project beginning October 30, 2026. Third-party runtime dependencies are declared in `package.json` and locked in `package-lock.json`. The interface bundles Manrope and Fraunces locally. Their SIL Open Font License files are included in `public/fonts/`; no remote font request is required.
 
 Provider references: [Baseten's Muse Spark Open model](https://www.baseten.co/library/muse-spark-open/), [model feature support](https://docs.baseten.co/inference/model-apis/overview), [reasoning controls](https://docs.baseten.co/inference/model-apis/reasoning), and [Meta Model API support](https://dev.meta.ai/help/support/contact-support).
+
+Credential handling: only the server reads `MODEL_API_KEY`, `BASETEN_API_KEY`, and `FIREWORKS_API_KEY` from the owner’s `~/.env`. Existing process/project values take precedence. Credential/key directories and Modal configuration files are ignored. `npm run check:secrets` checks configured provider values against tracked worktree files and staged blobs without printing them. Run it after staging before every commit.

@@ -38,7 +38,7 @@ const tools = [
   },
   {
     kind: "coin",
-    label: "Sunseed",
+    label: "Collectible",
     hint: "A little light to find.",
     width: 35,
     height: 40,
@@ -83,6 +83,8 @@ export function WorldEditor({
   revisedImage?: string;
   onBack?: () => void;
 }) {
+  const [bounds, setBounds] = useState({ width: world.width, height: world.height });
+  const expanded = bounds.width !== world.width || bounds.height !== world.height;
   const [additions, setAdditions] = useState<WorldEntity[]>(() =>
     structuredClone(proposal?.patch.additions ?? initialAdditions ?? []),
   );
@@ -120,11 +122,12 @@ export function WorldEditor({
       origin: proposal ? "meta" : "manual",
       ...(revisedImage ? { sourceImage: revisedImage } : {}),
       additions,
+      ...(expanded ? { bounds } : {}),
     }),
-    [world.id, world.revision, additions, proposal, revisedImage],
+    [world.id, world.revision, additions, proposal, revisedImage, bounds, expanded],
   );
   let problem = "";
-  if (additions.length) {
+  if (additions.length || expanded) {
     try {
       applyWorldPatch(world, state, patch);
     } catch (e) {
@@ -136,8 +139,8 @@ export function WorldEditor({
   function point(e: PointerEvent<SVGSVGElement>) {
     const r = e.currentTarget.getBoundingClientRect();
     return {
-      x: limit(((e.clientX - r.left) * 1440) / r.width, 0, 1440),
-      y: limit(((e.clientY - r.top) * 820) / r.height, 0, 820),
+      x: limit(((e.clientX - r.left) * bounds.width) / r.width, 0, bounds.width),
+      y: limit(((e.clientY - r.top) * bounds.height) / r.height, 0, bounds.height),
     };
   }
   function down(e: PointerEvent<SVGSVGElement>) {
@@ -182,8 +185,8 @@ export function WorldEditor({
           a.id === drag.id
             ? {
                 ...a,
-                x: limit(original.x + p.x - drag.x, 0, 1440 - a.width),
-                y: limit(original.y + p.y - drag.y, 0, 820 - a.height),
+                x: limit(original.x + p.x - drag.x, 0, bounds.width - a.width),
+                y: limit(original.y + p.y - drag.y, 0, bounds.height - a.height),
               }
             : a,
         ),
@@ -213,12 +216,12 @@ export function WorldEditor({
         x: limit(
           isClick ? p.x - width / 2 : Math.min(p.x, drag.x),
           0,
-          1440 - width,
+          bounds.width - width,
         ),
         y: limit(
           isClick ? p.y - height / 2 : Math.min(p.y, drag.y),
           0,
-          820 - height,
+          bounds.height - height,
         ),
         width,
         height,
@@ -348,14 +351,13 @@ export function WorldEditor({
   return (
     <>
       <Modal
-        title="Keep the world. Change the possibilities."
+        title="Edit your world"
         onClose={onClose}
         wide
       >
         <div className="editor-intro">
           <p>
-            Make a new path, a new challenge, a new little reason to explore.
-            Your character and everything you’ve earned stay with you.
+            Add objects and connect new paths. Your progress is kept.
           </p>
           <span className="editor-origin">
             {proposal
@@ -390,6 +392,7 @@ export function WorldEditor({
           </div>
         )}
         <div className="editor-tools" role="group" aria-label="Objects to add">
+          <button onClick={() => { setBounds(b => ({...b, width:Math.min(12000,b.width+1440)})); setReviewed(false); }} disabled={bounds.width >= 12000} aria-label="Extend world to the right"><Plus size={13} /> Add space</button>
           {tools.map((t) => (
             <button
               key={t.kind}
@@ -414,14 +417,15 @@ export function WorldEditor({
         <div className="editor-canvas-wrap">
           <svg
             className="editor-canvas"
-            viewBox="0 0 1440 820"
+            viewBox={`0 0 ${bounds.width} ${bounds.height}`}
+            style={{ aspectRatio: `${bounds.width} / ${bounds.height}` }}
             aria-label="World edit canvas. Select an object type, then drag on the world to place it. Existing objects are kept."
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}
             onPointerCancel={() => setDrag(null)}
           >
-            <rect width="1440" height="820" fill={colors[0]} />
+            <rect width={bounds.width} height={bounds.height} fill={colors[0]} />
             <circle cx="1120" cy="175" r="76" fill="#f0dba5" opacity=".6" />
             <path
               d="M0 550Q300 300 670 500T1440 470V820H0Z"
@@ -499,7 +503,7 @@ export function WorldEditor({
                     {[
                       ["bridge", "Bridge"],
                       ["terrain", "Platform"],
-                      ["coin", "Sunseed"],
+                      ["coin", "Collectible"],
                       ["lever", "Lever"],
                       ["gate", "Gate"],
                       ["goal", "Destination"],
@@ -535,12 +539,12 @@ export function WorldEditor({
                         min={key === "width" || key === "height" ? 12 : 0}
                         max={
                           key === "x"
-                            ? 1440 - item.width
+                            ? bounds.width - item.width
                             : key === "y"
-                              ? 820 - item.height
+                              ? bounds.height - item.height
                               : key === "width"
-                                ? 1440 - item.x
-                                : 820 - item.y
+                                ? bounds.width - item.x
+                                : bounds.height - item.y
                         }
                         onChange={(e) => {
                           const n = Number(e.target.value);
@@ -550,12 +554,12 @@ export function WorldEditor({
                                 n,
                                 key === "width" || key === "height" ? 12 : 0,
                                 key === "x"
-                                  ? 1440 - item.width
+                                  ? bounds.width - item.width
                                   : key === "y"
-                                    ? 820 - item.height
+                                    ? bounds.height - item.height
                                     : key === "width"
-                                      ? 1440 - item.x
-                                      : 820 - item.y,
+                                      ? bounds.width - item.x
+                                      : bounds.height - item.y,
                               ),
                             });
                         }}
@@ -620,7 +624,7 @@ export function WorldEditor({
             </h3>
             <p>
               {state.collected.length} collected{" "}
-              {state.collected.length === 1 ? "sunseed" : "sunseeds"} ·{" "}
+              {state.collected.length === 1 ? "item" : "items"} ·{" "}
               {state.activated.length} used{" "}
               {state.activated.length === 1 ? "lever" : "levers"} · character
               position kept
@@ -639,9 +643,9 @@ export function WorldEditor({
               )}
             </div>
             <p className="editor-scope">
-              Original objects are protected. This edit adds {additions.length}{" "}
-              new {additions.length === 1 ? "object" : "objects"} to version{" "}
-              {world.revision}.
+              {expanded ? `World extends to ${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()}. ` : ""}
+              {additions.length > 0 ? `${additions.length} new ${additions.length === 1 ? "object" : "objects"}. ` : ""}
+              Your existing objects and progress stay with you.
             </p>
             {(problem || error) && (
               <p className="editor-error" role="alert">
@@ -675,7 +679,7 @@ export function WorldEditor({
               <button
                 className="primary-button"
                 disabled={
-                  !additions.length ||
+                  (!additions.length && !expanded) ||
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
                 }

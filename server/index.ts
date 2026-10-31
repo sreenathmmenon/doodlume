@@ -8,11 +8,13 @@ import { interpretDrawing, InterpretationError } from "./interpret.js";
 import { interpretAmendment } from "./amend.js";
 import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
+import { loadLocalProviderKeys } from "./credentials.js";
 import { segmentationConnection } from "./segmentation.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
 config({ path: resolve(root, ".env") });
+loadLocalProviderKeys();
 const connection = modelConnection(process.env);
 const maxRequests = Math.max(
   0,

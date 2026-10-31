@@ -17,6 +17,7 @@ import {
   Pause,
   Pencil,
   Play,
+  Plus,
   RotateCcw,
   Settings2,
   Sparkles,
@@ -75,6 +76,8 @@ type Connection = {
   segmentation?: { enabled: boolean; configured: boolean; model: string };
 };
 type Dialog =
+  | "create"
+  | "review"
   | "sketch"
   | "worlds"
   | "help"
@@ -97,7 +100,7 @@ function savedWorlds(): SavedWorld[] {
 }
 const initialMetrics: WorldTelemetry = {
   collected: 0,
-  total: 3,
+  total: 0,
   completed: false,
   nearLever: false,
   playerX: 0,
@@ -146,16 +149,9 @@ export default function App() {
   const latestState = useRef<PlayState>(emptyPlayState());
   const request = useRef<AbortController | null>(null);
   const previousPlaying = useRef(false);
-  const draftPanel = useRef<HTMLElement>(null);
   const draftFeedback = draft ? setupFeedback(draft) : null;
   useEffect(() => {
-    if (draft) {
-      draftPanel.current?.scrollIntoView({
-        block: "start",
-        behavior: "instant",
-      });
-      draftPanel.current?.focus({ preventScroll: true });
-    }
+    if (draft) setDialog("review");
   }, [draft]);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -325,6 +321,7 @@ export default function App() {
     const result = applyWorldPatch(worldNow.current, editorState, patch);
     setHistory((items) => [...items, result.checkpoint].slice(-12));
     keepRevision(result.world, result.state);
+    if (patch.bounds) { tell("World expanded. Your progress is kept."); return; }
     tell(
       `${patch.additions.length === 1 ? "A new possibility" : `${patch.additions.length} new possibilities`}. Same little world. Your progress stayed with you.`,
     );
@@ -410,13 +407,7 @@ export default function App() {
     setError("");
     try {
       const image = await readDrawingFile(selected);
-      if (inputKind === "picture") {
-        useSource(image, selected.name);
-        return;
-      }
-      setPendingPhoto(image);
-      setPendingPhotoName(selected.name);
-      setDialog("align");
+      useSource(image, selected.name);
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "This image could not be opened.",
@@ -435,7 +426,7 @@ export default function App() {
     setDraft(null);
     setPlaying(false);
     setError("");
-    setDialog(null);
+    setDialog("create");
     previousPlaying.current = false;
     tell(
       "Your image is ready. Tell us what should happen in it, or choose the objects yourself.",
@@ -505,8 +496,156 @@ export default function App() {
   const touch = (key: "left" | "right" | "jump" | "interact", value: boolean) =>
     canvas.current?.touch(key, value);
 
+  const sourcePanel = (
+    <aside className="paper-panel" aria-label="Your drawing">
+      <div className="panel-heading">
+        <h2>Your source image</h2>
+      </div>
+      <div className="source-kind" role="group" aria-label="Source image type">
+        <button
+          aria-pressed={inputKind === "drawing"}
+          disabled={busy}
+          onClick={() => {
+            setInputKind("drawing");
+            setDraft(null);
+          }}
+        >
+          Drawing
+        </button>
+        <button
+          aria-pressed={inputKind === "picture"}
+          disabled={busy}
+          onClick={() => {
+            setInputKind("picture");
+            setDraft(null);
+          }}
+        >
+          Photo
+        </button>
+      </div>
+      <div className={`paper-frame ${customSource ? "custom-paper" : ""}`}>
+        <span className="paper-tape" />
+        <img src={source} alt={sourceName} />
+        <div className="source-caption">
+          <span>
+            {customSource || world.source !== "example"
+              ? inputKind === "picture"
+                ? "YOUR PICTURE"
+                : "YOUR DRAWING"
+              : source.startsWith("data:")
+                ? "EDITED EXAMPLE"
+                : "EXAMPLE DRAWING"}
+          </span>
+          <span>↗</span>
+        </div>
+      </div>
+      <div className="source-actions">
+        <button
+          className="secondary-button"
+          onClick={() => file.current?.click()}
+          disabled={busy}
+        >
+          <ImagePlus size={17} />{" "}
+          {inputKind === "picture" ? "Upload photo" : "Upload drawing"}
+        </button>
+        <button
+          className="icon-button draw-button"
+          aria-label="Draw here"
+          onClick={() => setDialog("sketch")}
+          disabled={busy}
+        >
+          <Pencil size={17} />
+        </button>
+        <input
+          ref={file}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          hidden
+          onChange={upload}
+        />
+      </div>
+      <div className="capture-source-actions">
+        <button
+          className="text-button"
+          disabled={busy}
+          onClick={() => setDialog("phone")}
+        >
+          <Smartphone size={15} />
+          Use phone camera
+        </button>
+        {customSource && (
+          <button
+            className="text-button"
+            disabled={busy}
+            onClick={() => {
+              setPendingPhoto(source);
+              setDialog("align");
+            }}
+          >
+            <Crop size={15} />
+            Align page
+          </button>
+        )}
+      </div>
+      <div className="paper-divider" />
+      <label className="intent-label" htmlFor="world-intent">
+        How should it play?
+      </label>
+      <div className="intent-box">
+        <textarea
+          id="world-intent"
+          value={intent}
+          maxLength={500}
+          onChange={(e) => setIntent(e.target.value)}
+          placeholder="Collect lost stars, connect two islands, or find a way home…"
+          disabled={busy}
+        />
+        <Sparkles size={15} aria-hidden="true" />
+      </div>
+      {error && (
+        <p role="alert" className="source-error">
+          {error}
+        </p>
+      )}
+      {busy ? (
+        <button
+          className="primary-button create-button"
+          onClick={cancelInterpretation}
+        >
+          <LoaderCircle size={18} className="spin" /> Creating your world…{" "}
+          <X size={16} />
+        </button>
+      ) : (
+        <button className="primary-button create-button" onClick={bringAlive}>
+          <WandSparkles size={18} /> Create world <ArrowUpRight size={18} />
+        </button>
+      )}
+      <button className="connection-note" onClick={() => setDialog("settings")}>
+        <span
+          className={`status-dot ${connection?.configured ? "connected" : ""}`}
+        />
+        {connection?.configured
+          ? "Meta connected"
+          : connectionError
+            ? "Connection unavailable"
+            : "Connect Meta"}
+        <ChevronRight size={13} />
+      </button>
+      {customSource && (
+        <button
+          className="secondary-button setup-source-button"
+          disabled={busy}
+          onClick={() => setDialog("setup")}
+        >
+          <Pencil size={16} />
+          {draft ? "Edit objects" : "Design it myself"}
+        </button>
+      )}
+    </aside>
+  );
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell studio-v2 ${focusedPlay ? "play-focused" : ""}`}>
       <header className="topbar">
         <a className="brand" href="#studio" aria-label="Doodlume studio">
           <img src="/art/favicon.svg" alt="" />
@@ -523,9 +662,14 @@ export default function App() {
           </button>
         </nav>
         <div className="top-actions">
-          <span className="local-pill">
-            <span /> Local studio
-          </span>
+          <button
+            className="primary-button new-world-button"
+            aria-label="Create a new world"
+            onClick={() => setDialog("create")}
+          >
+            <Plus size={17} />
+            <span>New world</span>
+          </button>
           <button
             className="icon-button"
             aria-label="How to play"
@@ -543,216 +687,13 @@ export default function App() {
         </div>
       </header>
       <main id="studio">
-        <section className="studio-intro">
-          <div>
-            <div className="eyebrow">
-              <span className="tiny-star">✳</span> A little ink. A whole new
-              world.
-            </div>
-            <h1>
-              Your drawings,
-              <br className="mobile-break" /> <em>alive.</em>
-              <svg
-                className="title-swish"
-                viewBox="0 0 180 14"
-                aria-hidden="true"
-              >
-                <path d="M3 9Q82-2 177 7M25 13Q95 3 155 11" />
-              </svg>
-            </h1>
-            <p>Small marks. Big adventures. Made entirely yours.</p>
-          </div>
-          <div className="intro-note">
-            <span>from page</span>
-            <svg
-              width="100"
-              height="40"
-              viewBox="0 0 100 40"
-              aria-hidden="true"
-            >
-              <path d="M5 23Q29 2 49 21T90 16M80 14L93 15L87 26" />
-            </svg>
-            <span>to possibility</span>
-          </div>
-        </section>
         <div className="studio-workspace">
-          <aside className="paper-panel" aria-label="Your drawing">
-            <div className="panel-heading">
-              <span className="step-label">01</span>
-              <h2>The beginning</h2>
-              <span className="paper-label">your page</span>
-            </div>
-            <div
-              className="source-kind"
-              role="group"
-              aria-label="Source image type"
-            >
-              <button
-                aria-pressed={inputKind === "drawing"}
-                disabled={busy}
-                onClick={() => {
-                  setInputKind("drawing");
-                  setDraft(null);
-                }}
-              >
-                Drawing
-              </button>
-              <button
-                aria-pressed={inputKind === "picture"}
-                disabled={busy}
-                onClick={() => {
-                  setInputKind("picture");
-                  setDraft(null);
-                }}
-              >
-                Photo / picture
-              </button>
-            </div>
-            <div
-              className={`paper-frame ${customSource ? "custom-paper" : ""}`}
-            >
-              <span className="paper-tape" />
-              <img src={source} alt={sourceName} />
-              <div className="source-caption">
-                <span>
-                  {customSource || world.source !== "example"
-                    ? inputKind === "picture"
-                      ? "YOUR PICTURE"
-                      : "YOUR DRAWING"
-                    : source.startsWith("data:")
-                      ? "EDITED EXAMPLE"
-                      : "EXAMPLE DRAWING"}
-                </span>
-                <span>↗</span>
-              </div>
-            </div>
-            <div className="source-actions">
-              <button
-                className="secondary-button"
-                onClick={() => file.current?.click()}
-                disabled={busy}
-              >
-                <ImagePlus size={17} />{" "}
-                {inputKind === "picture" ? "Add a picture" : "Add a drawing"}
-              </button>
-              <button
-                className="icon-button draw-button"
-                aria-label="Draw here"
-                onClick={() => setDialog("sketch")}
-                disabled={busy}
-              >
-                <Pencil size={17} />
-              </button>
-              <input
-                ref={file}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                hidden
-                onChange={upload}
-              />
-            </div>
-            <div className="capture-source-actions">
-              <button
-                className="text-button"
-                disabled={busy}
-                onClick={() => setDialog("phone")}
-              >
-                <Smartphone size={15} />
-                Use phone camera
-              </button>
-              {customSource && (
-                <button
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => {
-                    setPendingPhoto(source);
-                    setDialog("align");
-                  }}
-                >
-                  <Crop size={15} />
-                  Align page
-                </button>
-              )}
-            </div>
-            <div className="paper-divider" />
-            {inputKind === "picture" && (
-              <p className="source-picture-note">
-                A photo, printed picture or illustration can become a 2D
-                adventure. You choose how it plays; hidden scenery is not
-                reconstructed.
-              </p>
-            )}
-            <label className="intent-label" htmlFor="world-intent">
-              What’s the little adventure?
-            </label>
-            <div className="intent-box">
-              <textarea
-                id="world-intent"
-                value={intent}
-                maxLength={500}
-                onChange={(e) => setIntent(e.target.value)}
-                placeholder="A shy creature collecting stars on its way home…"
-                disabled={busy}
-              />
-              <Sparkles size={15} aria-hidden="true" />
-            </div>
-            <p className="source-tip">
-              A character, a path, a little purpose.
-              <br />
-              The rest starts with your imagination.
-            </p>
-            {busy ? (
-              <button
-                className="primary-button create-button"
-                onClick={cancelInterpretation}
-              >
-                <LoaderCircle size={18} className="spin" /> Reading your page…{" "}
-                <X size={16} />
-              </button>
-            ) : (
-              <button
-                className="primary-button create-button"
-                onClick={bringAlive}
-              >
-                <WandSparkles size={18} /> Bring it alive{" "}
-                <ArrowUpRight size={18} />
-              </button>
-            )}
-            <button
-              className="connection-note"
-              onClick={() => setDialog("settings")}
-            >
-              <span
-                className={`status-dot ${connection?.configured ? "connected" : ""}`}
-              />
-              {connection?.configured
-                ? `${connection.label} · key configured`
-                : connectionError
-                  ? "Connection unavailable · view setup"
-                  : `${connection?.label ?? "Meta model"} · setup needed`}
-              <ChevronRight size={13} />
-            </button>
-            {customSource && (
-              <button
-                className="secondary-button setup-source-button"
-                disabled={busy}
-                onClick={() => setDialog("setup")}
-              >
-                <Pencil size={16} />
-                {draft ? "Refine objects & layout" : "Choose objects myself"}
-              </button>
-            )}
-          </aside>
           <section
             className={`world-panel ${focusedPlay ? "focused-play" : ""}`}
             aria-label="Your playable world"
           >
             <div className="world-heading">
               <div>
-                <div className="world-kicker">
-                  <span className="step-label">02</span>
-                  <span>The possibility</span>
-                </div>
                 <label className="world-name-label">
                   <span className="sr-only">World name</span>
                   <input
@@ -801,7 +742,7 @@ export default function App() {
                   disabled={busy || metrics.completed}
                 >
                   <Pencil size={15} />
-                  <span>Keep creating</span>
+                  <span>Edit world</span>
                 </button>
                 <button
                   className="icon-button"
@@ -847,24 +788,24 @@ export default function App() {
                 }}
                 onMoment={tell}
               />
-              <div className="game-top">
-                <span className="world-location">
-                  <Sprout size={15} />
-                  {world.theme === "moon"
-                    ? "THE LUNAR ARCHIVE"
-                    : world.theme === "sunset"
-                      ? "THE AMBER WILDS"
-                      : "THE WANDERING GROVE"}
-                </span>
-                <span
-                  className="seed-counter"
-                  aria-label={`${metrics.collected} of ${metrics.total} sunseeds collected`}
-                >
-                  <img src="/art/seed.svg" alt="" />
-                  <b>{metrics.collected}</b>
-                  <span>/ {metrics.total}</span>
-                </span>
-              </div>
+              {metrics.total > 0 && (
+                <div className="game-top">
+                  <span
+                    className="seed-counter"
+                    aria-label={`${metrics.collected} of ${metrics.total} collectibles found`}
+                  >
+                    <img
+                      src={
+                        world.entities.find((e) => e.kind === "coin")?.art ??
+                        "/art/seed.svg"
+                      }
+                      alt=""
+                    />
+                    <b>{metrics.collected}</b>
+                    <span>/ {metrics.total}</span>
+                  </span>
+                </div>
+              )}
               {!playing && !metrics.completed && !busy && (
                 <div
                   className={`play-overlay ${started ? "paused-overlay" : ""}`}
@@ -876,18 +817,12 @@ export default function App() {
                   >
                     <Play size={27} fill="currentColor" />
                   </button>
-                  {!started && (
-                    <span className="adventure-overline">
-                      A WORLD FROM YOUR IMAGINATION
-                    </span>
-                  )}
+
                   <span className="play-caption">
                     {started ? "Adventure paused." : world.name}
                   </span>
                   <span className="play-subcaption">
-                    {started
-                      ? "Pick up right where you left off."
-                      : "Collect the light. Discover a way through. Make it yours."}
+                    {started ? "Your progress is kept." : world.description}
                   </span>
                 </div>
               )}
@@ -896,22 +831,16 @@ export default function App() {
                   <div className="completion-icon">
                     <Sparkles size={25} />
                   </div>
-                  <span className="eyebrow">
-                    {world.inputKind === "picture"
-                      ? "A PICTURE. A LITTLE ADVENTURE."
-                      : "HOME, SWEET DRAWING."}
-                  </span>
-                  <h2>
-                    A little world.
-                    <br />A whole lot of you.
-                  </h2>
+                  <span className="eyebrow">ADVENTURE COMPLETE</span>
+                  <h2>{world.name}</h2>
                   <p>
-                    {metrics.collected} of {metrics.total} sunseeds found. Every
-                    adventure leaves a little light.
+                    {metrics.total > 0
+                      ? `${metrics.collected} / ${metrics.total} collectibles found`
+                      : "A world made yours."}
                   </p>
                   <div>
                     <button className="primary-button" onClick={restart}>
-                      One more adventure <RotateCcw size={16} />
+                      Play again <RotateCcw size={16} />
                     </button>
                     <button
                       className="text-button"
@@ -919,7 +848,7 @@ export default function App() {
                       disabled={saving}
                       aria-busy={saving}
                     >
-                      <FolderHeart size={17} /> Keep this world
+                      <FolderHeart size={17} /> Save world
                     </button>
                   </div>
                 </div>
@@ -927,8 +856,8 @@ export default function App() {
               {busy && (
                 <div className="reading-overlay">
                   <LoaderCircle size={30} className="spin" />
-                  <h3>Finding the story in your lines.</h3>
-                  <p>Your current world is waiting safely here.</p>
+                  <h3>Creating your world.</h3>
+                  <p>Your current adventure is kept.</p>
                   <button
                     className="text-button"
                     onClick={cancelInterpretation}
@@ -939,21 +868,22 @@ export default function App() {
               )}
               {playing && !metrics.completed && (
                 <div className="quest-hud">
-                  <span>YOUR NEXT MOVE</span>
+                  <span>NEXT</span>
                   <strong>
                     {metrics.collected < metrics.total
-                      ? `Find the light · ${metrics.total - metrics.collected} remaining`
+                      ? `Collect · ${metrics.total - metrics.collected} remaining`
                       : world.entities.some(
                             (e) =>
                               e.kind === "lever" &&
                               !latestState.current.activated.includes(e.id),
                           )
-                        ? "Wake the gate · E near a switch"
-                        : "Find your way home"}
+                        ? "Use the switch · E"
+                        : world.entities.find((e) => e.kind === "goal")?.label
+                          ? `Reach ${world.entities.find((e) => e.kind === "goal")!.label}`
+                          : "Explore your world"}
                   </strong>
                 </div>
               )}
-              <div className="stage-corner">YOUR IMAGINATION. ALIVE.</div>
             </div>
             <div className="game-toolbar">
               <div className="play-controls">
@@ -1055,83 +985,9 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div className="world-footnote">
-              <span className="tiny-star">✳</span>
-              <p>
-                {metrics.nearLever && playing
-                  ? "You found a lever. Press E, or tap it, and see what changes."
-                  : world.description}
-              </p>
-              <button
-                onClick={() => setDialog("help")}
-                aria-label="Learn how this world works"
-              >
-                <CircleHelp size={15} />
-              </button>
-            </div>
           </section>
         </div>
-        {draft && (
-          <section
-            className="interpretation-preview"
-            aria-label="Review drawing interpretation"
-            ref={draftPanel}
-            tabIndex={-1}
-          >
-            <div>
-              <div className="eyebrow">
-                {draft.source === "manual"
-                  ? "YOUR SELECTION, READY TO PLAY"
-                  : "YOUR IMAGE, INTERPRETED"}
-              </div>
-              <h2>{draft.name}</h2>
-              <p>{draft.description}</p>
-              <p>
-                {draft.entities.length} objects ·{" "}
-                {draft.entities.filter((e) => e.kind === "coin").length}{" "}
-                {draft.entities.filter((e) => e.kind === "coin").length === 1
-                  ? "collectible"
-                  : "collectibles"}{" "}
-                · {draft.entities.filter((e) => e.kind === "lever").length}{" "}
-                {draft.entities.filter((e) => e.kind === "lever").length === 1
-                  ? "lever"
-                  : "levers"}
-              </p>
-              <ArtworkReview entities={draft.entities} />
-              {draftFeedback?.errors.map((message) => (
-                <p className="setup-error" key={message}>
-                  {message} Choose “Refine objects & layout” to adjust it.
-                </p>
-              ))}
-            </div>
-            <button
-              className="primary-button"
-              disabled={Boolean(draftFeedback?.errors.length)}
-              onClick={() => {
-                loadWorld(draft);
-                tell("Your first world is ready. Press play to explore.");
-                requestAnimationFrame(() => {
-                  stage.current?.scrollIntoView({
-                    block: "center",
-                    behavior: "instant",
-                  });
-                  stage.current
-                    ?.querySelector<HTMLElement>(".world-canvas")
-                    ?.focus({ preventScroll: true });
-                });
-              }}
-            >
-              Open this world <ArrowUpRight size={18} />
-            </button>
-            <button className="text-button" onClick={() => setDraft(null)}>
-              Keep current world
-            </button>
-            <button className="text-button" onClick={() => setDialog("setup")}>
-              Refine objects & layout
-            </button>
-          </section>
-        )}
-        {error && (
+        {error && dialog !== "create" && (
           <div role="alert" className="error-notice">
             <span>{error}</span>
             <button
@@ -1145,17 +1001,7 @@ export default function App() {
         )}
         <section className="example-section" aria-label="Example worlds">
           <div className="example-intro">
-            <div className="eyebrow">A FEW SPARKS TO START</div>
-            <h2>
-              Every world
-              <br />
-              starts somewhere.
-            </h2>
-            <p>
-              Explore three original examples.
-              <br />
-              Then make it unmistakably yours.
-            </p>
+            <h2>Try a world</h2>
           </div>
           <div className="example-grid">
             {EXAMPLES.map((example, i) => (
@@ -1190,29 +1036,11 @@ export default function App() {
                 </div>
                 <div className="example-card-copy">
                   <strong>{example.name}</strong>
-                  <span>
-                    {
-                      [
-                        "A curious creature & a quiet grove",
-                        "A stargazer & a sky full of wonder",
-                        "A tiny robot & a very big day",
-                      ][i]
-                    }
-                  </span>
                 </div>
               </button>
             ))}
           </div>
         </section>
-        <footer className="studio-footer">
-          <span>
-            <Sprout size={16} /> A playground for the things only you could
-            imagine.
-          </span>
-          <button onClick={() => setDialog("help")}>
-            Made for little wonders <ArrowUpRight size={13} />
-          </button>
-        </footer>
       </main>
       <div
         className={`toast ${notice ? "visible" : ""}`}
@@ -1232,6 +1060,82 @@ export default function App() {
           </>
         )}
       </div>
+      {dialog === "create" && (
+        <Modal
+          title="Create a world"
+          onClose={() => {
+            if (busy) cancelInterpretation();
+            setDialog(null);
+          }}
+        >
+          {sourcePanel}
+        </Modal>
+      )}
+      {dialog === "review" && draft && (
+        <Modal
+          title="Review your world"
+          wide
+          onClose={() => setDialog("create")}
+        >
+          <div className="world-review-heading">
+            <div>
+              <h3>{draft.name}</h3>
+              <p>{draft.description}</p>
+            </div>
+            <span>{draft.entities.length} objects</span>
+          </div>
+          <div className="review-stage">
+            <WorldCanvas
+              world={draft}
+              run={0}
+              playing={false}
+              muted
+              overview
+              onUpdate={() => {}}
+              onMoment={() => {}}
+            />
+          </div>
+          {draftFeedback?.errors.map((message) => (
+            <p className="setup-error" key={message}>
+              {message}
+            </p>
+          ))}
+          <ArtworkReview entities={draft.entities} />
+          <div className="review-actions">
+            <button className="text-button" onClick={() => setDialog("create")}>
+              Back
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => setDialog("setup")}
+            >
+              <Pencil size={16} /> Edit objects
+            </button>
+            <button
+              className="primary-button"
+              disabled={Boolean(draftFeedback?.errors.length)}
+              onClick={() => {
+                loadWorld(draft);
+                setDialog(null);
+                setStarted(true);
+                setPlaying(true);
+                setFocusedPlay(true);
+                requestAnimationFrame(() => {
+                  stage.current?.scrollIntoView({
+                    block: "center",
+                    behavior: "instant",
+                  });
+                  stage.current
+                    ?.querySelector<HTMLElement>(".world-canvas")
+                    ?.focus({ preventScroll: true });
+                });
+              }}
+            >
+              <Play size={16} fill="currentColor" /> Play this world
+            </button>
+          </div>
+        </Modal>
+      )}
       {dialog === "phone" && (
         <PhonePairing
           context={{ purpose: "create", name: "A new Doodlume world" }}
@@ -1266,10 +1170,10 @@ export default function App() {
           inputKind={draft?.inputKind ?? inputKind}
           initial={draft ?? undefined}
           intent={intent}
-          onClose={() => setDialog(null)}
+          onClose={() => setDialog(draft ? "review" : "create")}
           onUse={(next) => {
             setDraft(next);
-            setDialog(null);
+            setDialog("review");
             tell(
               "Your playable preview is ready. Check the cutouts, then open your world.",
             );
@@ -1345,7 +1249,7 @@ export default function App() {
         />
       )}
       {dialog === "worlds" && (
-        <Modal title="Your little worlds" onClose={() => setDialog(null)}>
+        <Modal title="Your worlds" onClose={() => setDialog(null)}>
           <p className="modal-copy">
             Saved in this browser, with your adventure right where you left it.
           </p>
@@ -1367,7 +1271,7 @@ export default function App() {
                   <span>
                     <strong>{entry.world.name}</strong>
                     <small>
-                      {entry.state.collected.length} sunseeds ·{" "}
+                      {entry.state.collected.length} items found ·{" "}
                       {new Date(entry.savedAt).toLocaleDateString()}
                     </small>
                   </span>
@@ -1388,7 +1292,7 @@ export default function App() {
         </Modal>
       )}
       {dialog === "settings" && (
-        <Modal title="Your studio, connected" onClose={() => setDialog(null)}>
+        <Modal title="Studio settings" onClose={() => setDialog(null)}>
           <div className="connection-card">
             <div className="meta-mark">∞</div>
             <div>
@@ -1400,72 +1304,32 @@ export default function App() {
                   className={`status-dot ${connection?.configured ? "connected" : ""}`}
                 />
                 {connection?.configured
-                  ? "Configured · ready for a first live trial"
+                  ? "Connected"
                   : connectionError
                     ? "Local API is unavailable"
                     : "API key not configured"}
               </p>
             </div>
           </div>
-          <p className="modal-copy">
-            The playable examples work now. To interpret a new drawing, the
-            studio needs a server connection to a Meta model. Direct Meta
-            billing issues can be handled separately while you use your credited
-            Baseten or Fireworks account.
-          </p>
-          <div className="setup-instructions">
-            <p>
-              In this project’s <code>.env.local</code>, add:
-            </p>
-            <pre>
-              {connection?.provider === "meta"
-                ? "MODEL_PROVIDER=meta\nMODEL_API_KEY=your_meta_key"
-                : connection?.provider === "fireworks"
-                  ? "MODEL_PROVIDER=fireworks\nFIREWORKS_API_KEY=your_fireworks_key"
-                  : "MODEL_PROVIDER=baseten\nBASETEN_API_KEY=your_baseten_key"}
-            </pre>
-            <p>
-              Restart the studio, then check the connection below. Keep the key
-              on the server.
-            </p>
-          </div>
-          <p className="small-note">
-            Baseten and Fireworks use Meta’s Muse Spark Open. JSON output is
-            checked locally; a live trial is still required. To use direct Meta
-            access, set MODEL_PROVIDER=meta and configure MODEL_API_KEY instead.
-            Provider selection is explicit when both keys exist.
-          </p>
           <div className="setup-details">
             <span>Model</span>
-            <code>{connection?.model ?? "muse-wonder-1.0"}</code>
-            <span>Model calls remaining</span>
+            <code>{connection?.model ?? "Not connected"}</code>
+            <span>Source cutouts</span>
             <span>
-              {connection
-                ? `${connection.requestsRemaining} remaining`
-                : "Not available"}
+              {connection?.segmentation?.enabled &&
+              connection.segmentation.configured
+                ? "Meta segmentation connected"
+                : "Original image crops"}
             </span>
-            <span>Precise artwork cutouts</span>
-            <span>
-              {connection?.segmentation?.enabled
-                ? connection.segmentation.configured
-                  ? "SAM 3.1 · configured for a live trial"
-                  : "SAM 3.1 · direct Meta key needed"
-                : "Paper cutouts · SAM is off"}
-            </span>
-            <span>Current build</span>
-            <span>Paper updates · review and apply</span>
+            <span>Storage</span>
+            <span>This browser · {saved.length} saved worlds</span>
           </div>
-          <p className="small-note">
-            SAM uses direct Meta access. With Baseten interpretation, enable it
-            separately with SAM_ENABLED=true and MODEL_API_KEY. Each SAM batch
-            counts toward the same model-call limit. Set SAM_ENABLED=false to
-            use paper cutouts only.
-          </p>
-          <p className="small-note">
-            Drawing and page-comparison adapters are included. Live model
-            quality still needs verification; examples are authored
-            demonstrations.
-          </p>
+          {!connection?.configured && (
+            <p className="modal-copy">
+              Connect a Meta provider on the server to create worlds from new
+              images. Your saved worlds and examples remain playable.
+            </p>
+          )}
           <button
             className="secondary-button"
             onClick={() => void checkConnection()}
@@ -1475,10 +1339,7 @@ export default function App() {
         </Modal>
       )}
       {dialog === "help" && (
-        <Modal
-          title="A small guide to big possibilities"
-          onClose={() => setDialog(null)}
-        >
+        <Modal title="How to play" onClose={() => setDialog(null)}>
           <div className="help-lead">
             <Sprout size={30} />
             <p>

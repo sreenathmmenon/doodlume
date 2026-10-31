@@ -49,6 +49,21 @@ test("a world amendment preserves all old objects, position, motion and earned p
   );
   assert.deepEqual(result.state, progress);
   assert.deepEqual(world, before);
+  const extension = applyWorldPatch(world, progress, {
+    ...patch,
+    additions: [],
+    bounds: { width: 2880, height: 820 },
+  });
+  assert.equal(extension.world.width, 2880);
+  assert.deepEqual(extension.state, progress);
+  assert.deepEqual(extension.world.entities, world.entities);
+  assert.equal(undoWorldPatch(extension.world, progress, extension.checkpoint).world.width, world.width);
+  assert.throws(() => applyWorldPatch(world, progress, {
+    ...patch, additions: [], bounds: { width: world.width - 1, height: world.height },
+  }), /extend/);
+  assert.throws(() => undoWorldPatch(extension.world, {
+    ...progress, player: { x: 1700, y: 640 },
+  }, extension.checkpoint), /original world/);
   assert.throws(
     () => applyWorldPatch(result.world, progress, patch),
     /older world/,

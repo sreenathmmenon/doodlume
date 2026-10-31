@@ -1,0 +1,936 @@
+@font-face {
+  font-family: Manrope;
+  src: url("/fonts/manrope.ttf") format("truetype");
+  font-weight: 200 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: Fraunces;
+  src: url("/fonts/fraunces.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+:root {
+  font-family: Manrope, sans-serif;
+  font-size: 14px;
+  --ink: #263c35;
+  --muted: #66746a;
+  --primary: #345b45;
+  --paper: #fcfaf5;
+  --border: #dddfd4;
+  background: #f4f3ed;
+}
+button,
+input,
+textarea,
+select {
+  font-family: Manrope, sans-serif;
+}
+.studio-v2 {
+  max-width: 1760px;
+}
+.studio-v2 .topbar {
+  height: 76px;
+  padding: 0 32px;
+  border-bottom: 1px solid #dddfd4;
+  gap: 32px;
+}
+.studio-v2 .brand {
+  font-size: 24px;
+  gap: 9px;
+  color: #2d4237;
+  letter-spacing: -1px;
+}
+.studio-v2 .brand img {
+  width: 30px;
+  height: 34px;
+}
+.studio-v2 .topbar nav {
+  position: static;
+  transform: none;
+  height: 100%;
+  margin: 0;
+  gap: 24px;
+  font-size: 13px;
+}
+.studio-v2 .topbar nav a,
+.studio-v2 .topbar nav button {
+  font-size: 13px;
+  color: #52634f;
+  font-weight: 650;
+}
+.studio-v2 .top-actions {
+  margin-left: auto;
+  gap: 8px;
+}
+.studio-v2 .new-world-button {
+  min-height: 40px;
+  padding: 10px 16px;
+  gap: 8px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+.studio-v2 .icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  color: #64735e;
+  flex-shrink: 0;
+}
+.studio-v2 .icon-button:hover {
+  background: #e8ecdf;
+}
+.studio-v2 main {
+  padding: 24px 32px 28px;
+  max-width: none;
+}
+.studio-v2 .studio-workspace {
+  display: block;
+}
+.studio-v2 .world-panel {
+  color: #edf0e2;
+  background: #142a31;
+  border: 1px solid #203c41;
+  border-radius: 16px;
+  box-shadow: 0 14px 44px #1b352214;
+}
+.studio-v2 .world-heading {
+  padding: 16px 20px;
+  min-height: 76px;
+  gap: 20px;
+}
+.studio-v2 .world-heading > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.studio-v2 .world-name-label {
+  margin: 0;
+  gap: 10px;
+}
+.studio-v2 .world-name-label input {
+  color: #f0efdf;
+  font-size: 21px;
+  letter-spacing: -0.6px;
+  width: 100%;
+  max-width: 440px;
+  min-width: 0;
+  font-weight: 650;
+}
+.studio-v2 .world-name-label svg {
+  color: #9daa9c;
+}
+.studio-v2 .world-heading-actions {
+  flex: 0;
+  gap: 8px;
+}
+.studio-v2 .world-heading-actions .secondary-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  background: #263d42;
+  border-color: #475f5b;
+  color: #e3e7d7;
+  font-size: 12px;
+  border-radius: 8px;
+}
+.studio-v2 .world-heading-actions .icon-button {
+  color: #cad6c6;
+  border-color: #475f5b;
+  width: 36px;
+  height: 36px;
+}
+.studio-v2 .world-heading-actions .icon-button:hover {
+  background: #304c50;
+}
+.studio-v2 .example-badge {
+  color: #c7d3c3;
+  background: transparent;
+  border-color: #506358;
+  font-size: 10px;
+  padding: 5px 8px;
+}
+.studio-v2 .game-stage,
+.studio-v2 .focused-play .game-stage {
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  height: clamp(330px, calc(100dvh - 235px), 740px);
+  aspect-ratio: auto;
+  align-self: center;
+  border-radius: 10px;
+  background: #0e2028;
+  border: 1px solid #395053;
+}
+.studio-v2 .game-top {
+  top: 18px;
+  left: 20px;
+  right: 20px;
+  justify-content: flex-end;
+}
+.studio-v2 .seed-counter {
+  font-size: 12px;
+  min-height: 34px;
+  gap: 7px;
+  padding: 6px 12px;
+}
+.studio-v2 .seed-counter b {
+  font-variant-numeric: tabular-nums;
+}
+.studio-v2 .play-caption {
+  font-family: Fraunces, Georgia, serif;
+  font-variation-settings:
+    "SOFT" 40,
+    "WONK" 0;
+  font-size: clamp(28px, 3.5vw, 54px);
+  font-weight: 500;
+  letter-spacing: -1.4px;
+  line-height: 1.05;
+  margin-top: 0;
+}
+.studio-v2 .play-subcaption {
+  font-size: 12px;
+  color: #e0e6d6;
+  max-width: 480px;
+  line-height: 1.6;
+  margin: 16px 24px 0;
+}
+.studio-v2 .play-orb {
+  width: 62px;
+  height: 62px;
+  margin-top: 28px;
+}
+.studio-v2 .paused-overlay .play-caption {
+  font-size: 38px;
+}
+.studio-v2 .quest-hud {
+  top: 18px;
+  left: 20px;
+  padding: 10px 13px;
+  max-width: calc(100% - 140px);
+  background: linear-gradient(90deg, #102831dd, #10283135);
+}
+.studio-v2 .quest-hud span {
+  font-size: 8px;
+  letter-spacing: 1.8px;
+}
+.studio-v2 .quest-hud strong {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #f6efd8;
+}
+.studio-v2 .game-toolbar {
+  flex: 0;
+  min-height: 58px;
+  padding: 10px 16px;
+  border: 0;
+  gap: 16px;
+}
+.studio-v2 .play-controls .icon-button {
+  width: 36px;
+  height: 36px;
+  color: #c8d2c1;
+}
+.studio-v2 .play-controls .icon-button:hover,
+.studio-v2 .game-toolbar > .icon-button:hover {
+  background: #314b4e;
+}
+.studio-v2 .play-controls .play-control {
+  background: #e4d9b2;
+  color: #1e3a3e;
+}
+.studio-v2 .keyboard-guide {
+  gap: 20px;
+  color: #c4d0bd;
+  font-size: 11px;
+}
+.studio-v2 .keyboard-guide kbd {
+  font-size: 10px;
+  min-height: 22px;
+  padding: 2px 6px;
+  color: #dce4d2;
+  background: #233d42;
+  border-color: #4b625c;
+}
+.studio-v2 .focus-play-button {
+  background: #263f44;
+  color: #e5e9d9;
+  border-color: #50665f;
+  min-height: 36px;
+  font-size: 11px;
+  padding: 8px 12px;
+  margin-left: auto;
+}
+.studio-v2 .game-toolbar > .icon-button {
+  color: #cad6c6;
+}
+.studio-v2 .tool-divider {
+  background: #4c6158;
+}
+.studio-v2 .revision-strip {
+  color: #c7d7bc;
+  background: #1c373c;
+  border-color: #36554e;
+  font-size: 11px;
+  padding: 8px 20px;
+}
+.studio-v2 .example-section {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 24px;
+}
+.studio-v2 .example-intro {
+  flex: 0 0 auto;
+}
+.studio-v2 .example-intro h2 {
+  font:
+    650 13px Manrope,
+    sans-serif;
+  color: #64715e;
+  letter-spacing: -0.1px;
+}
+.studio-v2 .example-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.studio-v2 .example-card {
+  display: flex;
+  align-items: center;
+  min-height: 78px;
+  border-radius: 12px;
+  padding: 6px;
+  gap: 14px;
+  border-color: #dce1d3;
+  background: #fcfaf5;
+  text-align: left;
+}
+.studio-v2 .example-card.selected {
+  border-color: #77936d;
+  box-shadow: 0 0 0 2px #8caa6a16;
+}
+.studio-v2 .example-art {
+  width: 110px;
+  height: 64px;
+  flex: 0 0 110px;
+  border-radius: 7px;
+}
+.studio-v2 .example-number,
+.studio-v2 .example-open,
+.studio-v2 .mini-seed {
+  display: none;
+}
+.studio-v2 .mini-hero {
+  height: 39px;
+  width: 39px;
+  left: 30px;
+  bottom: 7px;
+}
+.studio-v2 .mini-sun {
+  width: 23px;
+  height: 23px;
+  right: 18px;
+  top: 8px;
+}
+.studio-v2 .example-card-copy {
+  padding: 0 12px 0 0;
+}
+.studio-v2 .example-card-copy strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #425541;
+  letter-spacing: -0.15px;
+}
+.studio-v2.play-focused .topbar,
+.studio-v2.play-focused .example-section {
+  display: none;
+}
+.studio-v2.play-focused main {
+  padding: 12px;
+}
+.studio-v2.play-focused .game-stage {
+  height: calc(100dvh - 163px);
+  min-height: 300px;
+  max-height: none;
+}
+.studio-v2 .completion-overlay h2 {
+  font-family: Fraunces, Georgia, serif;
+  font-size: clamp(28px, 3.5vw, 48px);
+  line-height: 1.12;
+  max-width: 85%;
+  margin: 12px 0;
+}
+.studio-v2 .completion-overlay p {
+  font-size: 13px;
+}
+.studio-v2 .completion-overlay .primary-button {
+  background: #e8dcb4;
+  color: #203c3d;
+  font-size: 13px;
+}
+.studio-v2 .completion-overlay .text-button {
+  font-size: 13px;
+}
+.studio-v2 .reading-overlay {
+  color: #f0eddc;
+  background: #142b31e8;
+}
+.studio-v2 .reading-overlay h3 {
+  color: #f0eddc;
+  font:
+    500 34px Fraunces,
+    Georgia,
+    serif;
+}
+.studio-v2 .reading-overlay p {
+  font-size: 13px;
+  color: #cbd7c6;
+}
+.studio-v2 .error-notice {
+  margin: 16px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.studio-v2 .toast {
+  font-size: 12px;
+  max-width: calc(100vw - 32px);
+  border-radius: 10px;
+  padding: 14px 18px;
+  background: #314d3b;
+  color: #f7f3e8;
+}
+.studio-v2 .world-panel button:focus-visible,
+.studio-v2 .world-panel input:focus-visible {
+  outline-color: #e1c898;
+}
+.modal {
+  font-family: Manrope, sans-serif;
+  width: min(560px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 40px);
+  padding: 26px;
+  border-radius: 18px;
+  background: #fcfaf5;
+  color: #2e4436;
+  border-color: #dbe0d2;
+}
+.modal-wide {
+  width: min(1080px, calc(100vw - 40px));
+}
+.modal-heading {
+  margin-bottom: 22px;
+  gap: 16px;
+}
+.modal-heading h2 {
+  font:
+    650 22px Manrope,
+    sans-serif;
+  letter-spacing: -0.7px;
+}
+.modal .icon-button {
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  border-radius: 8px;
+}
+.modal .primary-button,
+.modal .secondary-button {
+  min-height: 42px;
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 9px;
+  gap: 8px;
+}
+.modal .text-button {
+  min-height: 38px;
+  font-size: 12px;
+  gap: 7px;
+}
+.modal .modal-copy,
+.modal .small-note,
+.modal .help-lead p,
+.modal .help-steps p,
+.modal .setup-details {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #61715e;
+}
+.modal .help-steps h3 {
+  font-size: 15px;
+}
+.modal .paper-panel {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  gap: 0;
+}
+.modal .panel-heading {
+  margin-bottom: 12px;
+}
+.modal .panel-heading h2 {
+  font-size: 12px;
+  color: #66745f;
+  font-weight: 600;
+}
+.modal .source-kind {
+  margin: 0 0 16px;
+  min-height: 38px;
+}
+.modal .source-kind button {
+  min-height: 34px;
+  font-size: 13px;
+}
+.modal .paper-frame {
+  height: 200px;
+  width: 100%;
+  margin: 0;
+  padding: 14px;
+  transform: none;
+  box-shadow: none;
+  border: 1px solid #dfe2d5;
+  border-radius: 10px;
+  background: #fffefa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal .paper-frame img {
+  width: 100%;
+  height: 100%;
+  max-height: 170px;
+  object-fit: contain;
+}
+.modal .paper-tape,
+.modal .source-caption {
+  display: none;
+}
+.modal .source-actions {
+  margin-top: 12px;
+  gap: 8px;
+}
+.modal .source-actions .secondary-button {
+  flex: 1;
+  justify-content: center;
+  font-size: 13px;
+  min-height: 42px;
+}
+.modal .capture-source-actions {
+  margin: 5px 0 0;
+  justify-content: space-between;
+}
+.modal .capture-source-actions .text-button {
+  font-size: 12px;
+  color: #536c4e;
+}
+.modal .paper-divider {
+  margin: 12px 0 18px;
+}
+.modal .intent-label {
+  font-size: 13px;
+  margin-bottom: 9px;
+}
+.modal .intent-box textarea {
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 92px;
+  padding: 13px;
+  border-radius: 9px;
+  background: #fffefa;
+  color: #3c523f;
+  resize: vertical;
+}
+.modal .create-button {
+  margin-top: 16px;
+  width: 100%;
+  min-height: 44px;
+  font-size: 13px;
+}
+.modal .connection-note {
+  margin: 12px auto 0;
+  font-size: 11px;
+  min-height: 30px;
+  color: #556a4d;
+}
+.modal .setup-source-button {
+  margin-top: 12px;
+  justify-content: center;
+  width: 100%;
+}
+.world-review-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.world-review-heading h3 {
+  font:
+    550 28px Fraunces,
+    Georgia,
+    serif;
+  letter-spacing: -0.7px;
+}
+.world-review-heading p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 6px;
+  color: #64745f;
+}
+.world-review-heading > span {
+  flex-shrink: 0;
+  color: #627459;
+  font-size: 12px;
+}
+.review-stage {
+  height: min(43dvh, 400px);
+  background: #102832;
+  border: 1px solid #3c514d;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+.review-actions > .text-button {
+  margin-right: auto;
+}
+.modal .artwork-review {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-color: #d9e0cf;
+  background: #f0f2e9;
+  border-radius: 9px;
+}
+.modal .artwork-review summary {
+  font-size: 12px;
+  color: #53694c;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.modal .artwork-cutouts strong {
+  font-size: 12px;
+}
+.modal .artwork-cutouts span,
+.modal .artwork-cutouts p {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.modal .setup-details {
+  display: grid;
+  gap: 16px 24px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 24px 0;
+}
+.modal .setup-details code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.modal .saved-worlds strong {
+  font-size: 15px;
+}
+.modal .saved-worlds small {
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .studio-v2 .topbar {
+    padding: 0 20px;
+    gap: 24px;
+  }
+  .studio-v2 main {
+    padding: 18px 20px 24px;
+  }
+  .studio-v2 .world-heading-actions .example-badge {
+    display: none;
+  }
+  .studio-v2 .world-name-label input {
+    font-size: 18px;
+  }
+  .studio-v2 .example-section {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .studio-v2 .example-grid {
+    width: 100%;
+    gap: 10px;
+  }
+  .studio-v2 .example-art {
+    width: 72px;
+    flex-basis: 72px;
+    height: 58px;
+  }
+  .studio-v2 .mini-hero {
+    left: 15px;
+  }
+  .studio-v2 .example-card {
+    gap: 10px;
+  }
+  .studio-v2 .example-card-copy strong {
+    font-size: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .studio-v2 .topbar {
+    height: 64px;
+    padding: 0 14px;
+    gap: 14px;
+  }
+  .studio-v2 .brand {
+    font-size: 21px;
+    gap: 5px;
+  }
+  .studio-v2 .brand img {
+    width: 25px;
+    height: 28px;
+  }
+  .studio-v2 .topbar nav {
+    gap: 0;
+    margin-left: auto;
+  }
+  .studio-v2 .topbar nav > a {
+    display: none;
+  }
+  .studio-v2 .topbar nav button {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .studio-v2 .nav-count {
+    display: none;
+  }
+  .studio-v2 .top-actions {
+    gap: 3px;
+    margin-left: 0;
+  }
+  .studio-v2 .top-actions > button[aria-label="How to play"] {
+    display: none;
+  }
+  .studio-v2 .new-world-button {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+  .studio-v2 .new-world-button span {
+    display: none;
+  }
+  .studio-v2 .top-actions .icon-button {
+    width: 36px;
+    height: 40px;
+  }
+  .studio-v2 main {
+    padding: 14px 12px 24px;
+  }
+  .studio-v2 .world-panel {
+    border-radius: 13px;
+  }
+  .studio-v2 .world-heading {
+    padding: 14px 12px;
+    min-height: 68px;
+    gap: 10px;
+  }
+  .studio-v2 .world-name-label {
+    gap: 6px;
+  }
+  .studio-v2 .world-name-label input {
+    font-size: 16px;
+    letter-spacing: -0.35px;
+    width: 100%;
+  }
+  .studio-v2 .world-name-label svg {
+    display: none;
+  }
+  .studio-v2 .world-heading-actions {
+    gap: 3px;
+  }
+  .studio-v2 .world-heading-actions .secondary-button,
+  .studio-v2 .world-heading-actions .icon-button {
+    width: 34px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  .studio-v2 .world-heading-actions .secondary-button span {
+    display: none;
+  }
+  .studio-v2
+    .world-heading-actions
+    > button[aria-label="Undo last world edit"] {
+    display: none;
+  }
+  .studio-v2 .game-stage,
+  .studio-v2 .focused-play .game-stage {
+    width: calc(100% - 12px);
+    margin: 0 6px;
+    height: clamp(290px, 48dvh, 470px);
+    min-height: 0;
+  }
+  .studio-v2 .play-caption {
+    font-size: 29px;
+    letter-spacing: -0.8px;
+  }
+  .studio-v2 .paused-overlay .play-caption {
+    font-size: 26px;
+  }
+  .studio-v2 .play-subcaption {
+    font-size: 11px;
+    margin-top: 12px;
+    max-width: 88%;
+  }
+  .studio-v2 .play-orb {
+    width: 52px;
+    height: 52px;
+    margin-top: 22px;
+  }
+  .studio-v2 .quest-hud {
+    top: 14px;
+    left: 12px;
+    padding: 8px 10px;
+    max-width: calc(100% - 100px);
+  }
+  .studio-v2 .quest-hud strong {
+    font-size: 10px;
+  }
+  .studio-v2 .quest-hud span {
+    font-size: 7px;
+  }
+  .studio-v2 .game-top {
+    top: 14px;
+    right: 12px;
+  }
+  .studio-v2 .seed-counter {
+    font-size: 10px;
+    padding: 5px 9px;
+    min-height: 29px;
+  }
+  .studio-v2 .game-toolbar {
+    padding: 9px 10px;
+    gap: 8px;
+    min-height: 54px;
+  }
+  .studio-v2 .play-controls .icon-button {
+    width: 34px;
+    height: 36px;
+  }
+  .studio-v2 .keyboard-guide {
+    display: none;
+  }
+  .studio-v2 .focus-play-button {
+    font-size: 10px;
+    padding: 7px 9px;
+    gap: 5px;
+  }
+  .studio-v2 .touch-controls {
+    display: flex;
+    padding: 2px 12px 12px;
+    border: 0;
+    gap: 8px;
+  }
+  .studio-v2 .touch-controls button {
+    width: 52px;
+    height: 46px;
+    background: #2a4449;
+    border: 1px solid #526b60;
+    color: #e3e8d7;
+    border-radius: 9px;
+  }
+  .studio-v2 .touch-controls button:active {
+    background: #557261;
+  }
+  .studio-v2 .touch-controls button:nth-child(2) {
+    margin-right: auto;
+  }
+  .studio-v2 .example-section {
+    margin-top: 22px;
+  }
+  .studio-v2 .example-grid {
+    gap: 8px;
+  }
+  .studio-v2 .example-card {
+    display: block;
+    padding: 4px;
+    min-height: 0;
+  }
+  .studio-v2 .example-art {
+    width: 100%;
+    height: 67px;
+  }
+  .studio-v2 .mini-hero {
+    left: calc(50% - 20px);
+  }
+  .studio-v2 .example-card-copy {
+    padding: 9px 5px 7px;
+  }
+  .studio-v2 .example-card-copy strong {
+    font-size: 10px;
+    line-height: 1.4;
+    display: block;
+  }
+  .studio-v2.play-focused main {
+    padding: 6px;
+  }
+  .studio-v2.play-focused .game-stage {
+    height: calc(100dvh - 202px);
+    max-height: none;
+    min-height: 250px;
+  }
+  .modal {
+    padding: 20px;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    border-radius: 14px;
+  }
+  .modal-heading {
+    margin-bottom: 16px;
+  }
+  .modal-heading h2 {
+    font-size: 20px;
+  }
+  .modal .paper-frame {
+    height: 165px;
+  }
+  .modal .paper-frame img {
+    max-height: 140px;
+  }
+  .world-review-heading h3 {
+    font-size: 24px;
+  }
+  .world-review-heading > span {
+    display: none;
+  }
+  .review-stage {
+    height: 240px;
+  }
+  .review-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .review-actions > .primary-button {
+    flex: 1;
+    justify-content: center;
+  }
+  .review-actions > .text-button {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+}
+
+.source-error {
+  padding: 12px 14px;
+  border: 1px solid #c8937c;
+  background: #fff1e9;
+  border-radius: 9px;
+  color: #843f2d;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 14px;
+}

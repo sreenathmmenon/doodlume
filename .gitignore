@@ -8,3 +8,21 @@ dist/
 .DS_Store
 data/
 *.log
+
+# Provider credentials and private key material stay outside version control.
+secrets/
+credentials/
+private-keys/
+.modal/
+.modal.toml
+modal-key*
+modal-credentials*
+*credentials*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+__pycache__/
+*.pyc

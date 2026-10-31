@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import "./styles.css";
+import "./studio.css";
 const Studio = lazy(() => import("./App"));
 const Capture = lazy(() => import("./components/CapturePage"));
 const isCapture = location.pathname.startsWith("/capture/");

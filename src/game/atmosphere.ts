@@ -35,6 +35,7 @@ export function createAtmosphere(
   reduced: boolean,
 ) {
   const p = themes[theme];
+  const layers: { object: Phaser.GameObjects.TileSprite | Phaser.GameObjects.Image; scroll: number }[] = [];
   let seed = 28371;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
@@ -49,10 +50,12 @@ export function createAtmosphere(
     const t = scene.textures.createCanvas(key, 1440, 820)!;
     draw(t.context);
     t.refresh();
-    return scene.add
-      .image(720, 410, key)
-      .setDepth(depth)
-      .setScrollFactor(scroll, 1);
+    const object = (key === "atmosphere-frame" || key === "atmosphere-vignette")
+      ? scene.add.image(720, 410, key)
+      : scene.add.tileSprite(720, 410, 1440, 820, key);
+    object.setDepth(depth).setScrollFactor(0);
+    layers.push({ object, scroll });
+    return object;
   };
   canvasLayer(
     "atmosphere-sky",
@@ -261,4 +264,18 @@ export function createAtmosphere(
         ease: "Sine.easeInOut",
       });
     }
+  return () => {
+    const camera = scene.cameras.main, w = camera.displayWidth, h = camera.displayHeight;
+    for (const {object, scroll} of layers) {
+      object.setPosition(camera.width / 2, camera.height / 2);
+      if (object instanceof Phaser.GameObjects.TileSprite) {
+        if (object.width !== w || object.height !== h) object.setSize(w, h);
+        const scale = Math.max(w / 1440, h / 820);
+        object.setTileScale(scale);
+        object.tilePositionX = camera.scrollX * scroll;
+        object.tilePositionY = camera.scrollY * scroll * .15;
+      } else object.setDisplaySize(w, h);
+    }
+  };
+
 }

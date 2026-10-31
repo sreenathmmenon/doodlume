@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,studio -c green,magenta \"tsx watch server/index.ts\" \"vite --host 127.0.0.1 --port 5173\"",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/build-local.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "start": "tsx server/index.ts",
     "studio": "npm run build && node scripts/preview-local.mjs",
     "check": "tsc --noEmit",
-    "test": "tsx --test shared/world.test.ts shared/revisions.test.ts server/provider.test.ts server/amend.test.ts shared/alignment.test.ts server/capture.test.ts server/segmentation.test.ts server/pictures.test.ts"
+    "test": "tsx --test shared/world.test.ts shared/revisions.test.ts server/provider.test.ts server/amend.test.ts shared/alignment.test.ts server/capture.test.ts server/segmentation.test.ts server/pictures.test.ts",
+    "check:secrets": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
     "@fastify/static": "10.1.8",

@@ -1,3 +1,4 @@
+import { groundDrawingBoxes } from "./ink-grounding.js";
 import { normalizeDrawing, imageData } from "./images.js";
 import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
 import { modelJSON, InterpretationError } from "./model.js";
@@ -167,6 +168,8 @@ export async function interpretDrawing(
         "Some shapes could not be located clearly. Try a closer, straight-on photo.",
       );
   }
+  if (inputKind === "drawing" && connection.provider !== "meta")
+    detected.objects = await groundDrawingBoxes(normalized, detected.objects);
   // Reject bad world structure before spending a segmentation request.
   const placements = detected.objects.map((o) => ({
     id: o.id,
@@ -212,6 +215,26 @@ export async function interpretDrawing(
       ...(o.targetId ? { targetId: o.targetId } : {}),
       label: o.label?.slice(0, 80),
     });
+  }
+  for (const entity of entities) {
+    if (connection.provider === "meta") continue;
+    const limit =
+      entity.kind === "player"
+        ? 120
+        : entity.kind === "coin"
+          ? 48
+          : entity.kind === "goal"
+            ? 200
+            : 0;
+    if (!limit) continue;
+    const scale =
+      entity.kind === "player"
+        ? limit / Math.max(entity.width, entity.height)
+        : Math.min(1, limit / Math.max(entity.width, entity.height));
+    entity.x += (entity.width * (1 - scale)) / 2;
+    entity.y += entity.height * (1 - scale);
+    entity.width *= scale;
+    entity.height *= scale;
   }
   return validateWorld({
     id: randomUUID(),

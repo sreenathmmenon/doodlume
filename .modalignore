@@ -1,0 +1,12 @@
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.toml
+**/*.key
+**/*.pem
+**/credentials/**
+**/secrets/**
+node_modules/
+dist/
+data/

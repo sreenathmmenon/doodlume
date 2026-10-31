@@ -10,9 +10,9 @@ export function setupFeedback(world: WorldDefinition) {
       e instanceof Error ? e.message : "Check the objects in this world.",
     );
   }
-  if (world.entities.length > 24)
-    errors.push("Keep the first adventure to 24 objects or fewer.");
-  if (world.entities.some((e) => e.x + e.width > 1440 || e.y + e.height > 820))
+  if (world.entities.length > 160)
+    errors.push("Keep this world to 160 objects or fewer.");
+  if (world.entities.some((e) => e.x + e.width > world.width || e.y + e.height > world.height))
     errors.push("Keep every object inside the game frame.");
   const hero = world.entities.find((e) => e.kind === "player");
   if (hero) {

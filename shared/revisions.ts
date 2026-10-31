@@ -13,6 +13,7 @@ export interface WorldPatch {
   origin: "manual" | "meta";
   additions: WorldEntity[];
   sourceImage?: string;
+  bounds?: { width: number; height: number };
 }
 export interface RevisionCheckpoint {
   before: WorldDefinition;
@@ -21,6 +22,8 @@ export interface RevisionCheckpoint {
 
 function safePlayerPosition(world: WorldDefinition, state: PlayState) {
   if (!state.player) return;
+  if (state.player.x > world.width || state.player.y > world.height)
+    throw new Error("Move back inside the original world before undoing this expansion.");
   const hero = world.entities.find((e) => e.kind === "player")!;
   const p = {
     x: state.player.x - hero.width * 0.33,
@@ -60,16 +63,19 @@ export function applyWorldPatch(
     !patch.id ||
     !["manual", "meta"].includes(patch.origin) ||
     !Array.isArray(patch.additions) ||
-    !patch.additions.length
+    (!patch.additions.length && !patch.bounds)
   )
     throw new Error("Add something to your world before applying this change.");
   if (patch.additions.some((e) => e.kind === "player"))
     throw new Error(
       "Your character stays with this world. Add a path or another possibility instead.",
     );
+  if (patch.bounds && (patch.bounds.width < world.width || patch.bounds.height < world.height))
+    throw new Error("New space must extend the existing world.");
   const next = validateWorld({
     ...structuredClone(world),
     revision: world.revision + 1,
+    ...(patch.bounds ?? {}),
     ...(patch.sourceImage ? { sourceImage: patch.sourceImage } : {}),
     entities: [
       ...structuredClone(world.entities),

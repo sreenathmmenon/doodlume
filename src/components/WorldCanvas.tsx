@@ -17,6 +17,7 @@ interface Props {
   playing: boolean;
   muted: boolean;
   run: number;
+  overview?: boolean;
   onUpdate: (state: PlayState, metrics: WorldTelemetry) => void;
   onMoment: (message: string) => void;
 }
@@ -47,39 +48,48 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           if (active) callbacks.current.onMoment(m);
         },
         onReady: (ready) => {
-          ready.setViewportWidth(host.current?.clientWidth ?? 900);
+          ready.setViewportWidth(
+            host.current?.clientWidth ?? 900,
+            props.overview,
+          );
           ready.setPlaying(active && callbacks.current.playing);
           ready.setMuted(callbacks.current.muted);
         },
       });
       scene.current = current;
-      const game = new Phaser.Game({
-        type: Phaser.AUTO,
-        parent: host.current!,
-        width: 1440,
-        height: 820,
-        backgroundColor: "#f1f0df",
-        transparent: false,
-        antialias: true,
-        physics: {
-          default: "arcade",
-          arcade: { gravity: { x: 0, y: 1450 }, debug: false },
-        },
-        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-        scene: current,
-        audio: { noAudio: true },
-        render: { roundPixels: true },
-      });
+      let game: Phaser.Game | undefined;
       const resize = new ResizeObserver(([entry]) => {
-        if (!active) return;
-        game.scale.refresh();
-        current.setViewportWidth(entry.contentRect.width);
+        if (!active || entry.contentRect.width < 2 || entry.contentRect.height < 2) return;
+        // Dialog children mount before showModal gives their host a size.
+        // Wait for a real layout before allocating the renderer framebuffer.
+        if (!game) {
+          game = new Phaser.Game({
+            type: Phaser.AUTO,
+            parent: host.current!,
+            width: entry.contentRect.width,
+            height: entry.contentRect.height,
+            backgroundColor: "#f1f0df",
+            transparent: false,
+            antialias: true,
+            physics: {
+              default: "arcade",
+              arcade: { gravity: { x: 0, y: 1450 }, debug: false },
+            },
+            scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+            scene: current,
+            audio: { noAudio: true },
+            render: { roundPixels: true },
+          });
+          return;
+        }
+        game.scale.resize(entry.contentRect.width, entry.contentRect.height);
+        current.setViewportWidth(entry.contentRect.width, props.overview);
       });
       resize.observe(host.current!);
       return () => {
         resize.disconnect();
         active = false;
-        game.destroy(true);
+        game?.destroy(true);
         scene.current = undefined;
       };
     }, [props.world.id, props.run]);
@@ -96,6 +106,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         aria-label="Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."
         role="application"
         tabIndex={0}
+        onPointerDown={(event) => event.currentTarget.focus({ preventScroll: true })}
       />
     );
   },

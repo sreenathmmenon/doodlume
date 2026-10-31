@@ -97,6 +97,7 @@ export class WorldScene extends Phaser.Scene {
   private soundtrack: Soundscape;
   private heroArt!: Phaser.GameObjects.Image;
   private heroHalo!: Phaser.GameObjects.Arc;
+  private updateAtmosphere = () => {};
   private heroWidth = 1;
   private heroHeight = 1;
   private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -142,8 +143,8 @@ export class WorldScene extends Phaser.Scene {
 
   create() {
     this.state = structuredClone(this.initial);
-    this.physics.world.setBounds(0, -200, 1440, 1200);
-    createAtmosphere(this, this.definition.theme, this.reducedMotion);
+    this.physics.world.setBounds(0, -200, this.definition.width, this.definition.height + 400);
+    this.updateAtmosphere = createAtmosphere(this, this.definition.theme, this.reducedMotion);
     const terrain = this.physics.add.staticGroup();
     for (const e of this.definition.entities) {
       if (e.kind === "terrain" || e.kind === "bridge") {
@@ -195,7 +196,7 @@ export class WorldScene extends Phaser.Scene {
     this.heroArt.setDisplaySize(hero.width, hero.height);
     this.heroArt.setPosition(this.player.x, this.player.y + hero.height / 2);
     this.cameras.main
-      .setBounds(0, 0, 1440, 820)
+      .setBounds(0, 0, this.definition.width, this.definition.height)
       .setZoom(this.reducedMotion ? 1 : 1.18);
     this.cameras.main.centerOn(this.player.x, 410);
     const body = this.player.body as Phaser.Physics.Arcade.Body;
@@ -245,7 +246,7 @@ export class WorldScene extends Phaser.Scene {
     ]);
     this.hint = this.add
       .text(0, 0, "E  ·  wake the gate", {
-        fontFamily: "Avenir Next, sans-serif",
+        fontFamily: "Manrope, sans-serif",
         fontSize: "20px",
         color: "#faf8f1",
         backgroundColor: "#4c5549",
@@ -421,7 +422,7 @@ export class WorldScene extends Phaser.Scene {
       this.ring(coin.x, coin.y, 0xffe3a3, 36);
       const reward = this.add
         .text(coin.x, coin.y - 25, "+1", {
-          fontFamily: "Avenir Next, sans-serif",
+          fontFamily: "Manrope, sans-serif",
           fontSize: "26px",
           fontStyle: "bold",
           color: "#ffe9b9",
@@ -442,7 +443,7 @@ export class WorldScene extends Phaser.Scene {
         this.state.collected.length ===
         this.definition.entities.filter((e) => e.kind === "coin").length
       )
-        this.hooks.onMoment("Every sunseed found. Now, find your way home.");
+        this.hooks.onMoment("Every collectible found. Find your destination.");
     });
   }
 
@@ -584,7 +585,7 @@ export class WorldScene extends Phaser.Scene {
       this.burst(gate.art.x + 25, gate.art.y + 65, 0xc9b6db, 14);
       this.soundtrack.cue("gate");
       this.ring(gate.art.x + 25, gate.art.y + 65, 0xd4c2ff, 80);
-      this.hooks.onMoment("Your lever woke the gate. Home is just ahead.");
+      this.hooks.onMoment("The gate is open. A new path awaits.");
     }
     this.report();
   }
@@ -639,16 +640,18 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  setViewportWidth(width: number) {
+  setViewportWidth(width: number, overview = false) {
     if (!this.player) return;
     const camera = this.cameras.main;
-    camera.setZoom(this.reducedMotion ? 1 : width < 600 ? 1.65 : 1.18);
-    const y = Phaser.Math.Clamp(
-      this.player.y + this.heroHeight / 2 + 110 - camera.displayHeight,
-      0,
-      820 - camera.displayHeight,
-    );
-    camera.centerOn(this.player.x, y + camera.displayHeight / 2);
+    if (overview || this.reducedMotion) {
+      camera.removeBounds().setZoom(Math.min(camera.width / this.definition.width, camera.height / this.definition.height));
+      camera.centerOn(this.definition.width / 2, this.definition.height / 2);
+      return;
+    }
+    camera.setZoom(Math.max(width / (width < 600 ? 720 : 1280), camera.height / this.definition.height));
+    camera.setBounds(0, 0, this.definition.width, this.definition.height);
+    const target = camera.getScroll(this.player.x, this.player.y + this.heroHeight / 2 + 100 - camera.displayHeight / 2);
+    camera.setScroll(target.x, target.y);
   }
 
   setPlaying(playing: boolean) {
@@ -716,6 +719,7 @@ export class WorldScene extends Phaser.Scene {
 
   update(time: number, delta: number) {
     if (!this.player || !this.cursors) return;
+    this.updateAtmosphere();
     if (!this.isPlaying) return;
     this.soundtrack.tick(time);
     const typing = document.activeElement?.matches(
@@ -791,13 +795,13 @@ export class WorldScene extends Phaser.Scene {
       if (lever) this.openLever(lever.entity.id);
     }
     this.previousTouchInteract = this.controls.interact;
-    this.player.x = Phaser.Math.Clamp(this.player.x, 25, 1415);
-    if (this.player.y > 930) {
+    this.player.x = Phaser.Math.Clamp(this.player.x, 25, this.definition.width - 25);
+    if (this.player.y > this.definition.height + 110) {
       this.player.setPosition(this.spawn.x, this.spawn.y);
       body.setVelocity(0);
       this.soundtrack.cue("return");
       this.ring(this.spawn.x, this.spawn.y, 0xffdf9c, 60);
-      this.hooks.onMoment("Back on your feet. Your sunseeds are still yours.");
+      this.hooks.onMoment("Back on your feet. Your discoveries are kept.");
     }
     const speed = Math.abs(body.velocity.x);
     const stride = Math.sin(time / 65);

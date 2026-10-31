@@ -89,10 +89,10 @@ export function validateWorld(value: unknown): WorldDefinition {
   if (!["grove", "moon", "sunset"].includes(w.theme))
     throw new Error("Unsupported world palette.");
   if (
-    w.width !== 1440 ||
-    w.height !== 820 ||
+    !Number.isInteger(w.width) || w.width < 1440 || w.width > 12000 ||
+    !Number.isInteger(w.height) || w.height < 820 || w.height > 5000 ||
     !Array.isArray(w.entities) ||
-    w.entities.length > 40
+    w.entities.length > 160
   )
     throw new Error("The drawing is too complex for this world.");
   const allowed: EntityKind[] = [
@@ -124,12 +124,12 @@ export function validateWorld(value: unknown): WorldDefinition {
       ) ||
       entity.width < 4 ||
       entity.height < 4 ||
-      entity.width > 1600 ||
-      entity.height > 900 ||
+      entity.width > w.width + 20 ||
+      entity.height > w.height + 20 ||
       entity.x < -20 ||
-      entity.x > 1440 ||
+      entity.x > w.width ||
       entity.y < -20 ||
-      entity.y > 820
+      entity.y > w.height
     )
       throw new Error("An object falls outside the usable page.");
     if (
