@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Modal } from "./Modal";
 import { SketchPad } from "./SketchPad";
+import { ArtworkReview } from "./ArtworkReview";
 import { extractSketchInk } from "../lib/ink";
 import { applyWorldPatch, type WorldPatch } from "../../shared/revisions";
 import type { PaperProposal } from "../../shared/amendments";
@@ -593,6 +594,7 @@ export function WorldEditor({
             )}
           </section>
           <section className="editor-summary">
+            <ArtworkReview entities={additions} />
             {proposal && (
               <div className="paper-evidence">
                 <strong>What the model saw</strong>
@@ -691,7 +693,12 @@ export function WorldEditor({
           onUse={(image) => {
             void extractSketchInk(image)
               .then((ink) => {
-                if (item) update({ art: ink });
+                if (item)
+                  update({
+                    art: ink,
+                    artMethod: undefined,
+                    artNote: undefined,
+                  });
                 else setCustomArt(ink);
                 setDrawing(false);
               })

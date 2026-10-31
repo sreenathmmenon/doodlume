@@ -1,4 +1,5 @@
-import { normalizeDrawing, imageData, cropArtwork } from "./images.js";
+import { normalizeDrawing, imageData } from "./images.js";
+import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
 import { modelJSON, InterpretationError } from "./model.js";
 export { InterpretationError } from "./model.js";
 import { randomUUID } from "node:crypto";
@@ -75,6 +76,8 @@ export async function interpretDrawing(
   intent: unknown,
   connection: ModelConnection,
   signal: AbortSignal,
+  segmentation: SegmentationConnection = { enabled: false, apiKey: "" },
+  transport: typeof fetch = fetch,
 ): Promise<WorldDefinition> {
   if (typeof intent !== "string" || intent.length > 500)
     throw new InterpretationError(
@@ -87,6 +90,7 @@ export async function interpretDrawing(
     connection,
     drawingRequest(connection, sourceImage, intent, instructions, schema),
     signal,
+    transport,
   );
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new InterpretationError(
@@ -139,7 +143,6 @@ export async function interpretDrawing(
       );
     ids.add(o.id);
   }
-  const entities = [];
   for (const o of detected.objects) {
     if (
       ![o.x, o.y, o.width, o.height].every(Number.isFinite) ||
@@ -153,6 +156,39 @@ export async function interpretDrawing(
       throw new InterpretationError(
         "Some shapes could not be located clearly. Try a closer, straight-on photo.",
       );
+  }
+  // Reject bad world structure before spending a segmentation request.
+  const placements = detected.objects.map((o) => ({
+    id: o.id,
+    kind: o.kind,
+    x: o.x * 1.44,
+    y: o.y * 0.82,
+    width: Math.max(4, o.width * 1.44),
+    height: Math.max(4, o.height * 0.82),
+    ...(o.targetId ? { targetId: o.targetId } : {}),
+    label: o.label.slice(0, 80),
+  }));
+  validateWorld({
+    id: "candidate",
+    name: detected.name,
+    description: detected.description,
+    theme: detected.theme,
+    width: 1440,
+    height: 820,
+    source: "meta",
+    sourceImage,
+    entities: placements,
+    revision: 1,
+  });
+  const artwork = await extractArtwork(
+    normalized,
+    detected.objects,
+    segmentation,
+    signal,
+    transport,
+  );
+  const entities = [];
+  for (const o of detected.objects) {
     entities.push({
       id: o.id,
       kind: o.kind,
@@ -160,7 +196,7 @@ export async function interpretDrawing(
       y: o.y * 0.82,
       width: Math.max(4, o.width * 1.44),
       height: Math.max(4, o.height * 0.82),
-      art: await cropArtwork(normalized, o),
+      ...artwork.get(o.id),
       ...(o.targetId ? { targetId: o.targetId } : {}),
       label: o.label?.slice(0, 80),
     });

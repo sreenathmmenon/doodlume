@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { randomUUID } from "node:crypto";
-import { normalizeDrawing, imageData, cropArtwork } from "./images.js";
+import { normalizeDrawing, imageData } from "./images.js";
+import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
 import { modelJSON, InterpretationError } from "./model.js";
 import { drawingRequest, type ModelConnection } from "./provider.js";
 import { validateWorld, type WorldEntity } from "../shared/world.js";
@@ -53,6 +54,7 @@ export async function interpretAmendment(
   connection: ModelConnection,
   signal: AbortSignal,
   transport: typeof fetch = fetch,
+  segmentation: SegmentationConnection = { enabled: false, apiKey: "" },
 ): Promise<PaperProposal> {
   const started = Date.now();
   let world;
@@ -223,6 +225,24 @@ export async function interpretAmendment(
       );
     ids.set(o.id, `paper-${randomUUID()}`);
   }
+  // Validate all lever references before requesting masks.
+  for (const o of raw.additions) {
+    if (o.kind !== "lever" || !o.targetId) continue;
+    const gate =
+      world.entities.find((e) => e.id === o.targetId) ??
+      raw.additions.find((e) => e.id === o.targetId);
+    if (!gate || gate.kind !== "gate")
+      throw new InterpretationError(
+        "A proposed lever points to an unknown gate. Nothing has been applied.",
+      );
+  }
+  const artwork = await extractArtwork(
+    after,
+    raw.additions,
+    segmentation,
+    signal,
+    transport,
+  );
   const additions: WorldEntity[] = [];
   const evidence: PaperProposal["evidence"] = [];
   for (const o of raw.additions) {
@@ -247,7 +267,7 @@ export async function interpretAmendment(
       width: Math.max(4, o.width * 1.44),
       height: Math.max(4, o.height * 0.82),
       label: o.label,
-      art: await cropArtwork(after, o),
+      ...artwork.get(o.id),
       ...(targetId ? { targetId } : {}),
     });
     evidence.push({

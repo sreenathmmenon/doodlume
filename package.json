@@ -10,7 +10,7 @@
     "start": "tsx server/index.ts",
     "studio": "npm run build && node scripts/preview-local.mjs",
     "check": "tsc --noEmit",
-    "test": "tsx --test shared/world.test.ts shared/revisions.test.ts server/provider.test.ts server/amend.test.ts shared/alignment.test.ts server/capture.test.ts"
+    "test": "tsx --test shared/world.test.ts shared/revisions.test.ts server/provider.test.ts server/amend.test.ts shared/alignment.test.ts server/capture.test.ts server/segmentation.test.ts"
   },
   "dependencies": {
     "@fastify/static": "10.1.8",
@@ -21,7 +21,8 @@
     "qrcode": "1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "@meta-sam/parser": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

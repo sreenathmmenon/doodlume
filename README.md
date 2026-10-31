@@ -36,7 +36,7 @@ Create the key through Baseten Settings → API Keys. If the hackathon portal pr
 
 For direct Meta access, use `MODEL_PROVIDER=meta`, `MODEL_API_KEY=...`, and `META_MODEL=muse-wonder-1.0`. If `MODEL_PROVIDER` is absent, an existing direct Meta key selects Meta; otherwise Baseten is selected. With both keys, explicitly set the intended provider. A failed call never switches billing accounts automatically.
 
-Both adapters send the selected drawing and adventure description to the chosen provider and crop artwork from the uploaded page. Direct Meta uses `https://api.meta.ai/v1/chat/completions` with constrained JSON. Baseten uses `https://inference.baseten.co/v1/chat/completions` with Meta's Muse Spark Open, a JSON-schema instruction, and local response validation. Baseten currently does not support enforced structured output/JSON mode for this model, so its adapter omits that unsupported parameter. Reasoning is set to `low`. These are different model paths whose drawing quality still needs live comparison. The foundation extraction uses white-paper removal, **not SAM segmentation**. It is unsuitable for claiming general photographic extraction quality. No stock world is returned on a failed request.
+Both adapters send the selected drawing and adventure description to the chosen provider and crop artwork from the uploaded page. Direct Meta uses `https://api.meta.ai/v1/chat/completions` with constrained JSON. Baseten uses `https://inference.baseten.co/v1/chat/completions` with Meta's Muse Spark Open, a JSON-schema instruction, and local response validation. Baseten currently does not support enforced structured output/JSON mode for this model, so its adapter omits that unsupported parameter. Reasoning is set to `low`. These are different model paths whose drawing quality still needs live comparison. SAM 3.1 precise cutouts are now integrated after interpretation and page comparison, using the direct Meta Responses API and the official mask parser. Direct Meta enables them by default; Baseten interpretation requires explicit `SAM_ENABLED=true` and a separate `MODEL_API_KEY` to use both providers. Set `SAM_ENABLED=false` for paper cutouts only. Each SAM batch counts toward the same model-call budget. Failed, missing or uncertain masks fall back per object to white-paper removal, labeled in the cutout review. Neither mask quality nor general photographic extraction has been verified live. See [the segmentation record](docs/SAM-CUTOUTS.md). No stock world is returned on a failed request.
 
 ## Play
 
@@ -61,7 +61,7 @@ npm run test
 npm run build
 ```
 
-Only sixteen focused contract/regression tests are included: three world-contract checks, three revision checks, two provider-boundary checks, four paper-comparison checks, two page-geometry checks, and two capture-session/gateway checks. Paper-comparison tests inject a test-only transport; they validate request/response handling and real image cropping, not Meta recognition accuracy. No mocked model response is available in the product. Browser playthroughs are the main foundation check. The later live input validation should use 5–20 materially different drawings rather than a large unit-test suite.
+Only nineteen focused contract/regression tests are included: three world-contract checks, three revision checks, two provider-boundary checks, four paper-comparison checks, two page-geometry checks, two capture-session/gateway checks, and three segmentation pipeline checks. Paper-comparison and segmentation tests inject a test-only transport; they validate request/response handling and real image cropping, not Meta recognition accuracy. The SAM wire fixture comes from Meta's published example; it is synthetic test data, not an app inference result. No mocked model response is available in the product. Browser playthroughs are the main foundation check. The later live input validation should use 5–20 materially different drawings rather than a large unit-test suite.
 
 For a local production build, `npm run build` followed by `npm start` serves the studio at http://127.0.0.1:8787. This service deliberately binds to loopback. Internet hosting, cloud saves, and deployment require a later integration pass. Capture is tested between browser sessions; a physical phone/camera and real Wi-Fi connection still need validation.
 
@@ -74,6 +74,8 @@ For a local production build, `npm run build` followed by `npm start` serves the
 - `shared/revisions.ts`: atomic additions, revision checks, progress retention, and undo.
 - `src/components/WorldEditor.tsx`: manual placement, gate connections, and object-art drawing.
 - `server/`: server-side Meta connection, two-page comparison, validation, and source-art extraction.
+- `server/segmentation.ts`: bounded SAM streaming, official mask decoding, source-pixel cutouts and explicit per-object fallback.
+- `src/components/ArtworkReview.tsx`: original cutout thumbnails and extraction details.
 - `server/capture.ts`: short-lived paired sessions and an opt-in capture-only Wi-Fi gateway.
 - `shared/alignment.ts`: projective mapping and bilinear page rectification.
 - `src/components/PageAlignment.tsx`: corner guidance and before/after acceptance.

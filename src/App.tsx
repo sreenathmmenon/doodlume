@@ -37,6 +37,7 @@ import { PaperUpdate } from "./components/PaperUpdate";
 import type { PaperProposal } from "../shared/amendments";
 import { readDrawingFile } from "./lib/drawing-file";
 import { WorldEditor } from "./components/WorldEditor";
+import { ArtworkReview } from "./components/ArtworkReview";
 import {
   applyWorldPatch,
   undoWorldPatch,
@@ -62,6 +63,7 @@ type Connection = {
   enforcedSchema: boolean;
   model: string;
   requestsRemaining: number;
+  segmentation?: { enabled: boolean; configured: boolean; model: string };
 };
 type SavedWorld = {
   world: WorldDefinition;
@@ -953,6 +955,7 @@ export default function App() {
                 collectibles ·{" "}
                 {draft.entities.filter((e) => e.kind === "lever").length} levers
               </p>
+              <ArtworkReview entities={draft.entities} />
             </div>
             <button
               className="primary-button"
@@ -1253,15 +1256,29 @@ export default function App() {
           <div className="setup-details">
             <span>Model</span>
             <code>{connection?.model ?? "muse-wonder-1.0"}</code>
-            <span>Session request limit</span>
+            <span>Model calls remaining</span>
             <span>
               {connection
                 ? `${connection.requestsRemaining} remaining`
                 : "Not available"}
             </span>
+            <span>Precise artwork cutouts</span>
+            <span>
+              {connection?.segmentation?.enabled
+                ? connection.segmentation.configured
+                  ? "SAM 3.1 · configured for a live trial"
+                  : "SAM 3.1 · direct Meta key needed"
+                : "Paper cutouts · SAM is off"}
+            </span>
             <span>Current build</span>
             <span>Paper updates · review and apply</span>
           </div>
+          <p className="small-note">
+            SAM uses direct Meta access. With Baseten interpretation, enable it
+            separately with SAM_ENABLED=true and MODEL_API_KEY. Each SAM batch
+            counts toward the same model-call limit. Set SAM_ENABLED=false to
+            use paper cutouts only.
+          </p>
           <p className="small-note">
             Drawing and page-comparison adapters are included. Live model
             quality still needs verification; examples are authored

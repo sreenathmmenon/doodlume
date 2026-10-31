@@ -17,6 +17,8 @@ export interface WorldEntity {
   width: number;
   height: number;
   art?: string;
+  artMethod?: "sam" | "paper";
+  artNote?: string;
   targetId?: string;
   label?: string;
 }
@@ -124,6 +126,13 @@ export function validateWorld(value: unknown): WorldDefinition {
       !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(entity.art)
     )
       throw new Error("Unsupported artwork format.");
+    if (
+      (entity.artMethod !== undefined &&
+        !["sam", "paper"].includes(entity.artMethod)) ||
+      (entity.artNote !== undefined &&
+        (typeof entity.artNote !== "string" || entity.artNote.length > 200))
+    )
+      throw new Error("Unsupported artwork extraction details.");
   }
   if (
     w.entities.filter((e) => e.kind === "player").length !== 1 ||

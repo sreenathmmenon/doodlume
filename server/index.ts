@@ -8,6 +8,7 @@ import { interpretDrawing, InterpretationError } from "./interpret.js";
 import { interpretAmendment } from "./amend.js";
 import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
+import { segmentationConnection } from "./segmentation.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
@@ -20,6 +21,18 @@ const maxRequests = Math.max(
 const port = Number(process.env.API_PORT) || 8787;
 let requests = 0,
   inFlight = false;
+function reserveRequest() {
+  if (requests >= maxRequests)
+    throw new InterpretationError(
+      "The local session model-call limit has been reached.",
+      429,
+    );
+  requests++;
+}
+const segmentation = {
+  ...segmentationConnection(process.env, connection),
+  reserveRequest,
+};
 const app = Fastify({ bodyLimit: 17_000_000, logger: false });
 app.addHook("onRequest", async (request, reply) => {
   const origin = request.headers.origin;
@@ -47,6 +60,11 @@ app.get("/api/status", async () => ({
   credential: connection.credential,
   enforcedSchema: connection.enforcedSchema,
   requestsRemaining: Math.max(0, maxRequests - requests),
+  segmentation: {
+    enabled: segmentation.enabled,
+    configured: Boolean(segmentation.apiKey),
+    model: "sam-3.1",
+  },
 }));
 for (const action of ["interpret", "amend"] as const)
   app.post<{ Body: { image?: unknown; intent?: unknown; world?: unknown } }>(
@@ -76,7 +94,7 @@ for (const action of ["interpret", "amend"] as const)
       };
       reply.raw.on("close", onClose);
       inFlight = true;
-      requests++;
+      reserveRequest();
       try {
         if (action === "amend")
           return {
@@ -86,6 +104,8 @@ for (const action of ["interpret", "amend"] as const)
               body.intent ?? "",
               connection,
               controller.signal,
+              fetch,
+              segmentation,
             ),
           };
         return {
@@ -94,6 +114,7 @@ for (const action of ["interpret", "amend"] as const)
             body.intent ?? "",
             connection,
             controller.signal,
+            segmentation,
           ),
         };
       } catch (error) {
