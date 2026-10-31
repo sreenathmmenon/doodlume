@@ -80,6 +80,7 @@ export class WorldScene extends Phaser.Scene {
       entity: WorldEntity;
       handle: Phaser.GameObjects.Line;
       knob: Phaser.GameObjects.Arc;
+      originalArt?: Phaser.GameObjects.Image;
     }
   >();
   private hint!: Phaser.GameObjects.Text;
@@ -200,6 +201,13 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false);
     for (const id of this.state.activated) this.openLever(id, true);
     this.setPlaying(false);
+    if (
+      this.initial.velocity &&
+      Number.isFinite(this.initial.velocity.x) &&
+      Number.isFinite(this.initial.velocity.y)
+    )
+      body.setVelocity(this.initial.velocity.x, this.initial.velocity.y);
+    this.player.setFlipX(Boolean(this.initial.facingLeft));
     this.report();
     this.hooks.onReady(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -394,6 +402,14 @@ export class WorldScene extends Phaser.Scene {
     g.lineStyle(2, 0x8f7a9c, 0.7);
     for (let y = 37; y < e.height; y += 30) g.lineBetween(2, y, e.width - 2, y);
     art.add(g);
+    if (e.art) {
+      g.setVisible(false);
+      art.add(
+        this.add
+          .image(e.width / 2, e.height / 2, `art-${e.id}`)
+          .setDisplaySize(e.width, e.height),
+      );
+    }
     this.gates.set(e.id, { collider, art });
   }
 
@@ -464,10 +480,26 @@ export class WorldScene extends Phaser.Scene {
       .zone(e.x + e.width / 2, e.y + e.height / 2, e.width + 35, e.height + 35)
       .setInteractive({ useHandCursor: true });
     target.on("pointerup", () => {
-      if (this.isPlaying && Math.abs(this.player.x - e.x) < 160)
+      if (
+        this.isPlaying &&
+        Math.hypot(
+          this.player.x - e.x - e.width / 2,
+          this.player.y - e.y - e.height / 2,
+        ) < 145
+      )
         this.openLever(e.id);
     });
-    this.levers.set(e.id, { entity: e, handle, knob });
+    let originalArt: Phaser.GameObjects.Image | undefined;
+    if (e.art) {
+      g.setVisible(false);
+      handle.setVisible(false);
+      knob.setVisible(false);
+      originalArt = this.add
+        .image(e.x + e.width / 2, e.y + e.height / 2, `art-${e.id}`)
+        .setDisplaySize(e.width, e.height)
+        .setDepth(13);
+    }
+    this.levers.set(e.id, { entity: e, handle, knob, originalArt });
   }
 
   private createGoal(e: WorldEntity) {
@@ -516,6 +548,7 @@ export class WorldScene extends Phaser.Scene {
       e.y + 20,
     );
     lever.knob.setPosition(e.x + e.width - 6, e.y + 20);
+    lever.originalArt?.setAngle(15);
     if (!instant) {
       this.burst(gate.art.x + 25, gate.art.y + 65, 0xc9b6db, 14);
       this.tone(440);
@@ -579,16 +612,32 @@ export class WorldScene extends Phaser.Scene {
     return {
       ...structuredClone(this.state),
       player: this.player ? { x: this.player.x, y: this.player.y } : null,
+      velocity: this.player?.body
+        ? {
+            x: (this.player.body as Phaser.Physics.Arcade.Body).velocity.x,
+            y: (this.player.body as Phaser.Physics.Arcade.Body).velocity.y,
+          }
+        : { x: 0, y: 0 },
+      facingLeft: this.player?.flipX ?? false,
     };
+  }
+  private nearestLever() {
+    return [...this.levers.values()]
+      .filter((l) => !this.state.activated.includes(l.entity.id))
+      .map((l) => ({
+        lever: l,
+        distance: Math.hypot(
+          this.player.x - l.entity.x - l.entity.width / 2,
+          this.player.y - l.entity.y - l.entity.height / 2,
+        ),
+      }))
+      .filter((l) => l.distance < 145)
+      .sort((a, b) => a.distance - b.distance)[0]?.lever;
   }
   private report() {
     if (!this.player) return;
     const state = this.snapshot();
-    const nearby = [...this.levers.values()].some(
-      (l) =>
-        !state.activated.includes(l.entity.id) &&
-        Math.abs(this.player.x - l.entity.x) < 125,
-    );
+    const nearby = Boolean(this.nearestLever());
     this.hooks.onUpdate(state, {
       collected: state.collected.length,
       total: this.definition.entities.filter((e) => e.kind === "coin").length,
@@ -616,14 +665,22 @@ export class WorldScene extends Phaser.Scene {
       this.cursors.right.isDown || this.keys.D.isDown || this.controls.right;
     body.setAccelerationX(left ? -1850 : right ? 1850 : 0);
     // Tiny differences between drawn ground and bridge edges should not snag feet.
-    if (body.blocked.down && ((right && body.blocked.right) || (left && body.blocked.left))) {
-      const step = this.definition.entities.find(e => {
-        if (e.kind !== 'terrain' && e.kind !== 'bridge') return false;
+    if (
+      body.blocked.down &&
+      ((right && body.blocked.right) || (left && body.blocked.left))
+    ) {
+      const step = this.definition.entities.find((e) => {
+        if (e.kind !== "terrain" && e.kind !== "bridge") return false;
         const rise = body.bottom - e.y;
-        const atEdge = right ? Math.abs(body.right - e.x) < 3 : Math.abs(body.left - e.x - e.width) < 3;
+        const atEdge = right
+          ? Math.abs(body.right - e.x) < 3
+          : Math.abs(body.left - e.x - e.width) < 3;
         return atEdge && rise > 0 && rise <= 10;
       });
-      if (step) { this.player.y -= body.bottom - step.y + 1; body.updateFromGameObject(); }
+      if (step) {
+        this.player.y -= body.bottom - step.y + 1;
+        body.updateFromGameObject();
+      }
     }
     if (left || right) this.player.setFlipX(left);
     if (
@@ -644,11 +701,7 @@ export class WorldScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.keys.E) ||
       (this.controls.interact && !this.previousTouchInteract)
     ) {
-      const lever = [...this.levers.values()].find(
-        (l) =>
-          !this.state.activated.includes(l.entity.id) &&
-          Math.abs(this.player.x - l.entity.x) < 125,
-      );
+      const lever = this.nearestLever();
       if (lever) this.openLever(lever.entity.id);
     }
     this.previousTouchInteract = this.controls.interact;
@@ -667,11 +720,7 @@ export class WorldScene extends Phaser.Scene {
       .setPosition(this.player.x, Math.min(this.player.y + 51, 692))
       .setAlpha(body.blocked.down ? 0.13 : 0.045)
       .setScale(body.blocked.down ? 1 : 0.65, 1);
-    const lever = [...this.levers.values()].find(
-      (l) =>
-        !this.state.activated.includes(l.entity.id) &&
-        Math.abs(this.player.x - l.entity.x) < 125,
-    );
+    const lever = this.nearestLever();
     this.hint.setVisible(Boolean(lever));
     if (lever) this.hint.setPosition(lever.entity.x + 25, lever.entity.y - 38);
     if (time - this.lastReport > 250) {

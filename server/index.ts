@@ -8,7 +8,7 @@ import { interpretDrawing, InterpretationError } from "./interpret.js";
 import { modelConnection } from "./provider.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-config({ path: resolve(root, ".env.local") });
+config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
 config({ path: resolve(root, ".env") });
 const connection = modelConnection(process.env);
 const maxRequests = Math.max(

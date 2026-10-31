@@ -36,6 +36,8 @@ export interface WorldDefinition {
 
 export interface PlayState {
   player: { x: number; y: number } | null;
+  velocity?: { x: number; y: number };
+  facingLeft?: boolean;
   collected: string[];
   activated: string[];
   completed: boolean;

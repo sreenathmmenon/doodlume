@@ -20,6 +20,7 @@ import {
   Settings2,
   Sparkles,
   Sprout,
+  Undo2,
   Volume2,
   VolumeX,
   WandSparkles,
@@ -28,6 +29,13 @@ import {
 import { WorldCanvas, type WorldCanvasHandle } from "./components/WorldCanvas";
 import { Modal } from "./components/Modal";
 import { SketchPad } from "./components/SketchPad";
+import { WorldEditor } from "./components/WorldEditor";
+import {
+  applyWorldPatch,
+  undoWorldPatch,
+  type WorldPatch,
+  type RevisionCheckpoint,
+} from "../shared/revisions";
 import { EXAMPLES, freshExample } from "./lib/examples";
 import {
   emptyPlayState,
@@ -47,8 +55,13 @@ type Connection = {
   model: string;
   requestsRemaining: number;
 };
-type SavedWorld = { world: WorldDefinition; state: PlayState; savedAt: string };
-type Dialog = "sketch" | "worlds" | "help" | "settings" | null;
+type SavedWorld = {
+  world: WorldDefinition;
+  state: PlayState;
+  savedAt: string;
+  history?: RevisionCheckpoint[];
+};
+type Dialog = "sketch" | "worlds" | "help" | "settings" | "editor" | null;
 const storageKey = "doodlume.worlds.v1";
 function savedWorlds(): SavedWorld[] {
   try {
@@ -63,7 +76,20 @@ function savedWorlds(): SavedWorld[] {
           !Array.isArray(item.state.activated)
         )
           return [];
-        return [item];
+        const history = Array.isArray(item.history)
+          ? item.history.slice(-12).filter((entry) => {
+              try {
+                return (
+                  entry.before.id === item.world.id &&
+                  Number.isInteger(entry.appliedRevision) &&
+                  Boolean(validateWorld(entry.before))
+                );
+              } catch {
+                return false;
+              }
+            })
+          : [];
+        return [{ ...item, history }];
       } catch {
         return [];
       }
@@ -103,6 +129,10 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<WorldDefinition | null>(null);
+  const [editorState, setEditorState] = useState<PlayState>(emptyPlayState);
+  const [history, setHistory] = useState<RevisionCheckpoint[]>([]);
+  const worldNow = useRef(world);
+  worldNow.current = world;
   const canvas = useRef<WorldCanvasHandle>(null);
   const file = useRef<HTMLInputElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -168,10 +198,16 @@ export default function App() {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(""), 5200);
   }
-  function loadWorld(next: WorldDefinition, state = emptyPlayState()) {
+  function loadWorld(
+    next: WorldDefinition,
+    state = emptyPlayState(),
+    checkpoints: RevisionCheckpoint[] = [],
+  ) {
     request.current?.abort();
     setBusy(false);
     setWorld(next);
+    worldNow.current = next;
+    setHistory(checkpoints);
     setSource(next.sourceImage);
     setCustomSource(false);
     setSourceName(
@@ -193,6 +229,74 @@ export default function App() {
     setDraft(null);
     setError("");
     previousPlaying.current = false;
+  }
+  function openEditor() {
+    setEditorState(canvas.current?.snapshot() ?? latestState.current);
+    setDialog("editor");
+  }
+  function keepRevision(next: WorldDefinition, state: PlayState) {
+    worldNow.current = next;
+    setWorld(next);
+    setInitial(state);
+    latestState.current = state;
+    setMetrics({
+      ...metrics,
+      collected: state.collected.length,
+      total: next.entities.filter((e) => e.kind === "coin").length,
+      completed: state.completed,
+    });
+    setRun((n) => n + 1);
+    setStarted(true);
+    previousPlaying.current = false;
+    setDialog(null);
+    setPlaying(!state.completed);
+    setError("");
+    requestAnimationFrame(() => {
+      stage.current?.scrollIntoView({
+        block: "center",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+      });
+      stage.current
+        ?.querySelector<HTMLElement>(".world-canvas")
+        ?.focus({ preventScroll: true });
+    });
+  }
+  function applyEdit(patch: WorldPatch) {
+    const result = applyWorldPatch(worldNow.current, editorState, patch);
+    setHistory((items) => [...items, result.checkpoint].slice(-12));
+    keepRevision(result.world, result.state);
+    tell(
+      `${patch.additions.length === 1 ? "A new possibility" : `${patch.additions.length} new possibilities`}. Same little world. Your progress stayed with you.`,
+    );
+  }
+  function undoEdit() {
+    const checkpoint = history.at(-1);
+    if (!checkpoint) return;
+    try {
+      const result = undoWorldPatch(
+        worldNow.current,
+        canvas.current?.snapshot() ?? latestState.current,
+        checkpoint,
+      );
+      setHistory((items) => {
+        const remaining = items.slice(0, -1);
+        return remaining.map((entry, index) =>
+          index === remaining.length - 1
+            ? { ...entry, appliedRevision: result.world.revision }
+            : entry,
+        );
+      });
+      keepRevision(result.world, result.state);
+      tell("Last world edit undone. Your surviving progress stays yours.");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "This edit could not be undone safely.",
+      );
+    }
   }
   function start() {
     setStarted(true);
@@ -224,6 +328,7 @@ export default function App() {
     const entry: SavedWorld = {
       world,
       state,
+      history,
       savedAt: new Date().toISOString(),
     };
     const next = [entry, ...saved.filter((s) => s.world.id !== world.id)].slice(
@@ -304,6 +409,7 @@ export default function App() {
         signal: controller.signal,
       });
       const result = await response.json();
+      if (controller.signal.aborted || request.current !== controller) return;
       if (!response.ok)
         throw new Error(
           result.error || "Your drawing could not be interpreted.",
@@ -536,9 +642,29 @@ export default function App() {
               <div className="world-heading-actions">
                 <span className="example-badge">
                   {world.source === "example"
-                    ? "Playable example"
+                    ? world.revision > 1
+                      ? "Edited example"
+                      : "Playable example"
                     : "From your drawing"}
                 </span>
+                <button
+                  className="secondary-button edit-world-button"
+                  aria-label="Keep creating in this world"
+                  onClick={openEditor}
+                  disabled={busy || metrics.completed}
+                >
+                  <Pencil size={15} />
+                  <span>Keep creating</span>
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Undo last world edit"
+                  title="Undo last world edit"
+                  onClick={undoEdit}
+                  disabled={!history.length || busy}
+                >
+                  <Undo2 size={17} />
+                </button>
                 <button
                   className="icon-button save-button"
                   aria-label="Save world on this device"
@@ -548,6 +674,16 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {world.revision > 1 && (
+              <div className="revision-strip" role="status">
+                <Check size={12} /> Version {world.revision} · Same world,
+                progress kept{" "}
+                <span>
+                  {history.length} {history.length === 1 ? "edit" : "edits"} you
+                  can undo
+                </span>
+              </div>
+            )}
             <div className="game-stage" ref={stage}>
               <WorldCanvas
                 ref={canvas}
@@ -876,6 +1012,14 @@ export default function App() {
           onUse={(image) => useSource(image)}
         />
       )}
+      {dialog === "editor" && (
+        <WorldEditor
+          world={world}
+          state={editorState}
+          onApply={applyEdit}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === "worlds" && (
         <Modal title="Your little worlds" onClose={() => setDialog(null)}>
           <p className="modal-copy">
@@ -890,6 +1034,7 @@ export default function App() {
                     loadWorld(
                       entry.world,
                       retainPlayState(entry.world, entry.state),
+                      entry.history ?? [],
                     );
                     setDialog(null);
                   }}

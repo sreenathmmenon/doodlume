@@ -8,8 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "start": "tsx server/index.ts",
+    "studio": "npm run build && node scripts/preview-local.mjs",
     "check": "tsc --noEmit",
-    "test": "tsx --test shared/world.test.ts server/provider.test.ts"
+    "test": "tsx --test shared/world.test.ts shared/revisions.test.ts server/provider.test.ts"
   },
   "dependencies": {
     "@fastify/static": "^8.0.0",
