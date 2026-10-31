@@ -6,6 +6,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { interpretDrawing, InterpretationError } from "./interpret.js";
 import { interpretAmendment } from "./amend.js";
+import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -115,6 +116,8 @@ for (const action of ["interpret", "amend"] as const)
     },
   );
 app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof CaptureError)
+    return reply.code(error.status).send({ error: error.message });
   const status =
     error &&
     typeof error === "object" &&
@@ -130,6 +133,7 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 const dist = resolve(root, "dist");
+installCapture(app, dist, port);
 if (existsSync(dist)) {
   await app.register(fastifyStatic, { root: dist });
   app.setNotFoundHandler((request, reply) =>

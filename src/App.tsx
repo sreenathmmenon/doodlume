@@ -20,6 +20,8 @@ import {
   Settings2,
   Sparkles,
   Sprout,
+  Smartphone,
+  Crop,
   Undo2,
   Volume2,
   VolumeX,
@@ -29,6 +31,8 @@ import {
 import { WorldCanvas, type WorldCanvasHandle } from "./components/WorldCanvas";
 import { Modal } from "./components/Modal";
 import { SketchPad } from "./components/SketchPad";
+import { PhonePairing } from "./components/PhonePairing";
+import { PageAlignment } from "./components/PageAlignment";
 import { PaperUpdate } from "./components/PaperUpdate";
 import type { PaperProposal } from "../shared/amendments";
 import { readDrawingFile } from "./lib/drawing-file";
@@ -72,6 +76,8 @@ type Dialog =
   | "settings"
   | "editor"
   | "paper"
+  | "phone"
+  | "align"
   | null;
 const storageKey = "doodlume.worlds.v1";
 function savedWorlds(): SavedWorld[] {
@@ -146,6 +152,8 @@ export default function App() {
   >();
   const [tracedAdditions, setTracedAdditions] = useState<WorldEntity[]>([]);
   const [revisedPage, setRevisedPage] = useState<string | undefined>();
+  const [pendingPhoto, setPendingPhoto] = useState<string | undefined>();
+  const [pendingPhotoName, setPendingPhotoName] = useState("Your drawing");
   const [history, setHistory] = useState<RevisionCheckpoint[]>([]);
   const worldNow = useRef(world);
   worldNow.current = world;
@@ -384,7 +392,9 @@ export default function App() {
     if (!selected) return;
     setError("");
     try {
-      useSource(await readDrawingFile(selected), selected.name);
+      setPendingPhoto(await readDrawingFile(selected));
+      setPendingPhotoName(selected.name);
+      setDialog("align");
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "This image could not be opened.",
@@ -582,6 +592,29 @@ export default function App() {
                 hidden
                 onChange={upload}
               />
+            </div>
+            <div className="capture-source-actions">
+              <button
+                className="text-button"
+                disabled={busy}
+                onClick={() => setDialog("phone")}
+              >
+                <Smartphone size={15} />
+                Use phone camera
+              </button>
+              {customSource && (
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => {
+                    setPendingPhoto(source);
+                    setDialog("align");
+                  }}
+                >
+                  <Crop size={15} />
+                  Align page
+                </button>
+              )}
             </div>
             <div className="paper-divider" />
             <label className="intent-label" htmlFor="world-intent">
@@ -1038,6 +1071,30 @@ export default function App() {
           </>
         )}
       </div>
+      {dialog === "phone" && (
+        <PhonePairing
+          context={{ purpose: "create", name: "A new Doodlume world" }}
+          onClose={() => setDialog(null)}
+          onReceive={(image) => {
+            setPendingPhoto(image);
+            setPendingPhotoName("Your phone drawing");
+            setDialog("align");
+          }}
+        />
+      )}
+      {dialog === "align" && pendingPhoto && (
+        <PageAlignment
+          image={pendingPhoto}
+          onClose={() => {
+            setPendingPhoto(undefined);
+            setDialog(null);
+          }}
+          onUse={(image) => {
+            setPendingPhoto(undefined);
+            useSource(image, pendingPhotoName);
+          }}
+        />
+      )}
       {dialog === "sketch" && (
         <SketchPad
           onClose={() => setDialog(null)}

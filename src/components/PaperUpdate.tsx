@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, ImagePlus, LoaderCircle, Pencil, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  ImagePlus,
+  LoaderCircle,
+  Pencil,
+  Smartphone,
+  Crop,
+  X,
+} from "lucide-react";
 import { Modal } from "./Modal";
+import { PhonePairing } from "./PhonePairing";
+import { PageAlignment } from "./PageAlignment";
 import { SketchPad } from "./SketchPad";
 import { readDrawingFile } from "../lib/drawing-file";
 import type { InkMark } from "../lib/ink";
@@ -32,6 +42,8 @@ export function PaperUpdate({
   const [kind, setKind] = useState<EntityKind>(initialKind ?? "bridge");
   const [intent, setIntent] = useState("");
   const [drawing, setDrawing] = useState(false);
+  const [phone, setPhone] = useState(false);
+  const [aligning, setAligning] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const file = useRef<HTMLInputElement>(null);
@@ -115,8 +127,7 @@ export function PaperUpdate({
             if (chosen)
               void readDrawingFile(chosen)
                 .then((value) => {
-                  setImage(value);
-                  setMark(undefined);
+                  setAligning(value);
                   setError("");
                 })
                 .catch((e) => setError(e.message));
@@ -139,6 +150,24 @@ export function PaperUpdate({
             <ImagePlus size={16} />
             Upload revised page
           </button>
+          <button
+            className="secondary-button"
+            disabled={busy}
+            onClick={() => setPhone(true)}
+          >
+            <Smartphone size={16} />
+            Use phone camera
+          </button>
+          {image && !mark && (
+            <button
+              className="text-button"
+              disabled={busy}
+              onClick={() => setAligning(image)}
+            >
+              <Crop size={15} />
+              Align revised page
+            </button>
+          )}
         </div>
         {mark && (
           <label className="paper-intent">
@@ -232,6 +261,44 @@ export function PaperUpdate({
           </div>
         )}
       </Modal>
+      {phone && (
+        <PhonePairing
+          context={{
+            purpose: "update",
+            name: world.name,
+            worldId: world.id,
+            revision: world.revision,
+          }}
+          onClose={() => setPhone(false)}
+          onReceive={(value, binding) => {
+            if (
+              binding.worldId !== world.id ||
+              binding.revision !== world.revision
+            ) {
+              setError(
+                "This capture belongs to an earlier world version. Start a fresh connection.",
+              );
+              setPhone(false);
+              return;
+            }
+            setPhone(false);
+            setAligning(value);
+          }}
+        />
+      )}
+      {aligning && (
+        <PageAlignment
+          image={aligning}
+          referenceImage={world.sourceImage}
+          onClose={() => setAligning(undefined)}
+          onUse={(value) => {
+            setImage(value);
+            setMark(undefined);
+            setAligning(undefined);
+            setError("");
+          }}
+        />
+      )}
       {drawing && (
         <SketchPad
           initialImage={world.sourceImage}
