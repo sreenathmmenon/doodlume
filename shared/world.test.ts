@@ -6,6 +6,11 @@ import { EXAMPLES, freshExample } from "../src/lib/examples.js";
 test("all three authored worlds satisfy the same world contract", () => {
   for (const example of EXAMPLES)
     assert.equal(validateWorld(example).id, example.id);
+  const first = freshExample(EXAMPLES[0].id);
+  const second = freshExample(EXAMPLES[0].id);
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.exampleId, EXAMPLES[0].id);
+  assert.equal(validateWorld(first).id, first.id);
 });
 
 test("ambiguous object IDs and missing gate targets cannot enter the engine", () => {

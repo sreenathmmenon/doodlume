@@ -9,6 +9,7 @@ import type { PlayState, WorldDefinition } from "../../shared/world";
 
 export interface WorldCanvasHandle {
   snapshot: () => PlayState | undefined;
+  explore: () => PlayState | undefined;
   touch: (key: keyof WorldControls, value: boolean) => void;
 }
 interface Props {
@@ -32,6 +33,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       ref,
       () => ({
         snapshot: () => scene.current?.snapshot(),
+        explore: () => scene.current?.continueExploring(),
         touch: (key, value) => {
           if (scene.current) scene.current.controls[key] = value;
         },
@@ -59,7 +61,12 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       scene.current = current;
       let game: Phaser.Game | undefined;
       const resize = new ResizeObserver(([entry]) => {
-        if (!active || entry.contentRect.width < 2 || entry.contentRect.height < 2) return;
+        if (
+          !active ||
+          entry.contentRect.width < 2 ||
+          entry.contentRect.height < 2
+        )
+          return;
         // Dialog children mount before showModal gives their host a size.
         // Wait for a real layout before allocating the renderer framebuffer.
         if (!game) {
@@ -75,7 +82,10 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               default: "arcade",
               arcade: { gravity: { x: 0, y: 1450 }, debug: false },
             },
-            scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+            scale: {
+              mode: Phaser.Scale.RESIZE,
+              autoCenter: Phaser.Scale.CENTER_BOTH,
+            },
             scene: current,
             audio: { noAudio: true },
             render: { roundPixels: true },
@@ -106,7 +116,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         aria-label="Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."
         role="application"
         tabIndex={0}
-        onPointerDown={(event) => event.currentTarget.focus({ preventScroll: true })}
+        onPointerDown={(event) =>
+          event.currentTarget.focus({ preventScroll: true })
+        }
       />
     );
   },

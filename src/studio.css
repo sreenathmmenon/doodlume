@@ -934,3 +934,106 @@ select {
   line-height: 1.6;
   margin-top: 14px;
 }
+
+/* Portable ownership without automatic retention/deletion. */
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+}
+.library-actions .secondary-button {
+  min-height: 44px;
+}
+.library-error {
+  color: #8d302d;
+  background: #fbeee8;
+  border: 1px solid #e5c9bc;
+  padding: 12px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.library-notice {
+  color: #294e39;
+  background: #eaf0e2;
+  border: 1px solid #cddabf;
+  padding: 12px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.library-import {
+  padding: 16px;
+  border: 1px solid #cad6bf;
+  background: #f1f4e9;
+  border-radius: 10px;
+  margin: 16px 0;
+}
+.library-import h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.library-import p {
+  line-height: 1.5;
+  color: #4e614f;
+}
+.library-import label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  line-height: 1.5;
+}
+.library-import input {
+  width: 18px;
+  height: 18px;
+  accent-color: #345b45;
+}
+.saved-world-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.saved-worlds .saved-world-row .saved-world-open {
+  display: flex;
+  gap: 12px;
+  border: 1px solid #e0e5d7;
+  padding: 10px;
+  border-radius: 10px;
+  text-align: left;
+  align-items: center;
+  background: #f5f6ec;
+  flex: 1;
+  min-width: 0;
+}
+.saved-worlds .saved-world-open:hover {
+  background: #ebefe1;
+}
+.saved-worlds .saved-world-row .saved-world-backup {
+  flex: 0 0 44px;
+  width: 44px;
+  padding: 10px;
+  justify-content: center;
+  color: #41583e;
+}
+.saved-world-open span {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+.saved-world-open img {
+  flex: 0 0 64px;
+}
+.modal .saved-world-open small {
+  color: #596551;
+  line-height: 1.5;
+}
+.saved-world-open strong {
+  overflow-wrap: anywhere;
+}
+.studio-v2 .completion-overlay > div:last-child {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 640px;
+}

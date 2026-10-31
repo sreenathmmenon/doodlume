@@ -41,6 +41,7 @@ import { readDrawingFile } from "./lib/drawing-file";
 import { WorldEditor } from "./components/WorldEditor";
 import { ArtworkReview } from "./components/ArtworkReview";
 import { setupFeedback } from "../shared/setup";
+import { WorldLibrary } from "./components/WorldLibrary";
 import { WorldSetup } from "./components/WorldSetup";
 import {
   updateLibrary,
@@ -56,6 +57,7 @@ import {
 import { EXAMPLES, freshExample } from "./lib/examples";
 import {
   emptyPlayState,
+  continueExploration,
   retainPlayState,
   validateWorld,
   type PlayState,
@@ -102,6 +104,7 @@ const initialMetrics: WorldTelemetry = {
   collected: 0,
   total: 0,
   completed: false,
+  exploring: false,
   nearLever: false,
   playerX: 0,
   playerY: 0,
@@ -126,6 +129,7 @@ export default function App() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [saved, setSaved] = useState(savedWorlds);
   const [saving, setSaving] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
   const [connection, setConnection] = useState<Connection | null>(null);
   const [connectionError, setConnectionError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -175,7 +179,10 @@ export default function App() {
         if (active) setSaved(entries);
       })
       .catch(() => {
-        /* Legacy saves remain available; a save failure is shown on action. */
+        if (active)
+          setLibraryError(
+            "Saved worlds could not be loaded. Stored data has not been removed.",
+          );
       });
     return () => {
       active = false;
@@ -224,8 +231,8 @@ export default function App() {
       document.removeEventListener("visibilitychange", pauseIfHidden);
   }, []);
   useEffect(() => {
-    if (metrics.completed) setPlaying(false);
-  }, [metrics.completed]);
+    if (metrics.completed && !metrics.exploring) setPlaying(false);
+  }, [metrics.completed, metrics.exploring]);
 
   function tell(message: string) {
     setNotice(message);
@@ -258,6 +265,7 @@ export default function App() {
       collected: state.collected.length,
       total: next.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
+      exploring: Boolean(state.exploring),
     });
     setRun((n) => n + 1);
     setStarted(false);
@@ -266,15 +274,30 @@ export default function App() {
     setError("");
     previousPlaying.current = false;
   }
+  function editableState() {
+    const state = canvas.current?.snapshot() ?? latestState.current;
+    if (!state.completed || state.exploring) return state;
+    const next = canvas.current?.explore() ?? continueExploration(state);
+    latestState.current = next;
+    setInitial(next);
+    setMetrics((m) => ({ ...m, exploring: true }));
+    return next;
+  }
+  function continueWorld(build = false) {
+    editableState();
+    setStarted(true);
+    if (build) openEditor();
+    else start();
+  }
   function openEditor() {
     setPaperProposal(undefined);
     setRevisedPage(undefined);
     setTracedAdditions([]);
-    setEditorState(canvas.current?.snapshot() ?? latestState.current);
+    setEditorState(editableState());
     setDialog("editor");
   }
   function openPaper() {
-    setEditorState(canvas.current?.snapshot() ?? latestState.current);
+    setEditorState(editableState());
     setPaperProposal(undefined);
     setRevisedPage(undefined);
     setTracedAdditions([]);
@@ -298,12 +321,13 @@ export default function App() {
       collected: state.collected.length,
       total: next.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
+      exploring: Boolean(state.exploring),
     });
     setRun((n) => n + 1);
     setStarted(true);
     previousPlaying.current = false;
     setDialog(null);
-    setPlaying(!state.completed);
+    setPlaying(!state.completed || Boolean(state.exploring));
     setError("");
     requestAnimationFrame(() => {
       stage.current?.scrollIntoView({
@@ -321,7 +345,10 @@ export default function App() {
     const result = applyWorldPatch(worldNow.current, editorState, patch);
     setHistory((items) => [...items, result.checkpoint].slice(-12));
     keepRevision(result.world, result.state);
-    if (patch.bounds) { tell("World expanded. Your progress is kept."); return; }
+    if (patch.bounds) {
+      tell("World expanded. Your progress is kept.");
+      return;
+    }
     tell(
       `${patch.additions.length === 1 ? "A new possibility" : `${patch.additions.length} new possibilities`}. Same little world. Your progress stayed with you.`,
     );
@@ -730,7 +757,7 @@ export default function App() {
                   className="secondary-button edit-world-button paper-update-button"
                   aria-label="Update this world's drawing"
                   onClick={openPaper}
-                  disabled={busy || metrics.completed}
+                  disabled={busy}
                 >
                   <ImagePlus size={16} />
                   <span>Update page</span>
@@ -739,7 +766,7 @@ export default function App() {
                   className="secondary-button edit-world-button"
                   aria-label="Keep creating in this world"
                   onClick={openEditor}
-                  disabled={busy || metrics.completed}
+                  disabled={busy}
                 >
                   <Pencil size={15} />
                   <span>Edit world</span>
@@ -806,27 +833,39 @@ export default function App() {
                   </span>
                 </div>
               )}
-              {!playing && !metrics.completed && !busy && (
-                <div
-                  className={`play-overlay ${started ? "paused-overlay" : ""}`}
-                >
-                  <button
-                    className="play-orb"
-                    onClick={start}
-                    aria-label={started ? "Resume adventure" : "Play adventure"}
+              {!playing &&
+                (!metrics.completed || metrics.exploring) &&
+                !busy && (
+                  <div
+                    className={`play-overlay ${started ? "paused-overlay" : ""}`}
                   >
-                    <Play size={27} fill="currentColor" />
-                  </button>
+                    <button
+                      className="play-orb"
+                      onClick={start}
+                      aria-label={
+                        metrics.exploring
+                          ? "Continue exploring"
+                          : started
+                            ? "Resume adventure"
+                            : "Play adventure"
+                      }
+                    >
+                      <Play size={27} fill="currentColor" />
+                    </button>
 
-                  <span className="play-caption">
-                    {started ? "Adventure paused." : world.name}
-                  </span>
-                  <span className="play-subcaption">
-                    {started ? "Your progress is kept." : world.description}
-                  </span>
-                </div>
-              )}
-              {metrics.completed && (
+                    <span className="play-caption">
+                      {started ? "Adventure paused." : world.name}
+                    </span>
+                    <span className="play-subcaption">
+                      {metrics.exploring
+                        ? "Achievement kept. Keep exploring or build something new."
+                        : started
+                          ? "Your progress is kept."
+                          : world.description}
+                    </span>
+                  </div>
+                )}
+              {metrics.completed && !metrics.exploring && (
                 <div className="completion-overlay">
                   <div className="completion-icon">
                     <Sparkles size={25} />
@@ -839,8 +878,20 @@ export default function App() {
                       : "A world made yours."}
                   </p>
                   <div>
-                    <button className="primary-button" onClick={restart}>
-                      Play again <RotateCcw size={16} />
+                    <button
+                      className="primary-button"
+                      onClick={() => continueWorld(true)}
+                    >
+                      Continue building <Pencil size={16} />
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => continueWorld()}
+                    >
+                      Keep exploring <Play size={16} />
+                    </button>
+                    <button className="text-button" onClick={restart}>
+                      Replay from start <RotateCcw size={16} />
                     </button>
                     <button
                       className="text-button"
@@ -866,21 +917,23 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {playing && !metrics.completed && (
+              {playing && (!metrics.completed || metrics.exploring) && (
                 <div className="quest-hud">
                   <span>NEXT</span>
                   <strong>
-                    {metrics.collected < metrics.total
-                      ? `Collect · ${metrics.total - metrics.collected} remaining`
-                      : world.entities.some(
-                            (e) =>
-                              e.kind === "lever" &&
-                              !latestState.current.activated.includes(e.id),
-                          )
-                        ? "Use the switch · E"
-                        : world.entities.find((e) => e.kind === "goal")?.label
-                          ? `Reach ${world.entities.find((e) => e.kind === "goal")!.label}`
-                          : "Explore your world"}
+                    {metrics.exploring
+                      ? "Explore · achievement kept"
+                      : metrics.collected < metrics.total
+                        ? `Collect · ${metrics.total - metrics.collected} remaining`
+                        : world.entities.some(
+                              (e) =>
+                                e.kind === "lever" &&
+                                !latestState.current.activated.includes(e.id),
+                            )
+                          ? "Use the switch · E"
+                          : world.entities.find((e) => e.kind === "goal")?.label
+                            ? `Reach ${world.entities.find((e) => e.kind === "goal")!.label}`
+                            : "Explore your world"}
                   </strong>
                 </div>
               )}
@@ -890,7 +943,7 @@ export default function App() {
                 <button
                   className="icon-button play-control"
                   aria-label={playing ? "Pause adventure" : "Resume adventure"}
-                  disabled={metrics.completed || busy}
+                  disabled={(metrics.completed && !metrics.exploring) || busy}
                   onClick={() => (playing ? setPlaying(false) : start())}
                 >
                   {playing ? (
@@ -1007,7 +1060,7 @@ export default function App() {
             {EXAMPLES.map((example, i) => (
               <button
                 key={example.id}
-                className={`example-card example-${example.theme} ${world.id === example.id ? "selected" : ""}`}
+                className={`example-card example-${example.theme} ${(world.exampleId ?? world.id) === example.id ? "selected" : ""}`}
                 disabled={busy}
                 onClick={() => {
                   loadWorld(freshExample(example.id));
@@ -1027,7 +1080,7 @@ export default function App() {
                   />
                   <img className="mini-seed" src="/art/seed.svg" alt="" />
                   <span className="example-open">
-                    {world.id === example.id ? (
+                    {(world.exampleId ?? world.id) === example.id ? (
                       <Check size={16} />
                     ) : (
                       <ArrowUpRight size={17} />
@@ -1249,47 +1302,38 @@ export default function App() {
         />
       )}
       {dialog === "worlds" && (
-        <Modal title="Your worlds" onClose={() => setDialog(null)}>
-          <p className="modal-copy">
-            Saved in this browser, with your adventure right where you left it.
-          </p>
-          {saved.length ? (
-            <div className="saved-worlds">
-              {saved.map((entry) => (
-                <button
-                  key={entry.world.id}
-                  onClick={() => {
-                    loadWorld(
-                      entry.world,
-                      retainPlayState(entry.world, entry.state),
-                      entry.history ?? [],
-                    );
-                    setDialog(null);
-                  }}
-                >
-                  <img src={entry.world.sourceImage} alt="" />
-                  <span>
-                    <strong>{entry.world.name}</strong>
-                    <small>
-                      {entry.state.collected.length} items found ·{" "}
-                      {new Date(entry.savedAt).toLocaleDateString()}
-                    </small>
-                  </span>
-                  <ChevronRight size={18} />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-worlds">
-              <FolderHeart size={38} strokeWidth={1.2} />
-              <h3>A home for your imagination.</h3>
-              <p>
-                Play a little, then use the save button beside your world’s
-                name. Your first world will be waiting here.
-              </p>
-            </div>
-          )}
-        </Modal>
+        <WorldLibrary
+          entries={saved}
+          loadError={libraryError}
+          onRetry={() => {
+            void updateLibrary(savedWorlds())
+              .then((entries) => {
+                setSaved(entries);
+                setLibraryError("");
+              })
+              .catch(() =>
+                setLibraryError(
+                  "Storage is still unavailable. Your stored worlds have not been removed.",
+                ),
+              );
+          }}
+          getCurrent={() => ({
+            world,
+            state: canvas.current?.snapshot() ?? latestState.current,
+            history,
+            savedAt: new Date().toISOString(),
+          })}
+          onOpen={(entry) => {
+            loadWorld(
+              entry.world,
+              retainPlayState(entry.world, entry.state),
+              entry.history ?? [],
+            );
+            setDialog(null);
+          }}
+          onImport={setSaved}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog === "settings" && (
         <Modal title="Studio settings" onClose={() => setDialog(null)}>

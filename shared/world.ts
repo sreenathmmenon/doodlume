@@ -40,6 +40,7 @@ export interface WorldDefinition {
   width: number;
   height: number;
   source: "example" | "meta" | "manual";
+  exampleId?: string;
   inputKind?: InputKind;
   sourceImage: string;
   entities: WorldEntity[];
@@ -53,6 +54,7 @@ export interface PlayState {
   collected: string[];
   activated: string[];
   completed: boolean;
+  exploring?: boolean;
 }
 
 export const emptyPlayState = (): PlayState => ({
@@ -70,6 +72,9 @@ export function validateWorld(value: unknown): WorldDefinition {
     typeof w.id !== "string" ||
     !/^[\w-]{1,80}$/.test(w.id) ||
     !["example", "meta", "manual"].includes(w.source) ||
+    (w.exampleId !== undefined &&
+      (typeof w.exampleId !== "string" ||
+        !/^[\w-]{1,80}$/.test(w.exampleId))) ||
     (w.inputKind !== undefined &&
       !["drawing", "picture"].includes(w.inputKind)) ||
     typeof w.description !== "string" ||
@@ -89,8 +94,12 @@ export function validateWorld(value: unknown): WorldDefinition {
   if (!["grove", "moon", "sunset"].includes(w.theme))
     throw new Error("Unsupported world palette.");
   if (
-    !Number.isInteger(w.width) || w.width < 1440 || w.width > 12000 ||
-    !Number.isInteger(w.height) || w.height < 820 || w.height > 5000 ||
+    !Number.isInteger(w.width) ||
+    w.width < 1440 ||
+    w.width > 12000 ||
+    !Number.isInteger(w.height) ||
+    w.height < 820 ||
+    w.height > 5000 ||
     !Array.isArray(w.entities) ||
     w.entities.length > 160
   )
@@ -195,4 +204,9 @@ export function retainPlayState(
     collected: state.collected.filter((id) => ids.has(id)),
     activated: state.activated.filter((id) => ids.has(id)),
   };
+}
+
+/** Continue the earned world without clearing its completed achievement or discoveries. */
+export function continueExploration(state: PlayState): PlayState {
+  return { ...structuredClone(state), exploring: true };
 }

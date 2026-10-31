@@ -208,5 +208,10 @@ export const EXAMPLES: WorldDefinition[] = [
 ];
 
 export function freshExample(id: string): WorldDefinition {
-  return structuredClone(EXAMPLES.find((w) => w.id === id) ?? EXAMPLES[0]);
+  const template = EXAMPLES.find((w) => w.id === id) ?? EXAMPLES[0];
+  return {
+    ...structuredClone(template),
+    id: crypto.randomUUID(),
+    exampleId: template.id,
+  };
 }

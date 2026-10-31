@@ -12,6 +12,7 @@ export interface WorldTelemetry {
   collected: number;
   total: number;
   completed: boolean;
+  exploring: boolean;
   nearLever: boolean;
   playerX: number;
   playerY: number;
@@ -143,8 +144,17 @@ export class WorldScene extends Phaser.Scene {
 
   create() {
     this.state = structuredClone(this.initial);
-    this.physics.world.setBounds(0, -200, this.definition.width, this.definition.height + 400);
-    this.updateAtmosphere = createAtmosphere(this, this.definition.theme, this.reducedMotion);
+    this.physics.world.setBounds(
+      0,
+      -200,
+      this.definition.width,
+      this.definition.height + 400,
+    );
+    this.updateAtmosphere = createAtmosphere(
+      this,
+      this.definition.theme,
+      this.reducedMotion,
+    );
     const terrain = this.physics.add.staticGroup();
     for (const e of this.definition.entities) {
       if (e.kind === "terrain" || e.kind === "bridge") {
@@ -644,19 +654,37 @@ export class WorldScene extends Phaser.Scene {
     if (!this.player) return;
     const camera = this.cameras.main;
     if (overview || this.reducedMotion) {
-      camera.removeBounds().setZoom(Math.min(camera.width / this.definition.width, camera.height / this.definition.height));
+      camera
+        .removeBounds()
+        .setZoom(
+          Math.min(
+            camera.width / this.definition.width,
+            camera.height / this.definition.height,
+          ),
+        );
       camera.centerOn(this.definition.width / 2, this.definition.height / 2);
       return;
     }
-    camera.setZoom(Math.max(width / (width < 600 ? 720 : 1280), camera.height / this.definition.height));
+    camera.setZoom(
+      Math.max(
+        width / (width < 600 ? 720 : 1280),
+        camera.height / this.definition.height,
+      ),
+    );
     camera.setBounds(0, 0, this.definition.width, this.definition.height);
-    const target = camera.getScroll(this.player.x, this.player.y + this.heroHeight / 2 + 100 - camera.displayHeight / 2);
+    const target = camera.getScroll(
+      this.player.x,
+      this.player.y + this.heroHeight / 2 + 100 - camera.displayHeight / 2,
+    );
     camera.setScroll(target.x, target.y);
   }
 
   setPlaying(playing: boolean) {
     this.isPlaying = playing;
-    this.soundtrack.setState(playing || this.state.completed, this.muted);
+    this.soundtrack.setState(
+      playing || (this.state.completed && !this.state.exploring),
+      this.muted,
+    );
     if (!this.physics?.world) return;
     playing ? this.physics.world.resume() : this.physics.world.pause();
     if (!playing) {
@@ -675,7 +703,15 @@ export class WorldScene extends Phaser.Scene {
   }
   setMuted(muted: boolean) {
     this.muted = muted;
-    this.soundtrack.setState(this.isPlaying || this.state.completed, muted);
+    this.soundtrack.setState(
+      this.isPlaying || (this.state.completed && !this.state.exploring),
+      muted,
+    );
+  }
+  continueExploring(): PlayState {
+    this.state.exploring = true;
+    this.report();
+    return this.snapshot();
   }
   snapshot(): PlayState {
     return {
@@ -711,6 +747,7 @@ export class WorldScene extends Phaser.Scene {
       collected: state.collected.length,
       total: this.definition.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
+      exploring: Boolean(state.exploring),
       nearLever: nearby,
       playerX: this.player.x,
       playerY: this.player.y,
@@ -795,7 +832,11 @@ export class WorldScene extends Phaser.Scene {
       if (lever) this.openLever(lever.entity.id);
     }
     this.previousTouchInteract = this.controls.interact;
-    this.player.x = Phaser.Math.Clamp(this.player.x, 25, this.definition.width - 25);
+    this.player.x = Phaser.Math.Clamp(
+      this.player.x,
+      25,
+      this.definition.width - 25,
+    );
     if (this.player.y > this.definition.height + 110) {
       this.player.setPosition(this.spawn.x, this.spawn.y);
       body.setVelocity(0);

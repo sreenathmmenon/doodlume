@@ -31,3 +31,18 @@ The first review exposed a zero-size dialog canvas; rendering now waits for a no
 A later browser repeat of clockwork crossing was rejected for unclear object geometry despite its earlier successful request. Recognition is not yet consistent across repeated complex drawings. The first-light drawing succeeded both in the input trial and the completed browser playthrough; these results should not be presented as a general success rate.
 
 After the renderer fix, a fresh real first-light generation displayed its complete world in the review dialog. Reloading the library preserved the earlier completed model world, its collected star and revision 3; the original saved grove remained alongside it. The final staged scan also checked configured Modal token values and the generated browser build.
+
+
+## Quality repair pair 1 — saved work and continued authorship
+
+Loading, migrating and saving no longer prune worlds beyond eight. IndexedDB saves take precedence over the retained localStorage migration backup. Fresh authored examples receive separate world identities, preventing a new attempt from overwriting an edited save. Atomic write failures report an error; the open world remains available for backup. A forced storage-quota/interrupted-write browser trial remains outstanding.
+
+My worlds now exports the open world, an individual save or the library as a versioned JSON backup containing source artwork, progress and undo history. Imports validate the entire file before writing, preserve existing IDs by default, and offer explicit independent copies with remapped history identities. The portable file is limited to 64 MB; this is not cloud sync.
+
+Completion offers Continue building, Keep exploring and Replay from start. Building/exploration preserve the completed achievement, used levers, collected items and character state. Goal overlap does not replay the completion overlay. Only an explicit replay starts a fresh attempt. Continued state survives world revisions, undo, save and reopen.
+
+Browser verification used an isolated loopback origin and clearly labelled authored QA fixtures, not model-generated results. Twelve worlds survived import and reload; a malformed twelve-world backup was rejected without changing the library; importing an existing backup showed all twelve conflicts and disabled the zero-new-world action. A single-world copy import produced a thirteenth independent save. An actual downloaded library backup validated with all twelve original IDs and its saved history.
+
+A completed QA world at its goal continued into the editor, expanded from 2,880 to 4,320 units at revision 3, resumed without a repeated completion overlay, collected another item through keyboard movement, paused and saved. Its downloaded backup retained two collected IDs, the activated lever, completed/exploring flags, character position and two undo checkpoints. Reload/reopen retained these; undo advanced to revision 4 while keeping later collected progress. Explicit replay reset the attempt to zero items while preserving world/history. A 390 × 844 viewport check covers the backup controls and library layout; it does not establish physical-phone usability.
+
+Two focused regression tests bring the suite to 22. They cover retention, migration precedence, conflict-safe import/copy, malformed backups and immutable earned-state continuation. Production build and type checking pass. Original council scores remain a historical baseline: these repairs do not establish a 10/10 rating, broad recognition reliability, device performance or emotional engagement.
