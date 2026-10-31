@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import type { WorldDefinition } from "../../shared/world";
+import { atmosphereLayout } from "./atmosphere-layout";
 
 // Authored procedural scenery: the player's source artwork remains the foreground.
 const themes = {
@@ -35,7 +36,10 @@ export function createAtmosphere(
   reduced: boolean,
 ) {
   const p = themes[theme];
-  const layers: { object: Phaser.GameObjects.TileSprite | Phaser.GameObjects.Image; scroll: number }[] = [];
+  const layers: {
+    object: Phaser.GameObjects.TileSprite | Phaser.GameObjects.Image;
+    scroll: number;
+  }[] = [];
   let seed = 28371;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
@@ -50,9 +54,16 @@ export function createAtmosphere(
     const t = scene.textures.createCanvas(key, 1440, 820)!;
     draw(t.context);
     t.refresh();
-    const object = (key === "atmosphere-frame" || key === "atmosphere-vignette")
-      ? scene.add.image(720, 410, key)
-      : scene.add.tileSprite(720, 410, 1440, 820, key);
+    const object =
+      key === "atmosphere-frame" || key === "atmosphere-vignette"
+        ? scene.add.image(720, 410, key)
+        : scene.add.tileSprite(
+            scene.cameras.main.width / 2,
+            scene.cameras.main.height / 2,
+            Math.ceil(scene.cameras.main.width),
+            Math.ceil(scene.cameras.main.height),
+            key,
+          );
     object.setDepth(depth).setScrollFactor(0);
     layers.push({ object, scroll });
     return object;
@@ -265,17 +276,23 @@ export function createAtmosphere(
       });
     }
   return () => {
-    const camera = scene.cameras.main, w = camera.displayWidth, h = camera.displayHeight;
-    for (const {object, scroll} of layers) {
+    const camera = scene.cameras.main;
+    const layout = atmosphereLayout(camera.width, camera.height, camera.zoom);
+    for (const { object, scroll } of layers) {
       object.setPosition(camera.width / 2, camera.height / 2);
       if (object instanceof Phaser.GameObjects.TileSprite) {
-        if (object.width !== w || object.height !== h) object.setSize(w, h);
-        const scale = Math.max(w / 1440, h / 820);
-        object.setTileScale(scale);
-        object.tilePositionX = camera.scrollX * scroll;
-        object.tilePositionY = camera.scrollY * scroll * .15;
-      } else object.setDisplaySize(w, h);
+        // TileSprite keeps an internal canvas even with WebGL. Its local size
+        // must stay in screen pixels; inverse zoom covers the same world view.
+        if (
+          object.width !== layout.canvasWidth ||
+          object.height !== layout.canvasHeight
+        )
+          object.setSize(layout.canvasWidth, layout.canvasHeight);
+        object.setScale(layout.inverseZoom);
+        object.setTileScale(layout.textureScale);
+        object.tilePositionX = camera.scrollX * scroll * camera.zoom;
+        object.tilePositionY = camera.scrollY * scroll * camera.zoom * 0.15;
+      } else object.setDisplaySize(layout.displayWidth, layout.displayHeight);
     }
   };
-
 }

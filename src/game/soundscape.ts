@@ -104,6 +104,25 @@ export class Soundscape {
       );
   }
   close() {
-    void this.context?.close().catch(() => {});
+    const context = this.context;
+    const master = this.master;
+    // Both scene shutdown and destruction can run. Release ownership before
+    // closing so disposal is idempotent and a later scene restart can reopen.
+    this.context = undefined;
+    this.master = undefined;
+    this.active = false;
+    this.muted = true;
+    this.lastPhrase = -1;
+    try {
+      master?.disconnect();
+    } catch {
+      /* Already disconnected. */
+    }
+    try {
+      if (context && context.state !== "closed")
+        void context.close().catch(() => {});
+    } catch {
+      // Browser audio may already be unavailable during page teardown.
+    }
   }
 }

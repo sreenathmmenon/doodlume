@@ -4,12 +4,17 @@ import { config } from "dotenv";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { interpretDrawing, InterpretationError } from "./interpret.js";
+import {
+  interpretDrawing,
+  InterpretationError,
+  RecognitionReviewError,
+} from "./interpret.js";
 import { interpretAmendment } from "./amend.js";
 import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
 import { loadLocalProviderKeys } from "./credentials.js";
 import { segmentationConnection } from "./segmentation.js";
+import { installStudioFallback } from "./static-routing.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
@@ -135,6 +140,10 @@ for (const action of ["interpret", "amend"] as const)
         ),
       };
     } catch (error) {
+      if (error instanceof RecognitionReviewError)
+        return reply
+          .code(422)
+          .send({ error: error.message, recovery: error.recovery });
       if (error instanceof InterpretationError)
         return reply.code(error.status).send({ error: error.message });
       if (controller.signal.aborted)
@@ -172,12 +181,19 @@ app.setErrorHandler((error, _request, reply) => {
 const dist = resolve(root, "dist");
 installCapture(app, dist, port);
 if (existsSync(dist)) {
-  await app.register(fastifyStatic, { root: dist });
-  app.setNotFoundHandler((request, reply) =>
-    request.url.startsWith("/api/")
-      ? reply.code(404).send({ error: "Unknown studio action." })
-      : reply.sendFile("index.html"),
-  );
+  await app.register(fastifyStatic, {
+    root: dist,
+    preCompressed: true,
+    setHeaders(response, path) {
+      response.header(
+        "Cache-Control",
+        path.includes("/assets/")
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
+      );
+    },
+  });
+  installStudioFallback(app);
 }
 await app.listen({ host: "127.0.0.1", port });
 console.log(

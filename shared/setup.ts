@@ -3,16 +3,54 @@ import { validateWorld, type WorldDefinition } from "./world.js";
 export function setupFeedback(world: WorldDefinition) {
   const errors: string[] = [],
     warnings: string[] = [];
+  const characters = world.entities.filter((e) => e.kind === "player");
+  if (!characters.length)
+    errors.push(
+      "Choose one recognizable character in the original picture and give it the Character role.",
+    );
+  else if (characters.length > 1)
+    errors.push(
+      "Keep one Character. Change the other characters to Scenery, or remove those selections.",
+    );
+  if (!world.entities.some((e) => e.kind === "terrain" || e.kind === "bridge"))
+    errors.push(
+      "Mark a visible surface as Platform or Bridge, or add a platform to the game.",
+    );
+  for (const entity of world.entities) {
+    if (
+      entity.kind === "lever" &&
+      !world.entities.some(
+        (gate) => gate.kind === "gate" && gate.id === entity.targetId,
+      )
+    )
+      errors.push(
+        `Choose the gate opened by “${entity.label || "Switch"}” in its object settings, or change its role.`,
+      );
+  }
   try {
     validateWorld(world);
   } catch (e) {
-    errors.push(
-      e instanceof Error ? e.message : "Check the objects in this world.",
-    );
+    const message =
+      e instanceof Error ? e.message : "Check the objects in this world.";
+    // The actionable role/connection notes above replace the broad contract
+    // errors; every other schema failure remains a blocker.
+    if (
+      !(
+        [
+          "Choose one character and include some ground to stand on.",
+          "A lever needs a clear connection to a gate in this world.",
+        ].includes(message) && errors.length
+      )
+    )
+      errors.push(message);
   }
   if (world.entities.length > 160)
     errors.push("Keep this world to 160 objects or fewer.");
-  if (world.entities.some((e) => e.x + e.width > world.width || e.y + e.height > world.height))
+  if (
+    world.entities.some(
+      (e) => e.x + e.width > world.width || e.y + e.height > world.height,
+    )
+  )
     errors.push("Keep every object inside the game frame.");
   const hero = world.entities.find((e) => e.kind === "player");
   if (hero) {

@@ -9,10 +9,12 @@ import {
   ChevronRight,
   CircleHelp,
   FolderHeart,
+  Flag,
   ImagePlus,
   Layers3,
   LoaderCircle,
   Maximize2,
+  Map,
   Minimize2,
   Pause,
   Pencil,
@@ -43,6 +45,11 @@ import { ArtworkReview } from "./components/ArtworkReview";
 import { setupFeedback } from "../shared/setup";
 import { WorldLibrary } from "./components/WorldLibrary";
 import { SourceInspector } from "./components/SourceInspector";
+import { GoalRules } from "./components/GoalRules";
+import {
+  validateRecognitionReview,
+  type RecognitionReview,
+} from "../shared/recognition-review";
 import { WorldSetup } from "./components/WorldSetup";
 import {
   updateLibrary,
@@ -58,6 +65,7 @@ import {
 import { EXAMPLES, freshExample } from "./lib/examples";
 import {
   emptyPlayState,
+  goalProgress,
   continueExploration,
   retainPlayState,
   validateWorld,
@@ -81,6 +89,7 @@ type Connection = {
 type Dialog =
   | "create"
   | "source"
+  | "rules"
   | "review"
   | "sketch"
   | "worlds"
@@ -93,6 +102,14 @@ type Dialog =
   | "setup"
   | null;
 const storageKey = "doodlume.worlds.v1";
+function objectiveTelemetry(world: WorldDefinition, state: PlayState) {
+  const progress = goalProgress(world, state);
+  return {
+    goalHint: progress.hint,
+    requiredDone: progress.done,
+    requiredTotal: progress.total,
+  };
+}
 function savedWorlds(): SavedWorld[] {
   try {
     return validSavedWorlds(
@@ -107,6 +124,9 @@ const initialMetrics: WorldTelemetry = {
   total: 0,
   completed: false,
   exploring: false,
+  goalHint: "",
+  requiredDone: 0,
+  requiredTotal: 0,
   nearLever: false,
   playerX: 0,
   playerY: 0,
@@ -124,6 +144,7 @@ export default function App() {
   );
   const [playing, setPlaying] = useState(false);
   const [focusedPlay, setFocusedPlay] = useState(false);
+  const [mapView, setMapView] = useState(false);
   const [started, setStarted] = useState(false);
   const [muted, setMuted] = useState(true);
   const [run, setRun] = useState(0);
@@ -137,7 +158,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [worldError, setWorldError] = useState("");
   const [draft, setDraft] = useState<WorldDefinition | null>(null);
+  const [recognitionReview, setRecognitionReview] =
+    useState<RecognitionReview | null>(null);
+  const [setupEdits, setSetupEdits] = useState<WorldDefinition | null>(null);
   const [editorState, setEditorState] = useState<PlayState>(emptyPlayState);
   const [paperProposal, setPaperProposal] = useState<
     PaperProposal | undefined
@@ -155,6 +180,7 @@ export default function App() {
   const stage = useRef<HTMLDivElement>(null);
   const latestState = useRef<PlayState>(emptyPlayState());
   const request = useRef<AbortController | null>(null);
+  const sourceVersion = useRef(0);
   const previousPlaying = useRef(false);
   const draftFeedback = draft ? setupFeedback(draft) : null;
   useEffect(() => {
@@ -247,7 +273,13 @@ export default function App() {
     state = emptyPlayState(),
     checkpoints: RevisionCheckpoint[] = [],
   ) {
+    sourceVersion.current++;
     request.current?.abort();
+    request.current = null;
+    setRecognitionReview(null);
+    setSetupEdits(null);
+    setWorldError("");
+    setMapView(false);
     setBusy(false);
     setWorld(next);
     worldNow.current = next;
@@ -269,6 +301,7 @@ export default function App() {
       total: next.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
       exploring: Boolean(state.exploring),
+      ...objectiveTelemetry(next, state),
     });
     setRun((n) => n + 1);
     setStarted(false);
@@ -307,6 +340,7 @@ export default function App() {
     setDialog("paper");
   }
   function keepRevision(next: WorldDefinition, state: PlayState) {
+    setWorldError("");
     setSource(next.sourceImage);
     setInputKind(next.inputKind ?? "drawing");
     setSourceName(
@@ -325,6 +359,7 @@ export default function App() {
       total: next.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
       exploring: Boolean(state.exploring),
+      ...objectiveTelemetry(next, state),
     });
     setRun((n) => n + 1);
     setStarted(true);
@@ -348,6 +383,10 @@ export default function App() {
     const result = applyWorldPatch(worldNow.current, editorState, patch);
     setHistory((items) => [...items, result.checkpoint].slice(-12));
     keepRevision(result.world, result.state);
+    if (patch.goalRules) {
+      tell("Destination rules updated. Your progress is kept.");
+      return;
+    }
     if (patch.bounds) {
       tell("World expanded. Your progress is kept.");
       return;
@@ -384,6 +423,7 @@ export default function App() {
     }
   }
   function start() {
+    if (worldError) return;
     setStarted(true);
     setPlaying(true);
     stage.current?.scrollIntoView({
@@ -397,6 +437,7 @@ export default function App() {
       ?.focus({ preventScroll: true });
   }
   function restart() {
+    setWorldError("");
     setInitial(emptyPlayState());
     latestState.current = emptyPlayState();
     setMetrics({
@@ -434,11 +475,14 @@ export default function App() {
     const selected = e.target.files?.[0];
     e.target.value = "";
     if (!selected) return;
+    const version = ++sourceVersion.current;
     setError("");
     try {
       const image = await readDrawingFile(selected);
+      if (version !== sourceVersion.current) return;
       useSource(image, selected.name);
     } catch (e) {
+      if (version !== sourceVersion.current) return;
       setError(
         e instanceof Error ? e.message : "This image could not be opened.",
       );
@@ -449,6 +493,12 @@ export default function App() {
     name = "A drawing, made by you",
     kind = inputKind,
   ) {
+    sourceVersion.current++;
+    request.current?.abort();
+    request.current = null;
+    setBusy(false);
+    setRecognitionReview(null);
+    setSetupEdits(null);
     setSource(image);
     setInputKind(kind);
     setSourceName(name);
@@ -475,6 +525,7 @@ export default function App() {
       return;
     }
     const controller = new AbortController();
+    setSetupEdits(null);
     request.current = controller;
     setBusy(true);
     setPlaying(false);
@@ -487,11 +538,21 @@ export default function App() {
       });
       const result = await response.json();
       if (controller.signal.aborted || request.current !== controller) return;
+      if (!response.ok && result.recovery) {
+        const review = validateRecognitionReview(result.recovery);
+        setRecognitionReview(review);
+        setDialog("setup");
+        tell(
+          "Your recognized objects are kept for review. Correct the highlighted details before playing.",
+        );
+        return;
+      }
       if (!response.ok)
         throw new Error(
           result.error || "Your drawing could not be interpreted.",
         );
       setDraft(validateWorld(result.world));
+      setRecognitionReview(null);
       tell(
         "Your drawing has a first interpretation. Preview it before you play.",
       );
@@ -538,6 +599,8 @@ export default function App() {
           onClick={() => {
             setInputKind("drawing");
             setDraft(null);
+            setRecognitionReview(null);
+            setSetupEdits(null);
           }}
         >
           Drawing
@@ -548,6 +611,8 @@ export default function App() {
           onClick={() => {
             setInputKind("picture");
             setDraft(null);
+            setRecognitionReview(null);
+            setSetupEdits(null);
           }}
         >
           Photo
@@ -678,7 +743,13 @@ export default function App() {
           onClick={() => setDialog("setup")}
         >
           <Pencil size={16} />
-          {draft ? "Edit objects" : "Design it myself"}
+          {setupEdits
+            ? "Continue arranging objects"
+            : recognitionReview
+              ? "Repair recognized objects"
+              : draft
+                ? "Edit objects"
+                : "Design it myself"}
         </button>
       )}
     </aside>
@@ -786,6 +857,20 @@ export default function App() {
                 </button>
                 <button
                   className="icon-button"
+                  aria-label="Set destination rules"
+                  title="Destination rules"
+                  disabled={busy}
+                  onClick={() => {
+                    setEditorState(
+                      canvas.current?.snapshot() ?? latestState.current,
+                    );
+                    setDialog("rules");
+                  }}
+                >
+                  <Flag size={17} />
+                </button>
+                <button
+                  className="icon-button"
                   aria-label="Undo last world edit"
                   title="Undo last world edit"
                   onClick={undoEdit}
@@ -814,10 +899,36 @@ export default function App() {
                 </span>
               </div>
             )}
+            {worldError && (
+              <div className="world-error" role="alert">
+                <p>{worldError}</p>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setWorldError("");
+                    setRun((n) => n + 1);
+                    setPlaying(false);
+                  }}
+                >
+                  Retry artwork
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => setDialog("worlds")}
+                >
+                  Open backups
+                </button>
+              </div>
+            )}
             <div className="game-stage" ref={stage}>
               <WorldCanvas
                 ref={canvas}
+                onError={(message) => {
+                  setWorldError(message);
+                  setPlaying(false);
+                }}
                 world={world}
+                overview={mapView}
                 initial={initial}
                 playing={playing && !dialog && !busy}
                 muted={muted}
@@ -847,6 +958,7 @@ export default function App() {
                 </div>
               )}
               {!playing &&
+                !worldError &&
                 (!metrics.completed || metrics.exploring) &&
                 !busy && (
                   <div
@@ -932,21 +1044,30 @@ export default function App() {
               )}
               {playing && (!metrics.completed || metrics.exploring) && (
                 <div className="quest-hud">
-                  <span>SUGGESTED</span>
+                  <span>
+                    {metrics.exploring
+                      ? "EXPLORING"
+                      : metrics.requiredTotal > 0
+                        ? "REQUIRED"
+                        : "SUGGESTED"}
+                  </span>
                   <strong>
                     {metrics.exploring
                       ? "Explore · achievement kept"
-                      : metrics.collected < metrics.total
-                        ? `Optional items · ${metrics.total - metrics.collected} left`
-                        : world.entities.some(
-                              (e) =>
-                                e.kind === "lever" &&
-                                !latestState.current.activated.includes(e.id),
-                            )
-                          ? "Use the switch · E"
-                          : world.entities.find((e) => e.kind === "goal")?.label
-                            ? `Reach ${world.entities.find((e) => e.kind === "goal")!.label}`
-                            : "Explore your world"}
+                      : metrics.requiredTotal > 0
+                        ? `${metrics.requiredDone}/${metrics.requiredTotal} required · ${metrics.goalHint}`
+                        : metrics.collected < metrics.total
+                          ? `Optional items · ${metrics.total - metrics.collected} left`
+                          : world.entities.some(
+                                (e) =>
+                                  e.kind === "lever" &&
+                                  !latestState.current.activated.includes(e.id),
+                              )
+                            ? "Use the switch · E"
+                            : world.entities.find((e) => e.kind === "goal")
+                                  ?.label
+                              ? `Reach ${world.entities.find((e) => e.kind === "goal")!.label}`
+                              : "Explore your world"}
                   </strong>
                 </div>
               )}
@@ -956,7 +1077,11 @@ export default function App() {
                 <button
                   className="icon-button play-control"
                   aria-label={playing ? "Pause adventure" : "Resume adventure"}
-                  disabled={(metrics.completed && !metrics.exploring) || busy}
+                  disabled={
+                    (metrics.completed && !metrics.exploring) ||
+                    busy ||
+                    Boolean(worldError)
+                  }
                   onClick={() => (playing ? setPlaying(false) : start())}
                 >
                   {playing ? (
@@ -995,6 +1120,15 @@ export default function App() {
                   <kbd>E</kbd> interact
                 </span>
               </div>
+              <button
+                className="focus-play-button"
+                aria-label={mapView ? "Follow character" : "Show whole world"}
+                title={mapView ? "Follow character" : "Show whole world"}
+                aria-pressed={mapView}
+                onClick={() => setMapView((value) => !value)}
+              >
+                <Map size={17} />
+              </button>
               <button
                 className="focus-play-button"
                 aria-pressed={focusedPlay}
@@ -1130,6 +1264,7 @@ export default function App() {
         <Modal
           title="Create a world"
           onClose={() => {
+            sourceVersion.current++;
             if (busy) cancelInterpretation();
             setDialog(null);
           }}
@@ -1145,6 +1280,23 @@ export default function App() {
             setDialog("create");
             requestAnimationFrame(() => sourceInspect.current?.focus());
           }}
+        />
+      )}
+      {dialog === "rules" && (
+        <GoalRules
+          world={world}
+          state={editorState}
+          onCancel={() => setDialog(null)}
+          onApply={(rules) =>
+            applyEdit({
+              id: crypto.randomUUID(),
+              worldId: world.id,
+              baseRevision: world.revision,
+              origin: "manual",
+              additions: [],
+              goalRules: rules,
+            })
+          }
         />
       )}
       {dialog === "review" && draft && (
@@ -1169,8 +1321,21 @@ export default function App() {
               overview
               onUpdate={() => {}}
               onMoment={() => {}}
+              onError={setError}
             />
           </div>
+          {error && (
+            <p className="setup-error" role="alert">
+              {error} Edit objects to repair the source selection before
+              playing.
+            </p>
+          )}
+          {draft.inputKind === "picture" && (
+            <p className="modal-copy">
+              Check each subject’s full outline. Use Edit objects to adjust a
+              cutout.
+            </p>
+          )}
           {draftFeedback?.errors.map((message) => (
             <p className="setup-error" key={message}>
               {message}
@@ -1189,7 +1354,7 @@ export default function App() {
             </button>
             <button
               className="primary-button"
-              disabled={Boolean(draftFeedback?.errors.length)}
+              disabled={Boolean(draftFeedback?.errors.length) || Boolean(error)}
               onClick={() => {
                 loadWorld(draft);
                 setDialog(null);
@@ -1242,12 +1407,26 @@ export default function App() {
       )}
       {dialog === "setup" && (
         <WorldSetup
-          image={draft?.sourceImage ?? source}
-          inputKind={draft?.inputKind ?? inputKind}
-          initial={draft ?? undefined}
+          image={
+            recognitionReview?.draft.sourceImage ?? draft?.sourceImage ?? source
+          }
+          inputKind={
+            recognitionReview?.draft.inputKind ?? draft?.inputKind ?? inputKind
+          }
+          initial={recognitionReview ? undefined : (draft ?? undefined)}
+          recovery={recognitionReview ?? undefined}
+          resume={setupEdits ?? undefined}
+          onPause={setSetupEdits}
           intent={intent}
-          onClose={() => setDialog(draft ? "review" : "create")}
+          onClose={() =>
+            setDialog(
+              recognitionReview ? "create" : draft ? "review" : "create",
+            )
+          }
           onUse={(next) => {
+            setRecognitionReview(null);
+            setSetupEdits(null);
+            setError("");
             setDraft(next);
             setDialog("review");
             tell(
@@ -1438,8 +1617,10 @@ export default function App() {
                 <p>
                   Move with ← → or A / D. Jump with Space, ↑, or W. Collect the
                   objects in your world. Press E near a lever to open its gate.
-                  Reach a destination to complete the adventure; collectibles
-                  are optional. On phones, use the on-screen controls.
+                  Reach a destination to complete the adventure. Destination
+                  rules show which items and switches are required; other
+                  collectibles are optional. On phones, use the on-screen
+                  controls.
                 </p>
               </section>
             </div>

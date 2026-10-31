@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -6,17 +6,25 @@ import {
   FolderHeart,
 } from "lucide-react";
 import { Modal } from "./Modal";
+import { validateImportArtwork } from "../lib/import-artwork";
 import {
   importWorlds,
   MAX_BACKUP_BYTES,
   parseBackup,
   serializeBackup,
+  BackupSizeError,
   type SavedWorld,
 } from "../lib/library";
 
-function download(entries: SavedWorld[], name: string) {
+function download(
+  entries: SavedWorld[],
+  name: string,
+  currentVersionOnly = false,
+) {
   const url = URL.createObjectURL(
-    new Blob([serializeBackup(entries)], { type: "application/json" }),
+    new Blob([serializeBackup(entries, { currentVersionOnly })], {
+      type: "application/json",
+    }),
   );
   const link = document.createElement("a");
   link.href = url;
@@ -42,22 +50,46 @@ export function WorldLibrary({
   onClose: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null),
-    trigger = useRef<HTMLButtonElement>(null);
+    trigger = useRef<HTMLButtonElement>(null),
+    inspection = useRef<AbortController | null>(null);
+  useEffect(() => () => inspection.current?.abort(), []);
   const [pending, setPending] = useState<SavedWorld[] | null>(null),
     [copies, setCopies] = useState(false);
   const [working, setWorking] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [backupFallback, setBackupFallback] = useState<SavedWorld | null>(null);
   const conflicts =
     pending?.filter((e) => entries.some((old) => old.world.id === e.world.id))
       .length ?? 0;
   const count = (pending?.length ?? 0) - (copies ? 0 : conflicts);
-  function backup(worlds: SavedWorld[], name: string) {
+  function backup(
+    worlds: SavedWorld[],
+    name: string,
+    currentVersionOnly = false,
+  ) {
     try {
       setError("");
-      download(worlds, name);
-      setNotice("Backup downloaded with artwork, progress and undo history.");
+      setNotice("");
+      setBackupFallback(null);
+      download(
+        worlds,
+        currentVersionOnly ? `${name}-current-version-only` : name,
+        currentVersionOnly,
+      );
+      setNotice(
+        currentVersionOnly
+          ? "Current version downloaded with artwork and progress. Undo history is not included; your stored history is unchanged."
+          : "Backup downloaded with artwork, progress and undo history.",
+      );
     } catch (e) {
+      if (
+        e instanceof BackupSizeError &&
+        worlds.length === 1 &&
+        !currentVersionOnly &&
+        worlds[0].history?.length
+      )
+        setBackupFallback(worlds[0]);
       setError(
         e instanceof Error ? e.message : "The backup could not be created.",
       );
@@ -67,23 +99,35 @@ export function WorldLibrary({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    inspection.current?.abort();
+    const controller = new AbortController();
+    inspection.current = controller;
     setError("");
     setNotice("");
     setPending(null);
+    setBackupFallback(null);
     setWorking(true);
     setCopies(false);
     try {
       if (file.size > MAX_BACKUP_BYTES)
         throw new Error("Choose a backup smaller than 64 MB.");
-      setPending(parseBackup(await file.text()));
+      const text = await file.text();
+      if (controller.signal.aborted) return;
+      const entries = parseBackup(text);
+      await validateImportArtwork(entries, controller.signal);
+      if (!controller.signal.aborted) setPending(entries);
     } catch (e) {
+      if (controller.signal.aborted) return;
       setError(
         e instanceof Error
           ? e.message
           : "This backup could not be opened. Nothing was imported.",
       );
     } finally {
-      setWorking(false);
+      if (inspection.current === controller) {
+        inspection.current = null;
+        if (!controller.signal.aborted) setWorking(false);
+      }
     }
   }
   async function restore() {
@@ -164,13 +208,44 @@ export function WorldLibrary({
           {notice}
         </p>
       )}
+      {working && !pending && (
+        <p className="library-notice" role="status">
+          Checking backup artwork…
+        </p>
+      )}
+      {backupFallback && (
+        <section
+          className="library-import"
+          aria-label="Backup current version without undo history"
+        >
+          <p>
+            Download the current artwork and progress without undo history. Your
+            saved world and its history stay unchanged.
+          </p>
+          <button
+            className="secondary-button"
+            onClick={() =>
+              backup([backupFallback], backupFallback.world.name, true)
+            }
+          >
+            <ArrowDownToLine size={16} /> Back up current version only
+          </button>
+        </section>
+      )}
       {pending && (
         <section className="library-import" aria-label="Review backup import">
           <h3>
             {pending.length} {pending.length === 1 ? "world" : "worlds"} in this
             backup
           </h3>
-          <p>Artwork, progress and undo history are included.</p>
+          <p>
+            Artwork and progress are included.{" "}
+            {pending.reduce(
+              (total, entry) => total + (entry.history?.length ?? 0),
+              0,
+            )}{" "}
+            undo checkpoints in this backup.
+          </p>
           {conflicts > 0 && (
             <>
               <p>

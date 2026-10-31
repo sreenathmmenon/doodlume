@@ -9,6 +9,8 @@ import {
   serializeBackup,
   type SavedWorld,
 } from "./library.js";
+const pixel =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
 
 test("a growing library keeps every world; imports preserve existing versions and copies keep valid history", () => {
   const items: SavedWorld[] = Array.from({ length: 12 }, (_, index) => ({
@@ -69,6 +71,47 @@ test("a growing library keeps every world; imports preserve existing versions an
   assert.equal(duplicate.history![0].before.id, duplicate.world.id);
   assert.deepEqual(duplicate.state, earned);
   assert.deepEqual(parseBackup(serializeBackup(copy.entries)), copy.entries);
+  const withPixels = (world: typeof revised.world) => ({
+    ...world,
+    sourceImage: pixel,
+    entities: world.entities.map((entity) =>
+      entity.kind === "player" ? { ...entity, art: pixel } : entity,
+    ),
+  });
+  const imageEntries = copy.entries.map((entry) => ({
+    ...entry,
+    world: withPixels(entry.world),
+    history: entry.history?.map((checkpoint) => ({
+      ...checkpoint,
+      before: withPixels(checkpoint.before),
+    })),
+  }));
+  const packedText = serializeBackup(imageEntries);
+  const packed = JSON.parse(packedText);
+  assert.equal(packed.version, 2);
+  assert.deepEqual(packed.assets, [pixel]);
+  assert.equal(packedText.split(pixel).length, 2);
+  assert.deepEqual(packed.worlds[0].world.sourceImage, { $asset: 0 });
+  assert.deepEqual(parseBackup(packedText), imageEntries);
+  assert.deepEqual(
+    parseBackup(
+      JSON.stringify({
+        format: "doodlume-library",
+        version: 1,
+        worlds: imageEntries,
+      }),
+    ),
+    imageEntries,
+  );
+  const currentOnly = serializeBackup([imageEntries[0]], {
+    currentVersionOnly: true,
+  });
+  assert.equal(JSON.parse(currentOnly).historyMode, "current-version-only");
+  assert.deepEqual(parseBackup(currentOnly)[0], {
+    ...imageEntries[0],
+    history: [],
+  });
+  assert.equal(imageEntries[0].history!.length, 1);
 });
 
 test("malformed backups fail as a whole without changing existing work; continuation keeps earned state", () => {
@@ -109,4 +152,62 @@ test("malformed backups fail as a whole without changing existing work; continua
   assert.deepEqual(state, before);
   const saved = { ...item, state: continued };
   assert.deepEqual(parseBackup(serializeBackup([saved]))[0].state, continued);
+  const imageItem = { ...item, world: { ...item.world, sourceImage: pixel } };
+  assert.throws(
+    () => serializeBackup([item, item]),
+    /repeated world identities/,
+  );
+  assert.throws(() => serializeBackup(Array(1001).fill(item)), /1,000/);
+  const packed = JSON.parse(serializeBackup([imageItem]));
+  for (const reference of [
+    { $asset: -1 },
+    { $asset: 1 },
+    { $asset: 0.5 },
+    { $asset: "0" },
+    { $asset: 0, extra: true },
+  ]) {
+    const broken = structuredClone(packed);
+    broken.worlds[0].world.sourceImage = reference;
+    assert.throws(
+      () => parseBackup(JSON.stringify(broken)),
+      /invalid world data/,
+    );
+  }
+  for (const mutate of [
+    (bad: typeof packed) => {
+      bad.assets[0] = "data:text/html;base64,AAAA";
+    },
+    (bad: typeof packed) => {
+      bad.assets.push(pixel);
+    },
+    (bad: typeof packed) => {
+      bad.worlds[0].world.sourceImage = "javascript:alert(1)";
+    },
+    (bad: typeof packed) => {
+      bad.worlds[0].world.sourceImage = "/art/../secret.png";
+    },
+    (bad: typeof packed) => {
+      bad.worlds[0].world.metadata = { $asset: 99 };
+    },
+    (bad: typeof packed) => {
+      Object.defineProperty(bad.worlds[0].world, "__proto__", {
+        value: {},
+        enumerable: true,
+      });
+    },
+  ]) {
+    const broken = structuredClone(packed);
+    mutate(broken);
+    assert.throws(
+      () => parseBackup(JSON.stringify(broken)),
+      /invalid world data/,
+    );
+  }
+  const unused = JSON.parse(serializeBackup([item]));
+  unused.assets = [pixel];
+  assert.throws(
+    () => parseBackup(JSON.stringify(unused)),
+    /invalid world data/,
+  );
+  assert.deepEqual(item, original);
 });

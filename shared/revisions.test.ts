@@ -6,7 +6,7 @@ import {
   undoWorldPatch,
   type WorldPatch,
 } from "./revisions.js";
-import type { PlayState } from "./world.js";
+import { goalProgress, type PlayState } from "./world.js";
 
 const progress: PlayState = {
   player: { x: 200, y: 640 },
@@ -57,13 +57,31 @@ test("a world amendment preserves all old objects, position, motion and earned p
   assert.equal(extension.world.width, 2880);
   assert.deepEqual(extension.state, progress);
   assert.deepEqual(extension.world.entities, world.entities);
-  assert.equal(undoWorldPatch(extension.world, progress, extension.checkpoint).world.width, world.width);
-  assert.throws(() => applyWorldPatch(world, progress, {
-    ...patch, additions: [], bounds: { width: world.width - 1, height: world.height },
-  }), /extend/);
-  assert.throws(() => undoWorldPatch(extension.world, {
-    ...progress, player: { x: 1700, y: 640 },
-  }, extension.checkpoint), /original world/);
+  assert.equal(
+    undoWorldPatch(extension.world, progress, extension.checkpoint).world.width,
+    world.width,
+  );
+  assert.throws(
+    () =>
+      applyWorldPatch(world, progress, {
+        ...patch,
+        additions: [],
+        bounds: { width: world.width - 1, height: world.height },
+      }),
+    /extend/,
+  );
+  assert.throws(
+    () =>
+      undoWorldPatch(
+        extension.world,
+        {
+          ...progress,
+          player: { x: 1700, y: 640 },
+        },
+        extension.checkpoint,
+      ),
+    /original world/,
+  );
   assert.throws(
     () => applyWorldPatch(result.world, progress, patch),
     /older world/,
@@ -154,4 +172,46 @@ test("undo keeps later progress for surviving objects and increases the revision
     () => undoWorldPatch(undone.world, later, applied.checkpoint),
     /earlier version/,
   );
+});
+
+test("changing destination rules is a reversible revision that keeps earned achievements and discoveries", () => {
+  const { world, patch } = setup();
+  const earned = { ...progress, completed: true, exploring: true };
+  const rules = {
+    requiredCollectedIds: ["sunseed-two"],
+    requiredActivatedIds: ["willow-lever"],
+  };
+  const changed = applyWorldPatch(world, earned, {
+    ...patch,
+    additions: [],
+    goalRules: rules,
+  });
+  assert.equal(changed.world.revision, 2);
+  assert.deepEqual(changed.world.goalRules, rules);
+  assert.deepEqual(changed.state, earned);
+  assert.equal(goalProgress(changed.world, changed.state).ready, false);
+  const undone = undoWorldPatch(changed.world, earned, changed.checkpoint);
+  assert.equal(undone.world.revision, 3);
+  assert.equal(undone.world.goalRules, undefined);
+  assert.deepEqual(undone.state, earned);
+  const cleared = applyWorldPatch(changed.world, earned, {
+    ...patch,
+    baseRevision: 2,
+    additions: [],
+    goalRules: { requiredCollectedIds: [], requiredActivatedIds: [] },
+  });
+  assert.equal(goalProgress(cleared.world, cleared.state).total, 0);
+  assert.throws(
+    () =>
+      applyWorldPatch(world, earned, {
+        ...patch,
+        additions: [],
+        goalRules: {
+          requiredCollectedIds: ["missing"],
+          requiredActivatedIds: [],
+        },
+      }),
+    /requirement/,
+  );
+  assert.equal(world.goalRules, undefined);
 });

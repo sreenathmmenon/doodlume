@@ -1,8 +1,16 @@
 import Phaser from "phaser";
 import { createAtmosphere } from "./atmosphere";
 import { Soundscape } from "./soundscape";
+import { artworkRasterSize } from "./artwork-raster";
+import {
+  sceneBoundsVisible,
+  sceneView,
+  type SceneRect,
+} from "./scene-visibility";
+import { terrainTiles } from "./terrain-tiles";
 import {
   emptyPlayState,
+  goalProgress,
   type PlayState,
   type WorldDefinition,
   type WorldEntity,
@@ -14,6 +22,9 @@ export interface WorldTelemetry {
   completed: boolean;
   exploring: boolean;
   nearLever: boolean;
+  goalHint: string;
+  requiredDone: number;
+  requiredTotal: number;
   playerX: number;
   playerY: number;
 }
@@ -27,6 +38,7 @@ interface Hooks {
   onUpdate: (state: PlayState, telemetry: WorldTelemetry) => void;
   onMoment: (message: string) => void;
   onReady: (scene: WorldScene) => void;
+  onError?: (message: string) => void;
 }
 const palettes = {
   grove: {
@@ -90,15 +102,24 @@ export class WorldScene extends Phaser.Scene {
   private lastGrounded = -1000;
   private jumpQueued = -1000;
   private lastReport = 0;
+  private lastGoalNotice = { message: "", at: -10000 };
   private previousTouchJump = false;
   private previousTouchInteract = false;
   private spawn = { x: 0, y: 0 };
   private isPlaying = false;
+  private overview = false;
+  private artworkFailed = false;
   private muted = true;
   private soundtrack: Soundscape;
   private heroArt!: Phaser.GameObjects.Image;
   private heroHalo!: Phaser.GameObjects.Arc;
   private updateAtmosphere = () => {};
+  private staticGraphics: {
+    graphic: Phaser.GameObjects.Graphics;
+    bounds: SceneRect;
+  }[] = [];
+  private generatedTerrainPixels = 0;
+  private generatedTerrainPieces = 0;
   private heroWidth = 1;
   private heroHeight = 1;
   private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -130,20 +151,74 @@ export class WorldScene extends Phaser.Scene {
     this.hooks = hooks;
   }
 
+  private releaseResources() {
+    this.load.off(
+      Phaser.Loader.Events.FILE_LOAD_ERROR,
+      this.artworkLoadError,
+      this,
+    );
+    this.soundtrack.close();
+    this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.releaseResources, this);
+    this.events.off(Phaser.Scenes.Events.DESTROY, this.releaseResources, this);
+  }
+
+  private failArtwork(entity: WorldEntity) {
+    if (this.artworkFailed) return;
+    this.artworkFailed = true;
+    this.isPlaying = false;
+    this.physics?.world?.pause();
+    this.soundtrack.close();
+    const label = entity.label?.trim() || entity.kind;
+    this.hooks.onError?.(
+      `The original artwork for “${label}” could not be loaded. Your source, world and progress are kept. Retry artwork or open a backup.`,
+    );
+  }
+
+  private artworkLoadError(file: Phaser.Loader.File) {
+    const entity = this.definition.entities.find(
+      (item) => item.art && file.key === `art-${item.id}`,
+    );
+    if (entity) this.failArtwork(entity);
+  }
+
   preload() {
+    this.artworkFailed = false;
+    this.load.on(
+      Phaser.Loader.Events.FILE_LOAD_ERROR,
+      this.artworkLoadError,
+      this,
+    );
+    this.events.once(
+      Phaser.Scenes.Events.SHUTDOWN,
+      this.releaseResources,
+      this,
+    );
+    this.events.once(Phaser.Scenes.Events.DESTROY, this.releaseResources, this);
     for (const e of this.definition.entities)
       if (e.art) {
         if (e.art.endsWith(".svg"))
-          this.load.svg(`art-${e.id}`, e.art, {
-            width: Math.ceil(e.width * 3),
-            height: Math.ceil(e.height * 3),
-          });
+          this.load.svg(
+            `art-${e.id}`,
+            e.art,
+            artworkRasterSize(e.width, e.height),
+          );
         else this.load.image(`art-${e.id}`, e.art);
       }
   }
 
   create() {
+    this.staticGraphics = [];
+    this.generatedTerrainPixels = 0;
+    this.generatedTerrainPieces = 0;
     this.state = structuredClone(this.initial);
+    const missing = this.definition.entities.find(
+      (entity) => entity.art && !this.textures.exists(`art-${entity.id}`),
+    );
+    if (missing) this.failArtwork(missing);
+    if (this.artworkFailed) {
+      this.physics.world.pause();
+      return;
+    }
     this.physics.world.setBounds(
       0,
       -200,
@@ -276,9 +351,6 @@ export class WorldScene extends Phaser.Scene {
     this.player.setFlipX(Boolean(this.initial.facingLeft));
     this.report();
     this.hooks.onReady(this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.soundtrack.close();
-    });
   }
 
   private createFallbackHero(): string {
@@ -341,6 +413,69 @@ export class WorldScene extends Phaser.Scene {
           g.fillCircle(x + 5, e.y - 15, 3);
         }
     }
+    const bounds = {
+      x: e.x - 8,
+      y: e.y - 24,
+      width: e.width + 16,
+      height: e.height + 48,
+    };
+    if (!this.cacheTerrain(g, e, bounds))
+      // Graphics lack native width/height culling. Preserve the bounded fallback.
+      this.staticGraphics.push({ graphic: g, bounds });
+  }
+
+  private cacheTerrain(
+    graphic: Phaser.GameObjects.Graphics,
+    entity: WorldEntity,
+    bounds: SceneRect,
+  ) {
+    const plan = terrainTiles(
+      bounds,
+      8_000_000 - this.generatedTerrainPixels,
+      128 - this.generatedTerrainPieces,
+    );
+    if (!plan) return false;
+    const images: Phaser.GameObjects.Image[] = [];
+    const textures: string[] = [];
+    try {
+      for (const [index, tile] of plan.tiles.entries()) {
+        const key = `terrain-cache-${entity.id}-${index}`;
+        const painter = this.make.graphics({ x: 0, y: 0 });
+        try {
+          // generateTexture's camera cancels the Graphics object's position;
+          // its command translation therefore maps global paths into this tile.
+          painter.translateCanvas(-tile.x + tile.gutter, -tile.y + tile.gutter);
+          for (const command of graphic.commandBuffer)
+            painter.commandBuffer.push(command);
+          textures.push(key);
+          painter.generateTexture(key, tile.textureWidth, tile.textureHeight);
+        } finally {
+          painter.destroy();
+        }
+        const texture = this.textures.get(key);
+        texture.add(
+          "core",
+          0,
+          tile.gutter,
+          tile.gutter,
+          tile.width,
+          tile.height,
+        );
+        images.push(
+          this.add.image(tile.x, tile.y, key, "core").setOrigin(0).setDepth(10),
+        );
+      }
+    } catch {
+      // A denied raster allocation keeps the original vector artwork available.
+      for (const image of images) image.destroy();
+      for (const key of textures)
+        if (this.textures.exists(key)) this.textures.remove(key);
+      return false;
+    }
+    this.generatedTerrainPixels += plan.pixels;
+    this.generatedTerrainPieces += plan.tiles.length;
+    graphic.destroy();
+    return true;
   }
 
   private createGate(e: WorldEntity) {
@@ -453,7 +588,7 @@ export class WorldScene extends Phaser.Scene {
         this.state.collected.length ===
         this.definition.entities.filter((e) => e.kind === "coin").length
       )
-        this.hooks.onMoment("Every collectible found. Find your destination.");
+        this.hooks.onMoment(goalProgress(this.definition, this.state).hint);
     });
   }
 
@@ -558,7 +693,19 @@ export class WorldScene extends Phaser.Scene {
     );
     this.physics.add.existing(zone, true);
     this.physics.add.overlap(this.player, zone, () => {
-      if (this.state.completed) return;
+      if (!this.isPlaying || this.state.completed) return;
+      const objective = goalProgress(this.definition, this.state);
+      if (!objective.ready) {
+        if (
+          this.lastGoalNotice.message !== objective.hint ||
+          this.time.now - this.lastGoalNotice.at > 4500
+        ) {
+          this.lastGoalNotice = { message: objective.hint, at: this.time.now };
+          this.hooks.onMoment(objective.hint);
+          this.report();
+        }
+        return;
+      }
       this.state.completed = true;
       this.soundtrack.cue("finish");
       this.ring(this.player.x, this.player.y, 0xffe3a3, 160);
@@ -651,6 +798,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   setViewportWidth(width: number, overview = false) {
+    this.overview = overview;
     if (!this.player) return;
     const camera = this.cameras.main;
     if (overview || this.reducedMotion) {
@@ -680,6 +828,12 @@ export class WorldScene extends Phaser.Scene {
   }
 
   setPlaying(playing: boolean) {
+    if (this.artworkFailed) {
+      this.isPlaying = false;
+      this.physics?.world?.pause();
+      this.soundtrack.close();
+      return;
+    }
     this.isPlaying = playing;
     this.soundtrack.setState(
       playing || (this.state.completed && !this.state.exploring),
@@ -703,6 +857,10 @@ export class WorldScene extends Phaser.Scene {
   }
   setMuted(muted: boolean) {
     this.muted = muted;
+    if (this.artworkFailed) {
+      this.soundtrack.close();
+      return;
+    }
     this.soundtrack.setState(
       this.isPlaying || (this.state.completed && !this.state.exploring),
       muted,
@@ -714,6 +872,7 @@ export class WorldScene extends Phaser.Scene {
     return this.snapshot();
   }
   snapshot(): PlayState {
+    if (!this.player) return structuredClone(this.initial);
     return {
       ...structuredClone(this.state),
       player: this.player ? { x: this.player.x, y: this.player.y } : null,
@@ -743,12 +902,16 @@ export class WorldScene extends Phaser.Scene {
     if (!this.player) return;
     const state = this.snapshot();
     const nearby = Boolean(this.nearestLever());
+    const objective = goalProgress(this.definition, state);
     this.hooks.onUpdate(state, {
       collected: state.collected.length,
       total: this.definition.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
       exploring: Boolean(state.exploring),
       nearLever: nearby,
+      goalHint: objective.hint,
+      requiredDone: objective.done,
+      requiredTotal: objective.total,
       playerX: this.player.x,
       playerY: this.player.y,
     });
@@ -757,6 +920,9 @@ export class WorldScene extends Phaser.Scene {
   update(time: number, delta: number) {
     if (!this.player || !this.cursors) return;
     this.updateAtmosphere();
+    const view = sceneView(this.cameras.main);
+    for (const { graphic, bounds } of this.staticGraphics)
+      graphic.setVisible(sceneBoundsVisible(bounds, view));
     if (!this.isPlaying) return;
     this.soundtrack.tick(time);
     const typing = document.activeElement?.matches(
@@ -900,7 +1066,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(altitude < 300)
       .setAlpha(Math.max(0.025, 0.2 - altitude / 1500))
       .setScale(Math.max(0.35, 1 - altitude / 420), 1);
-    if (!this.reducedMotion) {
+    if (!this.reducedMotion && !this.overview) {
       const camera = this.cameras.main;
       const lookAhead = Phaser.Math.Clamp(body.velocity.x * 0.35, -105, 105);
       const target = camera.getScroll(

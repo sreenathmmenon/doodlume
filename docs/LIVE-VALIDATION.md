@@ -61,3 +61,49 @@ At a 390 × 844 browser viewport the source occupied 328px of the available cont
 Settings and creation now say API key configured, and explicitly distinguish a local configuration refresh from a live provider request. Segmentation configuration no longer claims a live-tested connection. Help describes the current review flow, generic collectible objects, optional collection, destination completion, touch controls, continued authorship and backups. The gameplay hint marks collections as optional. No model credits were spent on these checks.
 
 Recognition repeatability, bounded required-objective authoring, expanded-map precision/zoom, physical-phone use, forced storage interruption, named-device performance and real creator engagement remain separate open acceptance gates. The original council is not re-scored automatically from these repairs.
+
+## Quality qualification — November 1, 2026 (local time)
+
+This entry is the current qualification record. Earlier entries above remain historical snapshots, including their then-open gates and test counts. The private local evidence is in `../outputs/doodlume-quality-all-2026-10-31/` relative to the repository; the folder uses the UTC session date.
+
+### Recognition and repair
+
+Fifteen actual Fireworks Meta Muse Spark Open (`accounts/fireworks/models/muse-spark-open`) interpretation calls exercised 12 distinct deterministic authored digital inputs plus three repeats. The distinct inputs covered separate line art, pale pencil rendering, saturated marker, touching character/ground, a shadowed/tilted digital page, ambiguous characters, a dense labelled diagram, textured overlapping illustration, a synthetic photo-like raster, one switch/two gates, no ground and a revised bridge page. Every SVG/PNG source, intent, output, latency and model/provider identifier was retained. All inputs were synthetic; the photo-like fixture is not a real photograph or magazine page.
+
+The 12 distinct outcomes were eight accepted previews, one quarantined repair review and three actionable clarifications. Pale pencil, touching-ground and bridge inputs were accepted in both runs. Including repeats, the 15 calls yielded 11 accepted previews, one repair and three clarifications, with no request/processing failures. SAM was disabled, no provider was substituted and no automatic retries were made. End-to-end exported-interpretation latency was 5.42–15.74 seconds, median 10.34 seconds; this includes local processing and inference, but not browser upload/review/render time. This small corpus does not establish a general success rate or resolve the earlier clockwork-repeat inconsistency.
+
+A sixteenth actual Fireworks request ran through the browser on the ambiguous-switch source. The recovered original objects were reviewed, the gate target was chosen, corrections survived closing/reopening the designer, and the resulting world was played and saved. Separately, the clean corpus model world was imported into isolated browser QA, played to 2/2 collected objects and completion, then saved. These are real inference outputs, not authored examples substituted for recognition.
+
+Recoverable output now preserves valid source selections and artwork in a separate review-only candidate. Unlocated/duplicate identities are left out with explanations; unclear switch links remain unassigned. Missing characters/ground and blank crops receive actionable local repair. Crop changes invalidate the earlier crop and prepare artwork from actual original pixels; final world validation still gates acceptance. Paused corrections are kept separately from the running world and cleared when the source or inference changes. Source/upload version guards invalidate stale requests and late file decodes. Declared artwork loading failures pause the game and offer recovery instead of silently replacing the original character.
+
+Accepted geometry does not prove complete semantic crops. In the synthetic photo-like fixture, the proposed subject crop trimmed approximately 45 pixels from the top; the retained source-coordinate overlays expose this limitation. Picture review explicitly asks the creator to check full outlines and provides crop correction. Real photographs, magazine pages and precise SAM cutout quality remain unqualified. Fresh bridge interpretation is not proof of revised-page inference continuity.
+
+### Rules, precision and preservation
+
+Destination rules select bounded required collectible and activated-lever IDs. The contract rejects repeated, missing or wrong-role references; the HUD, review and runtime distinguish required from optional actions. Premature destination overlap checks these requirements. Completed achievements remain earned during continued authorship; explicit replay starts a new attempt. Exploration worlds can receive a manual destination through Edit world. This remains a bounded 2D role/rule vocabulary, not arbitrary generated mechanics.
+
+The editor now includes fit/detail zoom, pan, object focus, numerical placement and keyboard controls for expanded worlds. These features complement the earlier source inspection and contrast repairs; physical-touch and assistive-technology qualification remain separate.
+
+Version 2 portable backups deduplicate identical PNG assets while restoring exact source/crop strings, progress and undo history. Existing version 1 backups remain readable. Import conflicts preserve existing versions or create explicitly independent copies; rule references and checkpoint world identities survive copying and export/import. A focused probe confirmed undoing a copied rule change restores its prior rules without clearing earned collected/activated IDs.
+
+Six isolated fake-IndexedDB fault-injection cases passed: retention beyond twelve worlds, migration precedence, synchronous quota-style transaction failure, abort after a staged successful replacement, safe retry and conflict-safe copy with rules/state/history. Existing records survived the injected failures. This used `fake-indexeddb 6.2.4` in memory and did not touch the owner's browser data or add a product dependency. It is not actual browser disk exhaustion, a process crash or a physical-storage test.
+
+A deterministic capacity trial round-tripped 26 repeated artwork references using one deduplicated asset. A full-history backup containing 26 unique large assets accurately hit the 64 MB limit; explicit current-version export preserved exact current pixels and left all 12 saved checkpoints unchanged. An oversized current version was rejected clearly. Expanded artwork references are bounded at 512 MB; neither limit implies cloud persistence or unlimited storage.
+
+### Performance and renderer lifecycle
+
+The measured profile was a Mac16,1 with 16 GiB memory, Chrome 156, a 1512 × 756 browser viewport and the loopback service, without network/CPU throttling. Readings came from opt-in in-app frame/lifecycle instrumentation, not a DevTools trace or a physical-phone benchmark.
+
+An authored maximum-bounds QA world (12,000 × 5,000, 160 objects) initially measured a 109.3 ms p95 frame interval. Bounded terrain baking, bounded artwork allocation and scene visibility work reduced the measured p95 interval to 9.8 ms across 9,173 samples; one sample exceeded 33 ms. These are renderer frame intervals on this machine and fixture, not a universal FPS guarantee. The later record showed a 740 ms first-world-ready time and 341.7 ms latest setup time; cache/network conditions were local.
+
+Across 20 restart transitions, the DOM retained one game canvas at each step. Cumulative lifecycle counters ended at 24 games created, 23 destroyed and one active. This supports cleanup of those observed transitions. The observed heap value and counters do not prove absence of every memory leak or long-session/device behavior.
+
+The measured main JavaScript response was 1,481,772 bytes with identity encoding, 335,357 bytes with gzip and 306,162 bytes with Brotli. The server returned matching Content-Encoding, Vary and immutable cache headers for hashed assets. These are measured response sizes for this build, not whole-page transfer or first-use mobile-network measurements.
+
+### Current checks and limits
+
+The latest 35 focused tests, type checking and production build pass. Protocol fixtures remain test-only; the product has no mocked model success path. Credential scanning remains a separate staged pre-commit gate and should not be inferred from build success.
+
+The work closes concrete save/recovery/rule/precision/lifecycle gaps and supplies measured local evidence. It does not establish 10/10 quality, 100× competitive superiority or a hackathon outcome. Actual photographs/magazine pages, physical devices/Wi-Fi/camera use, live SAM 3.1, broader device/performance coverage, real browser storage exhaustion, real creator engagement/emotional attachment and broad recognition repeatability remain unqualified. No public deployment or cloud save service was introduced.
+
+Final browser fault qualification: temporarily removing only the isolated QA copy of the character SVG produced a visible retry/backups alert, disabled play, and disposed its renderer (one created, one destroyed, zero active canvases). Restoring the file and retrying restored the same world. Missing static files now return 404 rather than the HTML app shell; a 15-second startup deadline also bounds stalled decoding. The final routing regression is the 35th focused test. The final full-map run measured 10.3 ms p95 across 5,503 samples, three above 33 ms; backing surfaces remained five viewport-sized canvases.

@@ -1060,6 +1060,27 @@ select:focus-visible {
   line-height: 1.6;
   margin-top: 14px;
 }
+.world-error {
+  padding: 16px 20px;
+  color: #f6e5d9;
+  background: #543b35;
+  line-height: 1.6;
+}
+.world-error .secondary-button {
+  margin: 8px 10px 0 0;
+  color: #263c35;
+  background: #fcfaf5;
+}
+.world-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #dbe6d4;
+  background: #142a31;
+  z-index: 1;
+  font-size: 14px;
+}
 
 /* Portable ownership without automatic retention/deletion. */
 .library-actions {

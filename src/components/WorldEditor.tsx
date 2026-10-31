@@ -1,5 +1,6 @@
 import {
   useMemo,
+  useEffect,
   useRef,
   useState,
   type PointerEvent,
@@ -9,12 +10,23 @@ import {
   ArrowUpRight,
   Check,
   ImagePlus,
+  Hand,
+  Focus,
+  ZoomIn,
+  ZoomOut,
   Move,
   Plus,
   Trash2,
   Undo2,
 } from "lucide-react";
 import { Modal } from "./Modal";
+import "./editor-viewport.css";
+import {
+  editorFitScale,
+  editorView,
+  editorPoint,
+  editorCenter,
+} from "../lib/editorViewport";
 import { SketchPad } from "./SketchPad";
 import { ArtworkReview } from "./ArtworkReview";
 import { extractSketchInk } from "../lib/ink";
@@ -48,6 +60,13 @@ const tools = [
     hint: "A little light to find.",
     width: 35,
     height: 40,
+  },
+  {
+    kind: "goal",
+    label: "Destination",
+    hint: "Where this adventure ends.",
+    width: 110,
+    height: 140,
   },
   {
     kind: "lever",
@@ -116,6 +135,72 @@ export function WorldEditor({
   const [drawing, setDrawing] = useState(false);
   const [customArt, setCustomArt] = useState<string | null>(null);
   const canvas = useRef<SVGSVGElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 360 });
+  const [detailScale, setDetailScale] = useState<number | null>(null);
+  const [center, setCenter] = useState({
+    x: world.width / 2,
+    y: world.height / 2,
+  });
+  const [panMode, setPanMode] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const pan = useRef<{
+    x: number;
+    y: number;
+    center: { x: number; y: number };
+  } | null>(null);
+  const fitScale = editorFitScale(bounds, viewportSize);
+  const scale =
+    detailScale === null ? fitScale : limit(detailScale, fitScale, 2);
+  const view = editorView(
+    bounds,
+    viewportSize,
+    scale,
+    detailScale === null
+      ? { x: bounds.width / 2, y: bounds.height / 2 }
+      : center,
+  );
+  useEffect(() => {
+    const node = viewport.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => {
+      const { width, height } = node.getBoundingClientRect();
+      if (width > 0 && height > 0) setViewportSize({ width, height });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  function zoomTo(value: number) {
+    setCenter(editorCenter(view));
+    setDetailScale(limit(value, fitScale, 2));
+  }
+  function fitWorld() {
+    setDetailScale(null);
+    setPanMode(false);
+  }
+  function focusObject(entity: WorldEntity) {
+    const nextScale = Math.min(
+      2,
+      Math.max(
+        fitScale,
+        Math.min(
+          viewportSize.width / (entity.width + 160),
+          viewportSize.height / (entity.height + 160),
+        ),
+      ),
+    );
+    setCenter({
+      x: entity.x + entity.width / 2,
+      y: entity.y + entity.height / 2,
+    });
+    setDetailScale(nextScale);
+  }
+  function stopPointer() {
+    pan.current = null;
+    setPanning(false);
+    setDrag(null);
+  }
   const item = additions.find((e) => e.id === selected);
   const gates = [...world.entities, ...additions].filter(
     (e) => e.kind === "gate",
@@ -157,23 +242,30 @@ export function WorldEditor({
 
   function point(e: PointerEvent<SVGSVGElement>) {
     const r = e.currentTarget.getBoundingClientRect();
+    const p = editorPoint(
+      view,
+      { width: r.width, height: r.height },
+      { x: e.clientX - r.left, y: e.clientY - r.top },
+    );
     return {
-      x: limit(
-        ((e.clientX - r.left) * bounds.width) / r.width,
-        0,
-        bounds.width,
-      ),
-      y: limit(
-        ((e.clientY - r.top) * bounds.height) / r.height,
-        0,
-        bounds.height,
-      ),
+      x: limit(p.x, 0, bounds.width),
+      y: limit(p.y, 0, bounds.height),
+      inside:
+        p.x >= 0 && p.x <= bounds.width && p.y >= 0 && p.y <= bounds.height,
     };
   }
   function down(e: PointerEvent<SVGSVGElement>) {
-    if (e.button !== 0) return;
-    const p = point(e);
+    if (e.button !== 0 && e.button !== 1) return;
+    e.preventDefault();
+    e.currentTarget.focus();
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (panMode || spaceHeld || e.button === 1) {
+      pan.current = { x: e.clientX, y: e.clientY, center: editorCenter(view) };
+      setPanning(true);
+      return;
+    }
+    const p = point(e);
+    if (!p.inside) return;
     setError("");
     setReviewed(false);
     const hit = [...additions]
@@ -200,9 +292,23 @@ export function WorldEditor({
       setSelected(null);
       return;
     }
+    if (world.entities.length + additions.length >= 160) {
+      setError("This world has reached its 160-object limit.");
+      return;
+    }
     setDrag({ ...p, currentX: p.x, currentY: p.y });
   }
   function move(e: PointerEvent<SVGSVGElement>) {
+    if (pan.current) {
+      const initial = pan.current;
+      const next = editorView(bounds, viewportSize, scale, {
+        x: initial.center.x - (e.clientX - initial.x) / scale,
+        y: initial.center.y - (e.clientY - initial.y) / scale,
+      });
+      setCenter(editorCenter(next));
+      setDetailScale(scale);
+      return;
+    }
     if (!drag) return;
     const p = point(e);
     if (drag.id && drag.original) {
@@ -226,11 +332,15 @@ export function WorldEditor({
     setDrag({ ...drag, currentX: p.x, currentY: p.y });
   }
   function up(e: PointerEvent<SVGSVGElement>) {
+    if (pan.current) {
+      stopPointer();
+      return;
+    }
     if (!drag) return;
     const p = point(e);
     if (!drag.id && tool !== "move") {
       const config = tools.find((t) => t.kind === tool)!;
-      const isClick = Math.hypot(p.x - drag.x, p.y - drag.y) < 12;
+      const isClick = Math.hypot(p.x - drag.x, p.y - drag.y) * scale < 6;
       const width = limit(
           isClick ? config.width : Math.abs(p.x - drag.x),
           12,
@@ -282,8 +392,20 @@ export function WorldEditor({
     const entity: WorldEntity = {
       id: `drawn-${crypto.randomUUID()}`,
       kind: tool,
-      x: Math.round((bounds.width - config.width) / 2),
-      y: Math.round((bounds.height - config.height) / 2),
+      x: Math.round(
+        limit(
+          view.x + view.width / 2 - config.width / 2,
+          0,
+          bounds.width - config.width,
+        ),
+      ),
+      y: Math.round(
+        limit(
+          view.y + view.height / 2 - config.height / 2,
+          0,
+          bounds.height - config.height,
+        ),
+      ),
       width: config.width,
       height: config.height,
       label: `New ${config.label.toLowerCase()}`,
@@ -301,7 +423,51 @@ export function WorldEditor({
     requestAnimationFrame(() => canvas.current?.focus());
   }
   function canvasKey(event: KeyboardEvent<SVGSVGElement>) {
-    if (!item) return;
+    if (event.key === " ") {
+      event.preventDefault();
+      setSpaceHeld(true);
+      return;
+    }
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      zoomTo(scale * 1.5);
+      return;
+    }
+    if (event.key === "-") {
+      event.preventDefault();
+      zoomTo(scale / 1.5);
+      return;
+    }
+    if (event.key === "0") {
+      event.preventDefault();
+      fitWorld();
+      return;
+    }
+    if (event.key.toLowerCase() === "f" && item) {
+      event.preventDefault();
+      focusObject(item);
+      return;
+    }
+    if (panMode || !item) {
+      const shifts: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const delta = shifts[event.key];
+      if (delta) {
+        event.preventDefault();
+        const current = editorCenter(view);
+        const next = editorView(bounds, viewportSize, scale, {
+          x: current.x + (delta[0] * view.width) / 4,
+          y: current.y + (delta[1] * view.height) / 4,
+        });
+        setCenter(editorCenter(next));
+        setDetailScale(scale);
+      }
+      return;
+    }
     const step = event.shiftKey ? 1 : 10;
     const movement: Record<string, [number, number]> = {
       ArrowLeft: [-step, 0],
@@ -312,10 +478,24 @@ export function WorldEditor({
     const delta = movement[event.key];
     if (delta) {
       event.preventDefault();
-      update({
+      const moved = {
+        ...item,
         x: limit(item.x + delta[0], 0, bounds.width - item.width),
         y: limit(item.y + delta[1], 0, bounds.height - item.height),
-      });
+      };
+      update({ x: moved.x, y: moved.y });
+      if (
+        moved.x < view.x ||
+        moved.x + moved.width > view.x + view.width ||
+        moved.y < view.y ||
+        moved.y + moved.height > view.y + view.height
+      ) {
+        setCenter({
+          x: moved.x + moved.width / 2,
+          y: moved.y + moved.height / 2,
+        });
+        setDetailScale(scale);
+      }
     }
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
@@ -418,7 +598,8 @@ export function WorldEditor({
             rx="6"
             fill="none"
             stroke={e.id === selected ? "#596d49" : "#93a57e"}
-            strokeWidth={e.id === selected ? 4 : 2}
+            strokeWidth={e.id === selected ? 2 : 1}
+            vectorEffect="non-scaling-stroke"
             strokeDasharray={e.id === selected ? undefined : "8 5"}
           />
         )}
@@ -482,6 +663,7 @@ export function WorldEditor({
               aria-pressed={tool === t.kind}
               onClick={() => {
                 setTool(t.kind);
+                setPanMode(false);
                 setSelected(null);
               }}
             >
@@ -492,7 +674,10 @@ export function WorldEditor({
           <button
             aria-label="Select and move new objects"
             aria-pressed={tool === "move"}
-            onClick={() => setTool("move")}
+            onClick={() => {
+              setTool("move");
+              setPanMode(false);
+            }}
           >
             <Move size={15} />
           </button>
@@ -516,7 +701,11 @@ export function WorldEditor({
               <select
                 aria-label="Select a new object"
                 value={selected ?? ""}
-                onChange={(e) => setSelected(e.target.value || null)}
+                onChange={(e) => {
+                  setSelected(e.target.value || null);
+                  const next = additions.find((a) => a.id === e.target.value);
+                  if (next) focusObject(next);
+                }}
               >
                 <option value="">Choose an object…</option>
                 {additions.map((e) => (
@@ -528,68 +717,161 @@ export function WorldEditor({
             </label>
           )}
         </div>
+        {world.entities.length + additions.length >= 160 && (
+          <p className="modal-copy" role="status">
+            This world has reached its 160-object limit.
+          </p>
+        )}
         <div className="editor-canvas-wrap">
-          <svg
-            ref={canvas}
-            tabIndex={0}
+          <div
+            className="editor-viewport-toolbar"
             role="group"
-            className="editor-canvas"
-            viewBox={`0 0 ${bounds.width} ${bounds.height}`}
-            style={{ aspectRatio: `${bounds.width} / ${bounds.height}` }}
-            aria-label="World edit canvas. Add an object at center, then use arrow keys to move it by ten units, or Shift and arrows by one. Delete removes the selected new object. Existing objects are kept."
-            onKeyDown={canvasKey}
-            onPointerDown={down}
-            onPointerMove={move}
-            onPointerUp={up}
-            onPointerCancel={() => setDrag(null)}
+            aria-label="World view controls"
           >
-            <rect
-              width={bounds.width}
-              height={bounds.height}
-              fill={colors[0]}
-            />
-            <circle cx="1120" cy="175" r="76" fill="#f0dba5" opacity=".6" />
-            <path
-              d="M0 550Q300 300 670 500T1440 470V820H0Z"
-              fill={colors[1]}
-              opacity=".6"
-            />
-            <path
-              d="M0 650Q600 390 1440 650V820H0Z"
-              fill={colors[2]}
-              opacity=".45"
-            />
-            {paperVisible && revisedImage && (
-              <image
-                href={revisedImage}
-                width="1440"
-                height="820"
-                preserveAspectRatio="none"
+            <button
+              aria-label="Zoom out"
+              disabled={scale <= fitScale}
+              onClick={() => zoomTo(scale / 1.5)}
+            >
+              <ZoomOut size={16} />
+            </button>
+            <label className="editor-zoom-control">
+              <input
+                aria-label="World zoom"
+                type="range"
+                min={Math.floor(fitScale * 1000)}
+                max="2000"
+                step="1"
+                value={Math.round(scale * 1000)}
+                onChange={(e) => zoomTo(Number(e.target.value) / 1000)}
               />
-            )}
-            <g opacity={paperVisible ? 0.25 : 1}>
-              {world.entities.map((e) => object(e))}
-            </g>
-            {additions.map((e) => object(e, true))}
-            {drag && !drag.id && (
+              <output aria-live="off">{Math.round(scale * 100)}%</output>
+            </label>
+            <button
+              aria-label="Zoom in"
+              disabled={scale >= 2}
+              onClick={() => zoomTo(scale * 1.5)}
+            >
+              <ZoomIn size={16} />
+            </button>
+            <button aria-pressed={detailScale === null} onClick={fitWorld}>
+              Fit world
+            </button>
+            <button onClick={() => zoomTo(1)}>100%</button>
+            <button
+              onClick={() => {
+                const hero = world.entities.find(
+                  (entity) => entity.kind === "player",
+                )!;
+                focusObject({
+                  ...hero,
+                  ...(state.player
+                    ? {
+                        x: state.player.x - hero.width / 2,
+                        y: state.player.y - hero.height / 2,
+                      }
+                    : {}),
+                });
+              }}
+            >
+              <Focus size={16} /> Character
+            </button>
+            <button
+              aria-pressed={panMode}
+              onClick={() => {
+                setPanMode(!panMode);
+                setDrag(null);
+              }}
+            >
+              <Hand size={16} /> Pan
+            </button>
+            <button disabled={!item} onClick={() => item && focusObject(item)}>
+              <Focus size={16} /> Selection
+            </button>
+          </div>
+          <div
+            ref={viewport}
+            className="editor-detail-viewport"
+            data-pan={panMode || spaceHeld}
+            data-panning={panning}
+          >
+            <svg
+              ref={canvas}
+              tabIndex={0}
+              role="group"
+              className="editor-canvas"
+              viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+              preserveAspectRatio="none"
+              aria-label="World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes it. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Existing objects are kept."
+              onKeyDown={canvasKey}
+              onKeyUp={(e) => {
+                if (e.key === " ") setSpaceHeld(false);
+              }}
+              onBlur={() => {
+                setSpaceHeld(false);
+                stopPointer();
+              }}
+              onPointerDown={down}
+              onPointerMove={move}
+              onPointerUp={up}
+              onPointerCancel={stopPointer}
+              onLostPointerCapture={stopPointer}
+            >
               <rect
-                x={Math.min(drag.x, drag.currentX)}
-                y={Math.min(drag.y, drag.currentY)}
-                width={Math.max(4, Math.abs(drag.currentX - drag.x))}
-                height={Math.max(4, Math.abs(drag.currentY - drag.y))}
-                fill="#9cac7d50"
-                stroke="#647953"
-                strokeWidth="3"
-                strokeDasharray="8 5"
+                width={bounds.width}
+                height={bounds.height}
+                fill={colors[0]}
               />
-            )}
-          </svg>
+              <circle cx="1120" cy="175" r="76" fill="#f0dba5" opacity=".6" />
+              <path
+                d="M0 550Q300 300 670 500T1440 470V820H0Z"
+                fill={colors[1]}
+                opacity=".6"
+              />
+              <path
+                d="M0 650Q600 390 1440 650V820H0Z"
+                fill={colors[2]}
+                opacity=".45"
+              />
+              {paperVisible && revisedImage && (
+                <image
+                  href={revisedImage}
+                  width="1440"
+                  height="820"
+                  preserveAspectRatio="none"
+                />
+              )}
+              <g opacity={paperVisible ? 0.25 : 1}>
+                {world.entities.map((e) => object(e))}
+              </g>
+              {additions.map((e) => object(e, true))}
+              {drag && !drag.id && (
+                <rect
+                  x={Math.min(drag.x, drag.currentX)}
+                  y={Math.min(drag.y, drag.currentY)}
+                  width={Math.max(4, Math.abs(drag.currentX - drag.x))}
+                  height={Math.max(4, Math.abs(drag.currentY - drag.y))}
+                  fill="#9cac7d50"
+                  stroke="#647953"
+                  strokeWidth="3"
+                  strokeDasharray="8 5"
+                />
+              )}
+            </svg>
+            <span className="editor-viewport-position" aria-hidden="true">
+              {Math.round(Math.max(0, view.x))},{" "}
+              {Math.round(Math.max(0, view.y))} ·{" "}
+              {bounds.width.toLocaleString()} × {bounds.height.toLocaleString()}
+            </span>
+          </div>
           <span className="editor-canvas-caption">
-            {item
-              ? "With the canvas focused, arrow keys move 10 units; Shift + arrows move 1. Use the fields below for exact placement."
-              : tool === "move"
-                ? "Drag a new object to move it. Existing objects stay put."
-                : `${tools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
+            {panMode
+              ? "Drag to explore the world, or focus the canvas and use arrow keys. Fit world restores the overview."
+              : item
+                ? "Arrows move 10 units; Shift + arrows move 1. F focuses selection. Hold Space to pan; + / − zoom; 0 fits the world."
+                : tool === "move"
+                  ? "Drag a new object to move it. Existing objects stay put."
+                  : `${tools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
           </span>
         </div>
         <div className="editor-bottom">
@@ -612,6 +894,20 @@ export function WorldEditor({
                     <Trash2 size={16} />
                   </button>
                 </div>
+                {item.art && (
+                  <div className="editor-inspected-art">
+                    <img
+                      src={item.art}
+                      alt={`${title(item)} original artwork`}
+                    />
+                    <span>
+                      Original artwork
+                      <br />
+                      {Math.round(item.width)} × {Math.round(item.height)} world
+                      units
+                    </span>
+                  </div>
+                )}
                 <label>
                   Object role
                   <select

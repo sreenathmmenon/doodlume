@@ -3,6 +3,7 @@ import {
   validateWorld,
   type WorldDefinition,
   type PlayState,
+  type WorldEntity,
 } from "../../shared/world";
 import type { RevisionCheckpoint } from "../../shared/revisions";
 
@@ -13,6 +14,37 @@ export interface SavedWorld {
   history?: RevisionCheckpoint[];
 }
 export const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
+export const MAX_EXPANDED_BACKUP_BYTES = 512 * 1024 * 1024;
+export class BackupSizeError extends Error {}
+const pngAsset = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+const publicArtwork =
+  /^\/art\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.(?:svg|png|jpe?g|webp)$/i;
+type AssetReference = { $asset: number };
+type BackupImage = string | AssetReference;
+type BackupWorld = Omit<WorldDefinition, "sourceImage" | "entities"> & {
+  sourceImage: BackupImage;
+  entities: (Omit<WorldEntity, "art"> & { art?: BackupImage })[];
+};
+function safeBackupKeys(
+  value: unknown,
+  depth = 0,
+  allowAssetReferences = true,
+) {
+  if (depth > 24) throw new Error("Invalid backup nesting.");
+  if (!value || typeof value !== "object") return;
+  for (const key of Object.keys(value)) {
+    if (
+      ["__proto__", "constructor", "prototype"].includes(key) ||
+      (!allowAssetReferences && key === "$asset")
+    )
+      throw new Error("Unsafe backup field.");
+    safeBackupKeys(
+      (value as Record<string, unknown>)[key],
+      depth + 1,
+      allowAssetReferences,
+    );
+  }
+}
 function savedWorld(value: unknown): SavedWorld {
   if (!value || typeof value !== "object")
     throw new Error("Invalid saved world.");
@@ -136,21 +168,81 @@ export function mergeLibraryRecords(
     changed,
   };
 }
-export function serializeBackup(entries: SavedWorld[]): string {
-  const worlds = entries.map(savedWorld);
-  const text = JSON.stringify(
-    {
-      format: "doodlume-library",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      worlds,
-    },
-    null,
-    2,
-  );
+export function serializeBackup(
+  entries: SavedWorld[],
+  options: { currentVersionOnly?: boolean } = {},
+): string {
+  if (!entries.length || entries.length > 1000)
+    throw new Error("Back up between one and 1,000 saved worlds at a time.");
+  const prepared = entries.map(savedWorld);
+  safeBackupKeys(prepared, 0, false);
+  if (new Set(prepared.map((entry) => entry.world.id)).size !== prepared.length)
+    throw new Error("A backup cannot contain repeated world identities.");
+  const assets: string[] = [],
+    assetIds = new Map<string, number>();
+  let expandedBytes = 0;
+  function image(value: string): BackupImage {
+    if (publicArtwork.test(value)) return value;
+    if (!pngAsset.test(value))
+      throw new Error(
+        "This world has unsupported artwork. Saved data has not been changed.",
+      );
+    expandedBytes += value.length;
+    if (expandedBytes > MAX_EXPANDED_BACKUP_BYTES)
+      throw new BackupSizeError(
+        "This backup would restore more than 512 MB of artwork references. Back up individual worlds or their current versions. Saved data is unchanged.",
+      );
+    let index = assetIds.get(value);
+    if (index === undefined) {
+      if (assets.length >= 100000)
+        throw new BackupSizeError(
+          "This backup exceeds 100,000 distinct artwork assets. Back up individual worlds or their current versions. Saved data is unchanged.",
+        );
+      index = assets.length;
+      assets.push(value);
+      assetIds.set(value, index);
+    }
+    return { $asset: index };
+  }
+  function world(value: WorldDefinition): BackupWorld {
+    return {
+      ...value,
+      sourceImage: image(value.sourceImage),
+      entities: value.entities.map((entity) => ({
+        ...entity,
+        ...(entity.art !== undefined ? { art: image(entity.art) } : {}),
+      })),
+    };
+  }
+  const worlds = prepared.map((entry) => ({
+    ...entry,
+    world: world(entry.world),
+    history: options.currentVersionOnly
+      ? []
+      : entry.history?.map((checkpoint) => ({
+          ...checkpoint,
+          before: world(checkpoint.before),
+        })),
+  }));
+  const envelope = {
+    format: "doodlume-library",
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    historyMode: options.currentVersionOnly
+      ? "current-version-only"
+      : "included",
+    assets,
+    worlds,
+  };
+  safeBackupKeys(envelope);
+  const text = JSON.stringify(envelope, null, 2);
   if (new Blob([text]).size > MAX_BACKUP_BYTES)
-    throw new Error(
-      "Back up individual worlds: this library exceeds the 64 MB backup limit.",
+    throw new BackupSizeError(
+      entries.length > 1
+        ? "This library exceeds the 64 MB backup limit. Back up individual worlds instead. Saved data is unchanged."
+        : options.currentVersionOnly
+          ? "This world's current version exceeds the 64 MB backup limit. Saved data is unchanged."
+          : "This world and its undo history exceed the 64 MB backup limit. Saved data is unchanged.",
     );
   return text;
 }
@@ -166,7 +258,7 @@ export function parseBackup(text: string): SavedWorld[] {
   if (
     !data ||
     data.format !== "doodlume-library" ||
-    data.version !== 1 ||
+    ![1, 2].includes(data.version) ||
     !Array.isArray(data.worlds) ||
     !data.worlds.length ||
     data.worlds.length > 1000
@@ -175,15 +267,112 @@ export function parseBackup(text: string): SavedWorld[] {
       "Choose a supported Doodlume backup containing saved worlds.",
     );
   try {
-    const entries = data.worlds.map(savedWorld) as SavedWorld[];
+    const entries =
+      data.version === 1
+        ? (data.worlds.map(savedWorld) as SavedWorld[])
+        : decodeBackup(data);
     if (new Set(entries.map((e) => e.world.id)).size !== entries.length)
       throw new Error();
     return entries;
-  } catch {
+  } catch (error) {
+    if (error instanceof BackupSizeError) throw error;
     throw new Error(
       "This backup has invalid world data. Nothing was imported.",
     );
   }
+}
+
+function decodeBackup(data: Record<string, unknown>): SavedWorld[] {
+  const keys = Object.keys(data);
+  if (
+    keys.some(
+      (key) =>
+        ![
+          "format",
+          "version",
+          "exportedAt",
+          "historyMode",
+          "assets",
+          "worlds",
+        ].includes(key),
+    ) ||
+    typeof data.exportedAt !== "string" ||
+    !Number.isFinite(Date.parse(data.exportedAt)) ||
+    !["included", "current-version-only"].includes(
+      data.historyMode as string,
+    ) ||
+    !Array.isArray(data.assets) ||
+    data.assets.length > 100000 ||
+    data.assets.some(
+      (asset) => typeof asset !== "string" || !pngAsset.test(asset),
+    ) ||
+    new Set(data.assets).size !== data.assets.length
+  )
+    throw new Error("Invalid backup manifest.");
+  const assets = data.assets as string[],
+    used = new Set<number>();
+  let expandedBytes = 0;
+  const record = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Invalid backup structure.");
+    return value as Record<string, unknown>;
+  };
+  safeBackupKeys(data);
+  function image(value: unknown): string {
+    if (typeof value === "string") {
+      if (!publicArtwork.test(value)) throw new Error("Invalid artwork URL.");
+      return value;
+    }
+    const ref = record(value),
+      index = ref.$asset;
+    if (
+      Object.keys(ref).length !== 1 ||
+      !Object.hasOwn(ref, "$asset") ||
+      !Number.isInteger(index) ||
+      (index as number) < 0 ||
+      (index as number) >= assets.length
+    )
+      throw new Error("Invalid artwork reference.");
+    const asset = assets[index as number];
+    expandedBytes += asset.length;
+    if (expandedBytes > MAX_EXPANDED_BACKUP_BYTES)
+      throw new BackupSizeError(
+        "This backup would restore more than 512 MB of artwork references. Choose individual-world backups. Nothing was imported.",
+      );
+    used.add(index as number);
+    return asset;
+  }
+  function world(value: unknown) {
+    const raw = record(value);
+    if (!Array.isArray(raw.entities) || raw.entities.length > 160)
+      throw new Error("Invalid backup objects.");
+    return {
+      ...raw,
+      sourceImage: image(raw.sourceImage),
+      entities: raw.entities.map((entity) => {
+        const e = record(entity);
+        return { ...e, ...(e.art !== undefined ? { art: image(e.art) } : {}) };
+      }),
+    };
+  }
+  const entries = (data.worlds as unknown[]).map((value) => {
+    const entry = record(value);
+    if (
+      entry.history !== undefined &&
+      (!Array.isArray(entry.history) || entry.history.length > 12)
+    )
+      throw new Error("Invalid backup history.");
+    const history = ((entry.history ?? []) as unknown[]).map((checkpoint) => {
+      const h = record(checkpoint);
+      return { ...h, before: world(h.before) };
+    });
+    if (data.historyMode === "current-version-only" && history.length)
+      throw new Error("Unexpected backup history.");
+    return savedWorld({ ...entry, world: world(entry.world), history });
+  });
+  if (used.size !== assets.length) throw new Error("Unused backup assets.");
+  safeBackupKeys(entries, 0, false);
+  return entries;
 }
 
 let database: Promise<IDBDatabase> | undefined;

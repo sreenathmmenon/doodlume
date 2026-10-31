@@ -1,0 +1,115 @@
+.editor-viewport-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #ccd5bf;
+  background: #f6f8ed;
+}
+.editor-viewport-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #bcc9aa;
+  border-radius: 6px;
+  background: #fcfaf5;
+  color: #354b29;
+  font-size: 13px;
+}
+.editor-viewport-toolbar button[aria-pressed="true"] {
+  background: #e3ecd6;
+  border-color: #687f50;
+}
+.editor-viewport-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.editor-zoom-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.editor-zoom-control input {
+  width: clamp(70px, 12vw, 145px);
+  accent-color: #456239;
+}
+.editor-zoom-control output {
+  min-width: 42px;
+  color: #354b29;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.editor-detail-viewport {
+  position: relative;
+  height: clamp(300px, 42dvh, 420px);
+  overflow: hidden;
+  background: #dce3d2;
+}
+.editor-detail-viewport .editor-canvas {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+.editor-detail-viewport[data-pan="true"] .editor-canvas {
+  cursor: grab;
+}
+.editor-detail-viewport[data-panning="true"] .editor-canvas {
+  cursor: grabbing;
+}
+.editor-viewport-position {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  pointer-events: none;
+  border: 1px solid #bdc9ad;
+  border-radius: 4px;
+  background: #fcfaf5ed;
+  padding: 3px 7px;
+  color: #354b29;
+  font:
+    11px/1.4 "Manrope",
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.editor-inspected-art {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+.editor-inspected-art img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border: 1px solid #b6c2aa;
+  border-radius: 6px;
+  background: #fff;
+}
+.editor-inspected-art span {
+  color: #4f623e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+@media (max-width: 520px) {
+  .editor-viewport-toolbar {
+    gap: 6px;
+  }
+  .editor-viewport-toolbar button {
+    min-height: 44px;
+  }
+  .editor-zoom-control {
+    flex: 1;
+  }
+  .editor-zoom-control input {
+    flex: 1;
+    min-width: 55px;
+    width: 70px;
+  }
+  .editor-detail-viewport {
+    height: 320px;
+  }
+}

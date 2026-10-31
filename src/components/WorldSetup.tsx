@@ -3,6 +3,7 @@ import { ArrowUpRight, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { Modal } from "./Modal";
 import { prepareSourceArtwork } from "../lib/source-art";
 import { setupFeedback } from "../../shared/setup";
+import type { RecognitionReview } from "../../shared/recognition-review";
 import type {
   ArtworkBox,
   EntityKind,
@@ -62,22 +63,40 @@ export function WorldSetup({
   image,
   inputKind,
   initial,
+  recovery,
+  resume,
   intent = "",
   onUse,
+  onPause,
   onClose,
 }: {
   image: string;
   inputKind: InputKind;
   initial?: WorldDefinition;
+  recovery?: RecognitionReview;
+  /** Unsaved review edits only; this may not yet satisfy the playable-world contract. */
+  resume?: WorldDefinition;
   intent?: string;
   onUse: (world: WorldDefinition) => void;
+  onPause?: (world: WorldDefinition) => void;
   onClose: () => void;
 }) {
   const [world, setWorld] = useState(() =>
-    initial ? structuredClone(initial) : emptyWorld(image, inputKind, intent),
+    resume
+      ? structuredClone(resume)
+      : recovery
+        ? structuredClone(recovery.draft)
+        : initial
+          ? structuredClone(initial)
+          : emptyWorld(image, inputKind, intent),
   );
   const [tool, setTool] = useState<EntityKind>("player"),
-    [selected, setSelected] = useState(initial?.entities[0]?.id || "");
+    [selected, setSelected] = useState(
+      resume?.entities[0]?.id ||
+        recovery?.draft.entities[0]?.id ||
+        initial?.entities[0]?.id ||
+        "",
+    );
   const [selection, setSelection] = useState<ArtworkBox | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -235,16 +254,47 @@ export function WorldSetup({
       title="Pick. Place. Play."
       onClose={() => {
         request.current?.abort();
+        onPause?.(structuredClone(world));
         onClose();
       }}
     >
       <p className="modal-copy">
-        {initial
-          ? "Fine-tune the first interpretation before it becomes your game."
-          : "Choose what comes alive in your picture. Mark an object, give it a role, then arrange your adventure."}
+        {recovery
+          ? "Your recognized selections are kept below. Correct the highlighted issues before preparing the game. Repairing here uses no model requests."
+          : initial
+            ? "Fine-tune the first interpretation before it becomes your game."
+            : "Choose what comes alive in your picture. Mark an object, give it a role, then arrange your adventure."}
         {world.source === "manual" &&
           " This is your selection—not an AI recognition result."}
       </p>
+      {recovery && (
+        <section
+          className="setup-feedback"
+          aria-label="Recognition repair notes"
+        >
+          <h3>Selections to check</h3>
+          <p className="small-note">
+            These notes describe the original result. Use the current placement
+            checks below as you make corrections.
+          </p>
+          {recovery.issues.map((issue) => (
+            <div key={issue.id}>
+              <p>
+                <strong>{issue.label}</strong> · {issue.message}
+              </p>
+              {issue.objectId &&
+                world.entities.some((e) => e.id === issue.objectId) && (
+                  <button
+                    className="text-button"
+                    onClick={() => setSelected(issue.objectId!)}
+                  >
+                    Adjust {issue.label || "selection"}
+                  </button>
+                )}
+            </div>
+          ))}
+        </section>
+      )}
       <fieldset disabled={busy} inert={busy} className="setup-fieldset">
         <div className="setup-title-fields">
           <label>
@@ -679,7 +729,8 @@ export function WorldSetup({
                     .filter((e) => e.kind === "gate")
                     .map((e) => (
                       <option key={e.id} value={e.id}>
-                        {e.label || "Gate"}
+                        {e.label || "Gate"} · {Math.round(e.x)},{" "}
+                        {Math.round(e.y)}
                       </option>
                     ))}
                 </select>

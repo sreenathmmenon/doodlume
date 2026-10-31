@@ -1,5 +1,5 @@
 import { groundDrawingBoxes } from "./ink-grounding.js";
-import { normalizeDrawing, imageData } from "./images.js";
+import { normalizeDrawing, imageData, cropArtwork } from "./images.js";
 import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
 import { modelJSON, InterpretationError } from "./model.js";
 export { InterpretationError } from "./model.js";
@@ -10,7 +10,24 @@ import {
   type EntityKind,
   type InputKind,
   type WorldDefinition,
+  type WorldEntity,
 } from "../shared/world.js";
+
+import { setupFeedback } from "../shared/setup.js";
+import {
+  validateRecognitionReview,
+  type RecognitionReview,
+  type RecognitionIssue,
+} from "../shared/recognition-review.js";
+
+export class RecognitionReviewError extends InterpretationError {
+  constructor(public recovery: RecognitionReview) {
+    super(
+      "Some recognized objects need your correction. Your current world is unchanged.",
+      422,
+    );
+  }
+}
 
 interface DetectedObject {
   id: string;
@@ -117,17 +134,25 @@ export async function interpretDrawing(
     throw new InterpretationError(
       "Meta returned an incomplete interpretation.",
     );
-  if (detected.clarification)
-    throw new InterpretationError(detected.clarification.slice(0, 280));
-  if (
-    !Array.isArray(detected.objects) ||
-    detected.objects.length > 24 ||
-    detected.objects.length < 2
-  )
+  if (!Array.isArray(detected.objects) || detected.objects.length > 24)
     throw new InterpretationError(
-      "We need a clear character and some ground. Could you make those two shapes distinct?",
+      "The interpretation contains too many or unreadable objects. Try a simpler, closer view.",
     );
-  const ids = new Set<string>();
+  if (!detected.objects.length)
+    throw new InterpretationError(
+      detected.clarification.slice(0, 280) ||
+        "Mark one character and a surface to stand on, or choose the objects yourself.",
+    );
+
+  const issues: RecognitionIssue[] = [];
+  const note = (label: string, message: string, objectId?: string) => {
+    issues.push({
+      id: `repair-${issues.length + 1}`,
+      label: label.slice(0, 80),
+      message: message.slice(0, 320),
+      ...(objectId ? { objectId } : {}),
+    });
+  };
   const roles = [
     "player",
     "terrain",
@@ -138,84 +163,84 @@ export async function interpretDrawing(
     "goal",
     "decoration",
   ];
-  for (const o of detected.objects) {
+  const idCounts = new Map<string, number>();
+  for (const object of detected.objects)
+    if (object && typeof object.id === "string")
+      idCounts.set(object.id, (idCounts.get(object.id) || 0) + 1);
+  let objects: DetectedObject[] = [];
+  for (const [index, object] of detected.objects.entries()) {
+    const o = object as DetectedObject;
+    const label =
+      typeof o?.label === "string"
+        ? o.label.slice(0, 80)
+        : `Selection ${index + 1}`;
     if (
       !o ||
       typeof o !== "object" ||
       typeof o.id !== "string" ||
       !/^[\w-]{1,60}$/.test(o.id) ||
-      ids.has(o.id) ||
+      idCounts.get(o.id) !== 1 ||
       !roles.includes(o.kind) ||
       typeof o.label !== "string" ||
-      (o.targetId !== null && typeof o.targetId !== "string")
-    )
-      throw new InterpretationError(
-        "The interpretation contains unclear object roles or identities. Nothing has been applied.",
+      (o.targetId !== null &&
+        (typeof o.targetId !== "string" || !/^[\w-]{1,60}$/.test(o.targetId)))
+    ) {
+      note(
+        label,
+        "This selection had an unclear identity or role and was left out. Mark it in the original picture if you want to include it.",
       );
-    ids.add(o.id);
-  }
-  for (const o of detected.objects) {
+      continue;
+    }
     if (
       ![o.x, o.y, o.width, o.height].every(Number.isFinite) ||
       o.x < 0 ||
       o.y < 0 ||
       o.width <= 0 ||
       o.height <= 0 ||
-      o.x + o.width > 1001 ||
-      o.y + o.height > 1001
-    )
-      throw new InterpretationError(
-        "Some shapes could not be located clearly. Try a closer, straight-on photo.",
+      o.x + o.width > 1000 ||
+      o.y + o.height > 1000
+    ) {
+      note(
+        label,
+        "Its selection fell outside the picture and was left out. Mark the complete object in the original picture.",
       );
+      continue;
+    }
+    objects.push({ ...o, label });
   }
+  if (!objects.length)
+    throw new InterpretationError(
+      "None of the proposed selections could be located safely. Choose the objects yourself, or try a clearer straight-on image.",
+    );
   if (inputKind === "drawing" && connection.provider !== "meta")
-    detected.objects = await groundDrawingBoxes(normalized, detected.objects);
-  // Reject bad world structure before spending a segmentation request.
-  const placements = detected.objects.map((o) => ({
+    objects = await groundDrawingBoxes(normalized, objects);
+
+  const gates = new Set(
+    objects.filter((o) => o.kind === "gate").map((o) => o.id),
+  );
+  for (const o of objects) {
+    if (o.kind === "lever" && (!o.targetId || !gates.has(o.targetId))) {
+      note(
+        o.label,
+        "Choose which visible gate this switch opens, or change its role.",
+        o.id,
+      );
+      o.targetId = null;
+    }
+  }
+  const entities: WorldEntity[] = objects.map((o) => ({
     id: o.id,
     kind: o.kind,
     x: o.x * 1.44,
     y: o.y * 0.82,
     width: Math.max(4, o.width * 1.44),
     height: Math.max(4, o.height * 0.82),
+    artSource: { x: o.x, y: o.y, width: o.width, height: o.height },
     ...(o.targetId ? { targetId: o.targetId } : {}),
-    label: o.label.slice(0, 80),
+    label: o.label,
   }));
-  validateWorld({
-    id: "candidate",
-    name: detected.name,
-    description: detected.description,
-    theme: detected.theme,
-    width: 1440,
-    height: 820,
-    source: "meta",
-    sourceImage,
-    entities: placements,
-    revision: 1,
-  });
-  const artwork = await extractArtwork(
-    normalized,
-    detected.objects,
-    segmentation,
-    signal,
-    transport,
-    inputKind,
-  );
-  const entities = [];
-  for (const o of detected.objects) {
-    entities.push({
-      id: o.id,
-      kind: o.kind,
-      x: o.x * 1.44,
-      y: o.y * 0.82,
-      width: Math.max(4, o.width * 1.44),
-      height: Math.max(4, o.height * 0.82),
-      ...artwork.get(o.id),
-      artSource: { x: o.x, y: o.y, width: o.width, height: o.height },
-      ...(o.targetId ? { targetId: o.targetId } : {}),
-      label: o.label?.slice(0, 80),
-    });
-  }
+  // Hosted adapters use the extracted character at a playable scale. Its actual
+  // source pixels/box remain unchanged and visible for correction in review.
   for (const entity of entities) {
     if (connection.provider === "meta") continue;
     const limit =
@@ -236,10 +261,16 @@ export async function interpretDrawing(
     entity.width *= scale;
     entity.height *= scale;
   }
-  return validateWorld({
+  for (const entity of entities) {
+    entity.width = Math.max(4, entity.width);
+    entity.height = Math.max(4, entity.height);
+    entity.x = Math.max(0, Math.min(1440 - entity.width, entity.x));
+    entity.y = Math.max(0, Math.min(820 - entity.height, entity.y));
+  }
+  const world: WorldDefinition = {
     id: randomUUID(),
-    name: detected.name,
-    description: detected.description,
+    name: detected.name.trim().slice(0, 80) || "My drawing adventure",
+    description: detected.description.slice(0, 500),
     theme: detected.theme,
     width: 1440,
     height: 820,
@@ -248,5 +279,55 @@ export async function interpretDrawing(
     entities,
     inputKind,
     revision: 1,
-  });
+  };
+  // Preflight every local crop before any optional paid segmentation. A blank
+  // selection stays visible as a repairable source box, never a transparent sprite.
+  for (const [index, o] of objects.entries()) {
+    signal.throwIfAborted();
+    try {
+      entities[index].art = await cropArtwork(
+        normalized,
+        o,
+        inputKind !== "picture",
+      );
+      entities[index].artMethod = inputKind === "picture" ? "crop" : "paper";
+      entities[index].artNote =
+        inputKind === "picture"
+          ? "Original picture crop; background is included."
+          : "Original drawing with paper-background removal.";
+    } catch {
+      signal.throwIfAborted();
+      note(
+        o.label,
+        "This selection contains no clear artwork. Adjust its box around the original mark, or remove it.",
+        o.id,
+      );
+    }
+  }
+  if (detected.clarification)
+    note("Check the interpretation", detected.clarification);
+  const feedback = setupFeedback(world);
+  for (const message of feedback.errors) note("Check the game layout", message);
+  if (issues.length)
+    throw new RecognitionReviewError(
+      validateRecognitionReview({
+        kind: "recognition-review",
+        version: 1,
+        draft: world,
+        issues,
+      }),
+    );
+
+  // A fully valid source-faithful candidate may now request optional cutouts.
+  validateWorld(world);
+  const artwork = await extractArtwork(
+    normalized,
+    objects,
+    segmentation,
+    signal,
+    transport,
+    inputKind,
+  );
+  for (const entity of entities) Object.assign(entity, artwork.get(entity.id));
+  return validateWorld(world);
 }
