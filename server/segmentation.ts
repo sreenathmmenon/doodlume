@@ -25,7 +25,7 @@ export interface ArtworkObject {
 }
 export type Artwork = Pick<WorldEntity, "art" | "artMethod" | "artNote">;
 
-// Baseten does not expose this direct-Meta endpoint. Using both providers is opt-in.
+// Hosted interpretation adapters do not expose this direct-Meta endpoint. Using both providers is opt-in.
 export function segmentationConnection(
   env: Record<string, string | undefined>,
   provider: ModelConnection,

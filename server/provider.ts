@@ -1,11 +1,11 @@
-export type Provider = "meta" | "baseten";
+export type Provider = "meta" | "baseten" | "fireworks";
 
 export interface ModelConnection {
   provider: Provider;
   label: string;
   model: string;
   apiKey: string;
-  credential: "MODEL_API_KEY" | "BASETEN_API_KEY";
+  credential: "MODEL_API_KEY" | "BASETEN_API_KEY" | "FIREWORKS_API_KEY";
   endpoint: string;
   enforcedSchema: boolean;
 }
@@ -17,6 +17,27 @@ export function modelConnection(
   const provider =
     env.MODEL_PROVIDER?.trim() ||
     (env.MODEL_API_KEY?.trim() ? "meta" : "baseten");
+  if (provider === "fireworks") {
+    const model =
+      env.FIREWORKS_MODEL?.trim() ||
+      "accounts/fireworks/models/muse-spark-open";
+    if (
+      !/^accounts\/fireworks\/models\/muse-spark-open(?:-[\w.-]+)?$/.test(model)
+    )
+      throw new Error(
+        "The Fireworks drawing adapter requires a Meta Muse Spark Open model.",
+      );
+    return {
+      provider,
+      label: "Meta via Fireworks",
+      model,
+      apiKey: env.FIREWORKS_API_KEY?.trim() || "",
+      credential: "FIREWORKS_API_KEY",
+      endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
+      // Use the same prompt schema and local checks as the hosted Baseten path.
+      enforcedSchema: false,
+    };
+  }
   if (provider === "baseten") {
     const model = env.BASETEN_MODEL?.trim() || "meta-models/muse-spark-open";
     if (!/^meta-models\/muse-spark-open(?:-[\w.-]+)?$/.test(model))
@@ -49,7 +70,7 @@ export function modelConnection(
       enforcedSchema: true,
     };
   }
-  throw new Error("MODEL_PROVIDER must be meta or baseten.");
+  throw new Error("MODEL_PROVIDER must be meta, baseten or fireworks.");
 }
 
 export function drawingRequest(

@@ -47,6 +47,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           if (active) callbacks.current.onMoment(m);
         },
         onReady: (ready) => {
+          ready.setViewportWidth(host.current?.clientWidth ?? 900);
           ready.setPlaying(active && callbacks.current.playing);
           ready.setMuted(callbacks.current.muted);
         },
@@ -69,7 +70,14 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         audio: { noAudio: true },
         render: { roundPixels: true },
       });
+      const resize = new ResizeObserver(([entry]) => {
+        if (!active) return;
+        game.scale.refresh();
+        current.setViewportWidth(entry.contentRect.width);
+      });
+      resize.observe(host.current!);
       return () => {
+        resize.disconnect();
         active = false;
         game.destroy(true);
         scene.current = undefined;

@@ -13,6 +13,7 @@ import {
   Layers3,
   LoaderCircle,
   Maximize2,
+  Minimize2,
   Pause,
   Pencil,
   Play,
@@ -65,7 +66,7 @@ import type { WorldTelemetry } from "./game/WorldScene";
 
 type Connection = {
   configured: boolean;
-  provider: "meta" | "baseten";
+  provider: "meta" | "baseten" | "fireworks";
   label: string;
   credential: string;
   enforcedSchema: boolean;
@@ -114,6 +115,7 @@ export default function App() {
     "Find the sunseeds, wake the gate, and bring Pip home.",
   );
   const [playing, setPlaying] = useState(false);
+  const [focusedPlay, setFocusedPlay] = useState(false);
   const [started, setStarted] = useState(false);
   const [muted, setMuted] = useState(true);
   const [run, setRun] = useState(0);
@@ -209,11 +211,22 @@ export default function App() {
         !dialog
       )
         e.preventDefault();
-      if (e.key === "Escape" && !dialog) setPlaying(false);
+      if (e.key === "Escape" && !dialog) {
+        setPlaying(false);
+        setFocusedPlay(false);
+      }
     }
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [playing, dialog]);
+  useEffect(() => {
+    const pauseIfHidden = () => {
+      if (document.hidden) setPlaying(false);
+    };
+    document.addEventListener("visibilitychange", pauseIfHidden);
+    return () =>
+      document.removeEventListener("visibilitychange", pauseIfHidden);
+  }, []);
   useEffect(() => {
     if (metrics.completed) setPlaying(false);
   }, [metrics.completed]);
@@ -730,7 +743,10 @@ export default function App() {
               </button>
             )}
           </aside>
-          <section className="world-panel" aria-label="Your playable world">
+          <section
+            className={`world-panel ${focusedPlay ? "focused-play" : ""}`}
+            aria-label="Your playable world"
+          >
             <div className="world-heading">
               <div>
                 <div className="world-kicker">
@@ -835,10 +851,10 @@ export default function App() {
                 <span className="world-location">
                   <Sprout size={15} />
                   {world.theme === "moon"
-                    ? "Moonlit meadows"
+                    ? "THE LUNAR ARCHIVE"
                     : world.theme === "sunset"
-                      ? "Golden afternoon"
-                      : "Somewhere lovely"}
+                      ? "THE AMBER WILDS"
+                      : "THE WANDERING GROVE"}
                 </span>
                 <span
                   className="seed-counter"
@@ -860,15 +876,18 @@ export default function App() {
                   >
                     <Play size={27} fill="currentColor" />
                   </button>
+                  {!started && (
+                    <span className="adventure-overline">
+                      A WORLD FROM YOUR IMAGINATION
+                    </span>
+                  )}
                   <span className="play-caption">
-                    {started
-                      ? "A little pause."
-                      : "Your little adventure awaits."}
+                    {started ? "Adventure paused." : world.name}
                   </span>
                   <span className="play-subcaption">
                     {started
                       ? "Pick up right where you left off."
-                      : "Press play. Meet your world."}
+                      : "Collect the light. Discover a way through. Make it yours."}
                   </span>
                 </div>
               )}
@@ -918,9 +937,23 @@ export default function App() {
                   </button>
                 </div>
               )}
-              <div className="stage-corner">
-                a world by you, a little light by doodlume
-              </div>
+              {playing && !metrics.completed && (
+                <div className="quest-hud">
+                  <span>YOUR NEXT MOVE</span>
+                  <strong>
+                    {metrics.collected < metrics.total
+                      ? `Find the light · ${metrics.total - metrics.collected} remaining`
+                      : world.entities.some(
+                            (e) =>
+                              e.kind === "lever" &&
+                              !latestState.current.activated.includes(e.id),
+                          )
+                        ? "Wake the gate · E near a switch"
+                        : "Find your way home"}
+                  </strong>
+                </div>
+              )}
+              <div className="stage-corner">YOUR IMAGINATION. ALIVE.</div>
             </div>
             <div className="game-toolbar">
               <div className="play-controls">
@@ -966,6 +999,29 @@ export default function App() {
                   <kbd>E</kbd> interact
                 </span>
               </div>
+              <button
+                className="focus-play-button"
+                aria-pressed={focusedPlay}
+                onClick={() => {
+                  setFocusedPlay(!focusedPlay);
+                  requestAnimationFrame(() => {
+                    stage.current?.scrollIntoView({
+                      block: "center",
+                      behavior: "instant",
+                    });
+                    stage.current
+                      ?.querySelector<HTMLElement>(".world-canvas")
+                      ?.focus({ preventScroll: true });
+                  });
+                }}
+              >
+                {focusedPlay ? (
+                  <Minimize2 size={15} />
+                ) : (
+                  <Maximize2 size={15} />
+                )}
+                {focusedPlay ? "Back to studio" : "Focus on play"}
+              </button>
               <button
                 className="icon-button"
                 aria-label="Full screen world"
@@ -1355,7 +1411,7 @@ export default function App() {
             The playable examples work now. To interpret a new drawing, the
             studio needs a server connection to a Meta model. Direct Meta
             billing issues can be handled separately while you use your credited
-            Baseten account.
+            Baseten or Fireworks account.
           </p>
           <div className="setup-instructions">
             <p>
@@ -1364,7 +1420,9 @@ export default function App() {
             <pre>
               {connection?.provider === "meta"
                 ? "MODEL_PROVIDER=meta\nMODEL_API_KEY=your_meta_key"
-                : "MODEL_PROVIDER=baseten\nBASETEN_API_KEY=your_baseten_key"}
+                : connection?.provider === "fireworks"
+                  ? "MODEL_PROVIDER=fireworks\nFIREWORKS_API_KEY=your_fireworks_key"
+                  : "MODEL_PROVIDER=baseten\nBASETEN_API_KEY=your_baseten_key"}
             </pre>
             <p>
               Restart the studio, then check the connection below. Keep the key
@@ -1372,9 +1430,9 @@ export default function App() {
             </p>
           </div>
           <p className="small-note">
-            Baseten uses Meta’s Muse Spark Open. Its JSON output is checked
-            locally; a live trial is still required. To use direct Meta access,
-            set MODEL_PROVIDER=meta and configure MODEL_API_KEY instead.
+            Baseten and Fireworks use Meta’s Muse Spark Open. JSON output is
+            checked locally; a live trial is still required. To use direct Meta
+            access, set MODEL_PROVIDER=meta and configure MODEL_API_KEY instead.
             Provider selection is explicit when both keys exist.
           </p>
           <div className="setup-details">

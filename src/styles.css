@@ -3777,3 +3777,332 @@ kbd {
     justify-content: center;
   }
 }
+
+/* The play surface has its own cinematic art direction, distinct from the studio. */
+.world-panel {
+  border-color: #cdd4c9;
+  box-shadow: 0 16px 48px #183b2e12;
+}
+.game-stage {
+  background: #102832;
+  border: 1px solid #203d43;
+  border-radius: 10px;
+}
+.game-top {
+  top: 20px;
+  left: 23px;
+  right: 23px;
+}
+.world-location {
+  color: #e2e5d3;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1.9px;
+  text-shadow: 0 2px 10px #071e27;
+}
+.world-location svg {
+  color: #dacb9b;
+}
+.seed-counter {
+  min-height: 32px;
+  padding: 6px 12px;
+  gap: 7px;
+  color: #e1dcc4;
+  background: #102831c9;
+  border-color: #b7bf9c45;
+  box-shadow: 0 4px 16px #071e2720;
+  font-size: 11px;
+}
+.seed-counter b {
+  color: #ffe2a2;
+}
+.seed-counter img {
+  width: 17px;
+  height: 18px;
+}
+.play-overlay {
+  background: linear-gradient(180deg, #0719230a, #07192342 35%, #07192391);
+  gap: 0;
+}
+.play-orb {
+  order: 3;
+  margin-top: 24px;
+  width: 62px;
+  height: 62px;
+  color: #183439;
+  background: #eddaa9;
+  border-color: #ffefc4;
+  box-shadow:
+    0 0 0 7px #ffe5a212,
+    0 10px 42px #0004;
+}
+.play-orb:hover {
+  background: #fff0c7;
+  box-shadow:
+    0 0 0 12px #ffe5a218,
+    0 12px 42px #0005;
+}
+.adventure-overline {
+  color: #d9ccab;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 3px;
+  margin-top: 8px;
+}
+.play-caption {
+  color: #fff1d5;
+  font-family: "Georgia", serif;
+  font-weight: 400;
+  font-size: clamp(20px, 2.7vw, 38px);
+  letter-spacing: -0.8px;
+  margin-top: 14px;
+  text-align: center;
+  max-width: 85%;
+  line-height: 1.15;
+  text-shadow: 0 3px 24px #0005;
+}
+.play-subcaption {
+  color: #e2e1d4;
+  font-size: 10px;
+  margin-top: 12px;
+  line-height: 1.6;
+  text-align: center;
+  max-width: 80%;
+}
+.paused-overlay {
+  background: #07192355;
+  backdrop-filter: blur(2px);
+}
+.stage-corner {
+  color: #d5dbcb88;
+  font-size: 6px;
+  letter-spacing: 2px;
+  bottom: 15px;
+  right: 20px;
+}
+.quest-hud {
+  position: absolute;
+  left: 23px;
+  bottom: 20px;
+  padding: 11px 15px;
+  border-left: 2px solid #ecd6a0;
+  color: #f5e9cc;
+  background: linear-gradient(90deg, #102831d9, #10283110);
+  pointer-events: none;
+  max-width: 80%;
+}
+.quest-hud span {
+  display: block;
+  color: #c6cbb6;
+  font-size: 6px;
+  letter-spacing: 2px;
+  margin-bottom: 4px;
+}
+.quest-hud strong {
+  font-size: 10px;
+  font-weight: 500;
+}
+.focus-play-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: #e9eddf;
+  color: #485e4f;
+  border: 1px solid #d6ddcb;
+  border-radius: 7px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.studio-workspace:has(.focused-play) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.studio-workspace:has(.focused-play) > .paper-panel {
+  display: none;
+}
+.focused-play .game-stage {
+  width: min(calc(100% - 20px), calc((100dvh - 190px) * 1440 / 820));
+  align-self: center;
+  margin: 0 10px;
+  aspect-ratio: 1440 / 820;
+}
+.focused-play .game-toolbar {
+  flex: 0;
+}
+.focused-play .world-footnote {
+  min-height: 44px;
+}
+.focused-play .play-caption {
+  font-size: clamp(24px, 3.6vw, 52px);
+}
+.focused-play .world-location {
+  font-size: 11px;
+}
+.focused-play .quest-hud strong {
+  font-size: 13px;
+}
+.focused-play .quest-hud span {
+  font-size: 8px;
+}
+.completion-overlay {
+  background: linear-gradient(180deg, #122b32d9, #0c252deb);
+  color: #fff2d6;
+}
+.completion-overlay h2 {
+  color: #fff2d6;
+  font-family: Georgia, serif;
+  font-weight: 400;
+}
+.completion-overlay p,
+.completion-overlay .eyebrow {
+  color: #d4d8c6;
+}
+.completion-overlay .text-button {
+  color: #ede0bd;
+}
+@media (max-width: 700px) {
+  .game-top {
+    top: 12px;
+    left: 13px;
+    right: 13px;
+  }
+  .world-location {
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+  .seed-counter {
+    min-height: 25px;
+    font-size: 9px;
+    padding: 4px 8px;
+  }
+  .seed-counter img {
+    width: 12px;
+    height: 13px;
+  }
+  .adventure-overline {
+    font-size: 6px;
+    letter-spacing: 1.5px;
+  }
+  .play-caption {
+    font-size: 22px;
+    max-width: 85%;
+  }
+  .play-subcaption {
+    font-size: 8px;
+    margin-top: 8px;
+  }
+  .play-orb {
+    width: 48px;
+    height: 48px;
+    margin-top: 15px;
+  }
+  .quest-hud {
+    left: 12px;
+    bottom: 12px;
+    padding: 7px 10px;
+  }
+  .quest-hud strong {
+    font-size: 8px;
+  }
+  .quest-hud span {
+    font-size: 5px;
+  }
+  .stage-corner {
+    display: none;
+  }
+  .focus-play-button {
+    font-size: 9px;
+    gap: 4px;
+    min-height: 30px;
+    padding: 5px 7px;
+  }
+  .focused-play .game-stage {
+    width: calc(100% - 12px);
+    margin: 0 6px;
+    aspect-ratio: 1.45;
+  }
+  .focused-play .world-location {
+    font-size: 7px;
+  }
+  .focused-play .quest-hud strong {
+    font-size: 8px;
+  }
+  .focused-play .quest-hud span {
+    font-size: 5px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .play-orb {
+    transition: none;
+  }
+}
+
+/* Keep objectives away from the character's route and reserve a dark cinema frame. */
+.quest-hud {
+  top: 61px;
+  bottom: auto;
+}
+.focused-play {
+  background: #10242b;
+  border-color: #263c41;
+  box-shadow: 0 20px 70px #0c242930;
+}
+.focused-play .world-name-label input {
+  color: #e7e5d6;
+}
+.focused-play .world-kicker,
+.focused-play .world-kicker .step-label {
+  color: #a4b5ac;
+  border-color: #52675d;
+}
+.focused-play .world-heading-actions .secondary-button,
+.focused-play .example-badge {
+  background: #20383e;
+  border-color: #465c58;
+  color: #d7ddcb;
+}
+.focused-play .world-heading-actions .icon-button,
+.focused-play .play-controls .icon-button,
+.focused-play .game-toolbar > .icon-button {
+  color: #d0d5c4;
+}
+.focused-play .save-button {
+  border-color: #465c58;
+}
+.focused-play .game-toolbar,
+.focused-play .world-footnote,
+.focused-play .touch-controls {
+  border-color: #33474b;
+}
+.focused-play .world-footnote p,
+.focused-play .keyboard-guide {
+  color: #b6c1b6;
+}
+.focused-play .keyboard-guide kbd {
+  background: #233a40;
+  color: #cfdbc8;
+  border-color: #4d625d;
+}
+.focused-play .play-controls .play-control,
+.focused-play .focus-play-button {
+  background: #d9d5b9;
+  color: #213a3e;
+  border-color: #e2dfc3;
+}
+.focused-play .touch-controls button {
+  background: #243e44;
+  border-color: #50655f;
+  color: #e1dfca;
+}
+@media (max-width: 700px) {
+  .quest-hud {
+    top: 48px;
+    bottom: auto;
+  }
+}
+
+.focused-play .world-footnote {
+  background: #142b32;
+}

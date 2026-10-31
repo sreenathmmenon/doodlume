@@ -6,7 +6,7 @@
 
 The local **studio foundation** is working: three explicitly labeled authored examples, original vector characters, a shared physics engine, drawing/upload input, keyboard and touch controls, device-local world saves, a manual editor that adds to the same running world without losing progress, paired drawing capture, guided perspective correction, and a first-world designer for drawings and pictures.
 
-The server includes direct Meta and Baseten-hosted Meta interpretation adapters. **Neither live model path has been verified yet because no working provider key is configured.** Example worlds are not model results. The original plan's broader drawing-to-play milestone remains open until the real input → Meta model → original artwork → play path is demonstrated. See [the foundation record](docs/MILESTONE-1.md), [same-world editing record](docs/MILESTONE-2.md), and [paper-update record](docs/PAPER-UPDATES.md), and [capture/alignment record](docs/CAPTURE-ALIGNMENT.md).
+The server includes direct Meta, Baseten-hosted Meta and Fireworks-hosted Meta interpretation adapters. **Live model inference remains unverified because no working provider key is configured.** Example worlds are not model results. The original plan's broader drawing-to-play milestone remains open until the real input → Meta model → original artwork → play path is demonstrated. See [the foundation record](docs/MILESTONE-1.md), [same-world editing record](docs/MILESTONE-2.md), and [paper-update record](docs/PAPER-UPDATES.md), and [capture/alignment record](docs/CAPTURE-ALIGNMENT.md).
 
 ## Run locally
 
@@ -34,9 +34,19 @@ BASETEN_MODEL=meta-models/muse-spark-open
 
 Create the key through Baseten Settings → API Keys. If the hackathon portal provides a different Muse Spark Open model slug, set `BASETEN_MODEL` to that exact supported slug. Do not put keys in frontend code or commit them. Restart the server after changing credentials. Baseten's own account access and credits must also be active; the code cannot remove a provider billing restriction.
 
+Fireworks is also supported with an explicit server configuration:
+
+```dotenv
+MODEL_PROVIDER=fireworks
+FIREWORKS_API_KEY=your_key
+FIREWORKS_MODEL=accounts/fireworks/models/muse-spark-open
+```
+
+Fireworks uses its official inference endpoint, the same Meta-only model boundary, prompt schema and local validation. No failure silently changes providers. The configured model must be available to the credited account; no live call has been made without a key. Modal also offers a Muse Spark Open Shared Endpoint, but it is not wired into this application yet. See [the model access record](docs/MODEL-ACCESS.md).
+
 For direct Meta access, use `MODEL_PROVIDER=meta`, `MODEL_API_KEY=...`, and `META_MODEL=muse-wonder-1.0`. If `MODEL_PROVIDER` is absent, an existing direct Meta key selects Meta; otherwise Baseten is selected. With both keys, explicitly set the intended provider. A failed call never switches billing accounts automatically.
 
-Both adapters send the selected drawing and adventure description to the chosen provider and crop artwork from the uploaded page. Direct Meta uses `https://api.meta.ai/v1/chat/completions` with constrained JSON. Baseten uses `https://inference.baseten.co/v1/chat/completions` with Meta's Muse Spark Open, a JSON-schema instruction, and local response validation. Baseten currently does not support enforced structured output/JSON mode for this model, so its adapter omits that unsupported parameter. Reasoning is set to `low`. These are different model paths whose drawing quality still needs live comparison. SAM 3.1 precise cutouts are now integrated after interpretation and page comparison, using the direct Meta Responses API and the official mask parser. Direct Meta enables them by default; Baseten interpretation requires explicit `SAM_ENABLED=true` and a separate `MODEL_API_KEY` to use both providers. Set `SAM_ENABLED=false` for paper cutouts only. Each SAM batch counts toward the same model-call budget. Failed, missing or uncertain masks fall back per object to white-paper removal, labeled in the cutout review. Neither mask quality nor general photographic extraction has been verified live. See [the segmentation record](docs/SAM-CUTOUTS.md). No stock world is returned on a failed request.
+All adapters send the selected drawing and adventure description to the chosen provider and crop artwork from the uploaded page. Direct Meta uses `https://api.meta.ai/v1/chat/completions` with constrained JSON. Baseten uses `https://inference.baseten.co/v1/chat/completions` with Meta's Muse Spark Open, a JSON-schema instruction, and local response validation. Baseten currently does not support enforced structured output/JSON mode for this model, so its adapter omits that unsupported parameter. Reasoning is set to `low`. These are different model paths whose drawing quality still needs live comparison. SAM 3.1 precise cutouts are now integrated after interpretation and page comparison, using the direct Meta Responses API and the official mask parser. Direct Meta enables them by default; Baseten interpretation requires explicit `SAM_ENABLED=true` and a separate `MODEL_API_KEY` to use both providers. Set `SAM_ENABLED=false` for paper cutouts only. Each SAM batch counts toward the same model-call budget. Failed, missing or uncertain masks fall back per object to white-paper removal, labeled in the cutout review. Neither mask quality nor general photographic extraction has been verified live. See [the segmentation record](docs/SAM-CUTOUTS.md). No stock world is returned on a failed request.
 
 ## Pictures and first-world design
 
@@ -48,10 +58,18 @@ Choose **Photo / picture**, then upload a photograph, printed picture or illustr
 
 See [the picture workflow record](docs/PICTURE-WORLDS.md). This is a 2D adaptation workflow, not hidden-scene reconstruction, generated game code or a 3D world model.
 
+## Game presentation and feel
+
+The three themes have authored procedural environments with layered trees, lunar arches and amber rock formations, parallax, light shafts, drifting motes and a restrained foreground vignette. Original drawing and photo subjects remain the actual playable artwork. The generic engine adds separate visual character poses, breathing, running rhythm, airborne stretch, landing compression, feet-based dust, collectible light rings and rewards. Animation does not resize the physics body. Camera follow includes directional anticipation and remains inside the world.
+
+**Focus on play** expands the game into a dark cinema frame while preserving the live scene. Escape pauses and returns to the studio layout. Jump height responds to how long the button is held; thin platforms support landing from above without blocking jumps from underneath. Grounded drag, air steering, buffered jumps and forgiving platform-edge timing are shared by every world. The objective display tracks remaining collectibles and switch progress. Completing a world does not require every collectible.
+
+An original synthesized score and event-specific sound cues run locally after the player enables sound. Pausing fades audio, completion lets the final notes decay, and scene destruction closes the audio context. The game pauses when the page becomes hidden. Reduced-motion mode removes decorative drifting particles, camera travel/zoom, hero deformation and collectible bobbing. See [the game-feel work record](docs/GAME-FEEL.md) for the actual playthrough checks and remaining acceptance work.
+
 ## Play
 
 - Move: left/right arrows or A/D.
-- Jump: Space, up arrow, or W.
+- Jump: Space, up arrow, or W. Hold for a higher jump; release for a short hop.
 - Interact: E near a lever, or click the nearby lever.
 - Collect the sunseeds and reach home.
 - **Use phone camera** pairs a one-photo connection with this studio. Choose Wi-Fi for a physical phone on the same network, or preview pairing on this computer. The phone can choose/take a photo, rotate, preview, and send; it cannot access model keys or studio controls. Wi-Fi mode starts a temporary drawing-only listener on the next port (5174 with `npm run studio`) and closes when captures finish, expire, or are cancelled. It starts only when selected. No internet hosting is configured.

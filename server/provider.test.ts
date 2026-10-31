@@ -18,6 +18,30 @@ test("provider selection keeps credentials and endpoints separate and only allow
       .apiKey,
     "",
   );
+  const fireworks = modelConnection({
+    MODEL_PROVIDER: "fireworks",
+    FIREWORKS_API_KEY: "test-fireworks",
+    BASETEN_API_KEY: "test-baseten",
+    MODEL_API_KEY: "test-meta",
+  });
+  assert.equal(fireworks.apiKey, "test-fireworks");
+  assert.equal(fireworks.credential, "FIREWORKS_API_KEY");
+  assert.equal(
+    fireworks.endpoint,
+    "https://api.fireworks.ai/inference/v1/chat/completions",
+  );
+  assert.equal(fireworks.model, "accounts/fireworks/models/muse-spark-open");
+  assert.equal(
+    modelConnection({ MODEL_PROVIDER: "fireworks", MODEL_API_KEY: "test-meta" })
+      .apiKey,
+    "",
+  );
+  assert.throws(() =>
+    modelConnection({
+      MODEL_PROVIDER: "fireworks",
+      FIREWORKS_MODEL: "accounts/fireworks/models/something-else",
+    }),
+  );
   assert.throws(() =>
     modelConnection({
       MODEL_PROVIDER: "baseten",
