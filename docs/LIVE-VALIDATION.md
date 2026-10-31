@@ -46,3 +46,18 @@ Browser verification used an isolated loopback origin and clearly labelled autho
 A completed QA world at its goal continued into the editor, expanded from 2,880 to 4,320 units at revision 3, resumed without a repeated completion overlay, collected another item through keyboard movement, paused and saved. Its downloaded backup retained two collected IDs, the activated lever, completed/exploring flags, character position and two undo checkpoints. Reload/reopen retained these; undo advanced to revision 4 while keeping later collected progress. Explicit replay reset the attempt to zero items while preserving world/history. A 390 × 844 viewport check covers the backup controls and library layout; it does not establish physical-phone usability.
 
 Two focused regression tests bring the suite to 22. They cover retention, migration precedence, conflict-safe import/copy, malformed backups and immutable earned-state continuation. Production build and type checking pass. Original council scores remain a historical baseline: these repairs do not establish a 10/10 rating, broad recognition reliability, device performance or emotional engagement.
+
+
+## Quality repair pair 2 — readable interaction and source-first creation
+
+Creation uses a single logical source → intent → Create flow at narrow widths. The source image opens a separate original-image inspector with a keyboard-operable 100–400% zoom, contained scrolling and a Fit action. Returning keeps the source and intent. Phone intent text uses 16px type.
+
+The editor provides Add at center, a chooser for new objects, arrow-key movement in ten-unit increments, Shift-arrow one-unit movement, Delete/Backspace removal, and the existing numerical placement fields. Existing objects remain protected. A browser test inserted a bridge with Enter, moved X from 610 to 621 using coarse/fine keys, inserted and deleted a platform, selected the surviving bridge through the native chooser and applied the edit. This is targeted keyboard verification, not a screen-reader or physical-device certification.
+
+Six rendered supporting-text samples now measure contrast ratios from 5.76:1 to 6.09:1. The previously reviewed editor instruction changed from 12px at 3.03:1 to 13px at 5.92:1 on the cream surface. This does not assert that every surface in the app has been audited. Operational labels, tools and numerical fields also use darker text and larger controls.
+
+At a 390 × 844 browser viewport the source occupied 328px of the available content width, followed vertically by intent and Create; the page had no horizontal overflow. The original-image inspector reached a 1,304px scrollable image at 400% while the page remained 390px wide. Source pixels were unchanged.
+
+Settings and creation now say API key configured, and explicitly distinguish a local configuration refresh from a live provider request. Segmentation configuration no longer claims a live-tested connection. Help describes the current review flow, generic collectible objects, optional collection, destination completion, touch controls, continued authorship and backups. The gameplay hint marks collections as optional. No model credits were spent on these checks.
+
+Recognition repeatability, bounded required-objective authoring, expanded-map precision/zoom, physical-phone use, forced storage interruption, named-device performance and real creator engagement remain separate open acceptance gates. The original council is not re-scored automatically from these repairs.

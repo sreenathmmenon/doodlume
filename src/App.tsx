@@ -42,6 +42,7 @@ import { WorldEditor } from "./components/WorldEditor";
 import { ArtworkReview } from "./components/ArtworkReview";
 import { setupFeedback } from "../shared/setup";
 import { WorldLibrary } from "./components/WorldLibrary";
+import { SourceInspector } from "./components/SourceInspector";
 import { WorldSetup } from "./components/WorldSetup";
 import {
   updateLibrary,
@@ -79,6 +80,7 @@ type Connection = {
 };
 type Dialog =
   | "create"
+  | "source"
   | "review"
   | "sketch"
   | "worlds"
@@ -149,6 +151,7 @@ export default function App() {
   worldNow.current = world;
   const canvas = useRef<WorldCanvasHandle>(null);
   const file = useRef<HTMLInputElement>(null);
+  const sourceInspect = useRef<HTMLButtonElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const latestState = useRef<PlayState>(emptyPlayState());
   const request = useRef<AbortController | null>(null);
@@ -550,10 +553,20 @@ export default function App() {
           Photo
         </button>
       </div>
-      <div className={`paper-frame ${customSource ? "custom-paper" : ""}`}>
+      <button
+        type="button"
+        ref={sourceInspect}
+        className={`paper-frame ${customSource ? "custom-paper" : ""}`}
+        aria-label="Inspect original image"
+        disabled={busy}
+        onClick={() => setDialog("source")}
+      >
         <span className="paper-tape" />
         <img src={source} alt={sourceName} />
-        <div className="source-caption">
+        <span className="source-inspect-hint">
+          Inspect image <Maximize2 size={12} />
+        </span>
+        <span className="source-caption">
           <span>
             {customSource || world.source !== "example"
               ? inputKind === "picture"
@@ -564,8 +577,8 @@ export default function App() {
                 : "EXAMPLE DRAWING"}
           </span>
           <span>↗</span>
-        </div>
-      </div>
+        </span>
+      </button>
       <div className="source-actions">
         <button
           className="secondary-button"
@@ -652,7 +665,7 @@ export default function App() {
           className={`status-dot ${connection?.configured ? "connected" : ""}`}
         />
         {connection?.configured
-          ? "Meta connected"
+          ? "Meta API key configured"
           : connectionError
             ? "Connection unavailable"
             : "Connect Meta"}
@@ -919,12 +932,12 @@ export default function App() {
               )}
               {playing && (!metrics.completed || metrics.exploring) && (
                 <div className="quest-hud">
-                  <span>NEXT</span>
+                  <span>SUGGESTED</span>
                   <strong>
                     {metrics.exploring
                       ? "Explore · achievement kept"
                       : metrics.collected < metrics.total
-                        ? `Collect · ${metrics.total - metrics.collected} remaining`
+                        ? `Optional items · ${metrics.total - metrics.collected} left`
                         : world.entities.some(
                               (e) =>
                                 e.kind === "lever" &&
@@ -1123,6 +1136,16 @@ export default function App() {
         >
           {sourcePanel}
         </Modal>
+      )}
+      {dialog === "source" && (
+        <SourceInspector
+          image={source}
+          name={sourceName}
+          onClose={() => {
+            setDialog("create");
+            requestAnimationFrame(() => sourceInspect.current?.focus());
+          }}
+        />
       )}
       {dialog === "review" && draft && (
         <Modal
@@ -1348,7 +1371,7 @@ export default function App() {
                   className={`status-dot ${connection?.configured ? "connected" : ""}`}
                 />
                 {connection?.configured
-                  ? "Connected"
+                  ? "API key configured"
                   : connectionError
                     ? "Local API is unavailable"
                     : "API key not configured"}
@@ -1357,17 +1380,21 @@ export default function App() {
           </div>
           <div className="setup-details">
             <span>Model</span>
-            <code>{connection?.model ?? "Not connected"}</code>
+            <code>{connection?.model ?? "Configuration unavailable"}</code>
             <span>Source cutouts</span>
             <span>
               {connection?.segmentation?.enabled &&
               connection.segmentation.configured
-                ? "Meta segmentation connected"
+                ? "Meta segmentation configured · not live-tested"
                 : "Original image crops"}
             </span>
             <span>Storage</span>
             <span>This browser · {saved.length} saved worlds</span>
           </div>
+          <p className="modal-copy">
+            This checks local configuration without spending model credits. A
+            configured key does not confirm provider availability.
+          </p>
           {!connection?.configured && (
             <p className="modal-copy">
               Connect a Meta provider on the server to create worlds from new
@@ -1378,7 +1405,7 @@ export default function App() {
             className="secondary-button"
             onClick={() => void checkConnection()}
           >
-            <RotateCcw size={16} /> Check connection
+            <RotateCcw size={16} /> Refresh configuration
           </button>
         </Modal>
       )}
@@ -1398,8 +1425,9 @@ export default function App() {
               <section>
                 <h3>Start with a page</h3>
                 <p>
-                  Add a clear drawing, or open the pencil to make one here. Your
-                  page stays visible beside your world.
+                  Upload a drawing or photo, or use the pencil to draw here.
+                  Inspect the original image, describe how it should play, then
+                  review its objects before playing.
                 </p>
               </section>
             </div>
@@ -1409,7 +1437,9 @@ export default function App() {
                 <h3>Take a little adventure</h3>
                 <p>
                   Move with ← → or A / D. Jump with Space, ↑, or W. Collect the
-                  sunseeds. Press E near a lever to open its gate. Find home.
+                  objects in your world. Press E near a lever to open its gate.
+                  Reach a destination to complete the adventure; collectibles
+                  are optional. On phones, use the on-screen controls.
                 </p>
               </section>
             </div>
@@ -1419,7 +1449,8 @@ export default function App() {
                 <h3>Keep the little things</h3>
                 <p>
                   Save your world to this device. Its character position,
-                  sunseeds, and open gates come with it.
+                  collected items and open gates come with it. Continue building
+                  after completion, or back up your worlds from My worlds.
                 </p>
               </section>
             </div>

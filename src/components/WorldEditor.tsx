@@ -1,4 +1,10 @@
-import { useMemo, useState, type PointerEvent } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type KeyboardEvent,
+} from "react";
 import {
   ArrowUpRight,
   Check,
@@ -83,8 +89,12 @@ export function WorldEditor({
   revisedImage?: string;
   onBack?: () => void;
 }) {
-  const [bounds, setBounds] = useState({ width: world.width, height: world.height });
-  const expanded = bounds.width !== world.width || bounds.height !== world.height;
+  const [bounds, setBounds] = useState({
+    width: world.width,
+    height: world.height,
+  });
+  const expanded =
+    bounds.width !== world.width || bounds.height !== world.height;
   const [additions, setAdditions] = useState<WorldEntity[]>(() =>
     structuredClone(proposal?.patch.additions ?? initialAdditions ?? []),
   );
@@ -105,6 +115,7 @@ export function WorldEditor({
   const [error, setError] = useState("");
   const [drawing, setDrawing] = useState(false);
   const [customArt, setCustomArt] = useState<string | null>(null);
+  const canvas = useRef<SVGSVGElement>(null);
   const item = additions.find((e) => e.id === selected);
   const gates = [...world.entities, ...additions].filter(
     (e) => e.kind === "gate",
@@ -124,7 +135,15 @@ export function WorldEditor({
       additions,
       ...(expanded ? { bounds } : {}),
     }),
-    [world.id, world.revision, additions, proposal, revisedImage, bounds, expanded],
+    [
+      world.id,
+      world.revision,
+      additions,
+      proposal,
+      revisedImage,
+      bounds,
+      expanded,
+    ],
   );
   let problem = "";
   if (additions.length || expanded) {
@@ -139,8 +158,16 @@ export function WorldEditor({
   function point(e: PointerEvent<SVGSVGElement>) {
     const r = e.currentTarget.getBoundingClientRect();
     return {
-      x: limit(((e.clientX - r.left) * bounds.width) / r.width, 0, bounds.width),
-      y: limit(((e.clientY - r.top) * bounds.height) / r.height, 0, bounds.height),
+      x: limit(
+        ((e.clientX - r.left) * bounds.width) / r.width,
+        0,
+        bounds.width,
+      ),
+      y: limit(
+        ((e.clientY - r.top) * bounds.height) / r.height,
+        0,
+        bounds.height,
+      ),
     };
   }
   function down(e: PointerEvent<SVGSVGElement>) {
@@ -186,7 +213,11 @@ export function WorldEditor({
             ? {
                 ...a,
                 x: limit(original.x + p.x - drag.x, 0, bounds.width - a.width),
-                y: limit(original.y + p.y - drag.y, 0, bounds.height - a.height),
+                y: limit(
+                  original.y + p.y - drag.y,
+                  0,
+                  bounds.height - a.height,
+                ),
               }
             : a,
         ),
@@ -244,6 +275,52 @@ export function WorldEditor({
       items.map((e) => (e.id === selected ? { ...e, ...change } : e)),
     );
     setError("");
+  }
+  function insertAtCenter() {
+    if (tool === "move") return;
+    const config = tools.find((t) => t.kind === tool)!;
+    const entity: WorldEntity = {
+      id: `drawn-${crypto.randomUUID()}`,
+      kind: tool,
+      x: Math.round((bounds.width - config.width) / 2),
+      y: Math.round((bounds.height - config.height) / 2),
+      width: config.width,
+      height: config.height,
+      label: `New ${config.label.toLowerCase()}`,
+      ...(tool === "coin" ? { art: "/art/seed.svg" } : {}),
+      ...(customArt ? { art: customArt } : {}),
+      ...(tool === "lever" && gates.length === 1
+        ? { targetId: gates[0].id }
+        : {}),
+    };
+    setAdditions((items) => [...items, entity]);
+    setSelected(entity.id);
+    setCustomArt(null);
+    setReviewed(false);
+    setError("");
+    requestAnimationFrame(() => canvas.current?.focus());
+  }
+  function canvasKey(event: KeyboardEvent<SVGSVGElement>) {
+    if (!item) return;
+    const step = event.shiftKey ? 1 : 10;
+    const movement: Record<string, [number, number]> = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+    };
+    const delta = movement[event.key];
+    if (delta) {
+      event.preventDefault();
+      update({
+        x: limit(item.x + delta[0], 0, bounds.width - item.width),
+        y: limit(item.y + delta[1], 0, bounds.height - item.height),
+      });
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      removeSelected();
+    }
   }
   function removeSelected() {
     setReviewed(false);
@@ -350,15 +427,9 @@ export function WorldEditor({
   }
   return (
     <>
-      <Modal
-        title="Edit your world"
-        onClose={onClose}
-        wide
-      >
+      <Modal title="Edit your world" onClose={onClose} wide>
         <div className="editor-intro">
-          <p>
-            Add objects and connect new paths. Your progress is kept.
-          </p>
+          <p>Add objects and connect new paths. Your progress is kept.</p>
           <span className="editor-origin">
             {proposal
               ? `${proposal.provider} · proposed additions`
@@ -392,7 +463,19 @@ export function WorldEditor({
           </div>
         )}
         <div className="editor-tools" role="group" aria-label="Objects to add">
-          <button onClick={() => { setBounds(b => ({...b, width:Math.min(12000,b.width+1440)})); setReviewed(false); }} disabled={bounds.width >= 12000} aria-label="Extend world to the right"><Plus size={13} /> Add space</button>
+          <button
+            onClick={() => {
+              setBounds((b) => ({
+                ...b,
+                width: Math.min(12000, b.width + 1440),
+              }));
+              setReviewed(false);
+            }}
+            disabled={bounds.width >= 12000}
+            aria-label="Extend world to the right"
+          >
+            <Plus size={13} /> Add space
+          </button>
           {tools.map((t) => (
             <button
               key={t.kind}
@@ -414,18 +497,57 @@ export function WorldEditor({
             <Move size={15} />
           </button>
         </div>
+        <div className="editor-keyboard-controls">
+          <button
+            className="secondary-button"
+            disabled={
+              tool === "move" || world.entities.length + additions.length >= 160
+            }
+            onClick={insertAtCenter}
+          >
+            Add{" "}
+            {tools.find((t) => t.kind === tool)?.label.toLowerCase() ??
+              "object"}{" "}
+            at center
+          </button>
+          {additions.length > 0 && (
+            <label>
+              New object{" "}
+              <select
+                aria-label="Select a new object"
+                value={selected ?? ""}
+                onChange={(e) => setSelected(e.target.value || null)}
+              >
+                <option value="">Choose an object…</option>
+                {additions.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {title(e)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         <div className="editor-canvas-wrap">
           <svg
+            ref={canvas}
+            tabIndex={0}
+            role="group"
             className="editor-canvas"
             viewBox={`0 0 ${bounds.width} ${bounds.height}`}
             style={{ aspectRatio: `${bounds.width} / ${bounds.height}` }}
-            aria-label="World edit canvas. Select an object type, then drag on the world to place it. Existing objects are kept."
+            aria-label="World edit canvas. Add an object at center, then use arrow keys to move it by ten units, or Shift and arrows by one. Delete removes the selected new object. Existing objects are kept."
+            onKeyDown={canvasKey}
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}
             onPointerCancel={() => setDrag(null)}
           >
-            <rect width={bounds.width} height={bounds.height} fill={colors[0]} />
+            <rect
+              width={bounds.width}
+              height={bounds.height}
+              fill={colors[0]}
+            />
             <circle cx="1120" cy="175" r="76" fill="#f0dba5" opacity=".6" />
             <path
               d="M0 550Q300 300 670 500T1440 470V820H0Z"
@@ -463,9 +585,11 @@ export function WorldEditor({
             )}
           </svg>
           <span className="editor-canvas-caption">
-            {tool === "move"
-              ? "Drag a new object to move it. Existing objects stay put."
-              : `${tools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
+            {item
+              ? "With the canvas focused, arrow keys move 10 units; Shift + arrows move 1. Use the fields below for exact placement."
+              : tool === "move"
+                ? "Drag a new object to move it. Existing objects stay put."
+                : `${tools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
           </span>
         </div>
         <div className="editor-bottom">
@@ -643,8 +767,12 @@ export function WorldEditor({
               )}
             </div>
             <p className="editor-scope">
-              {expanded ? `World extends to ${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()}. ` : ""}
-              {additions.length > 0 ? `${additions.length} new ${additions.length === 1 ? "object" : "objects"}. ` : ""}
+              {expanded
+                ? `World extends to ${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()}. `
+                : ""}
+              {additions.length > 0
+                ? `${additions.length} new ${additions.length === 1 ? "object" : "objects"}. `
+                : ""}
               Your existing objects and progress stay with you.
             </p>
             {(problem || error) && (
