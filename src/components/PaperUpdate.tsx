@@ -49,7 +49,8 @@ export function PaperUpdate({
   const file = useRef<HTMLInputElement>(null);
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
-  const available = configured && world.source === "meta";
+  const available =
+    configured && world.source === "meta" && world.inputKind !== "picture";
   function close() {
     request.current?.abort();
     onClose();

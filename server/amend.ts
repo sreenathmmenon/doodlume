@@ -70,6 +70,10 @@ export async function interpretAmendment(
     throw new InterpretationError(
       "Automatic page comparison starts with a world interpreted from your own drawing. You can place additions manually on this authored example.",
     );
+  if (world.inputKind === "picture")
+    throw new InterpretationError(
+      "Picture worlds use the manual editor for further changes. Automatic comparison currently supports revised drawings only.",
+    );
   if (typeof intent !== "string" || intent.length > 500)
     throw new InterpretationError(
       "Describe the change in 500 characters or fewer.",

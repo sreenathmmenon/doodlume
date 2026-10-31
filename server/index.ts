@@ -67,75 +67,89 @@ app.get("/api/status", async () => ({
   },
 }));
 for (const action of ["interpret", "amend"] as const)
-  app.post<{ Body: { image?: unknown; intent?: unknown; world?: unknown } }>(
-    `/api/${action}`,
-    async (request, reply) => {
-      if (!connection.apiKey)
-        return reply.code(503).send({
-          error: `Add ${connection.credential} to .env.local and restart the studio to use ${connection.label}.`,
-        });
-      if (inFlight)
-        return reply.code(429).send({
-          error:
-            "One drawing is already being interpreted. Wait for it to finish.",
-        });
-      if (requests >= maxRequests)
-        return reply.code(429).send({
-          error:
-            "The local session request limit has been reached. Your current world is safe.",
-        });
-      const body = request.body;
-      if (!body || typeof body !== "object")
-        return reply.code(400).send({ error: "Choose a drawing first." });
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60_000);
-      const onClose = () => {
-        if (!reply.raw.writableFinished) controller.abort();
-      };
-      reply.raw.on("close", onClose);
-      inFlight = true;
-      reserveRequest();
-      try {
-        if (action === "amend")
-          return {
-            proposal: await interpretAmendment(
-              body.world,
-              body.image,
-              body.intent ?? "",
-              connection,
-              controller.signal,
-              fetch,
-              segmentation,
-            ),
-          };
+  app.post<{
+    Body: {
+      image?: unknown;
+      intent?: unknown;
+      world?: unknown;
+      inputKind?: unknown;
+    };
+  }>(`/api/${action}`, async (request, reply) => {
+    if (!connection.apiKey)
+      return reply.code(503).send({
+        error: `Add ${connection.credential} to .env.local and restart the studio to use ${connection.label}.`,
+      });
+    if (inFlight)
+      return reply.code(429).send({
+        error:
+          "One drawing is already being interpreted. Wait for it to finish.",
+      });
+    if (requests >= maxRequests)
+      return reply.code(429).send({
+        error:
+          "The local session request limit has been reached. Your current world is safe.",
+      });
+    const body = request.body;
+    if (!body || typeof body !== "object")
+      return reply.code(400).send({ error: "Choose a drawing first." });
+    if (
+      body.inputKind !== undefined &&
+      (typeof body.inputKind !== "string" ||
+        !["drawing", "picture"].includes(body.inputKind))
+    )
+      return reply
+        .code(400)
+        .send({ error: "Choose drawing or picture input." });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const onClose = () => {
+      if (!reply.raw.writableFinished) controller.abort();
+    };
+    reply.raw.on("close", onClose);
+    inFlight = true;
+    reserveRequest();
+    try {
+      if (action === "amend")
         return {
-          world: await interpretDrawing(
+          proposal: await interpretAmendment(
+            body.world,
             body.image,
             body.intent ?? "",
             connection,
             controller.signal,
+            fetch,
             segmentation,
           ),
         };
-      } catch (error) {
-        if (error instanceof InterpretationError)
-          return reply.code(error.status).send({ error: error.message });
-        if (controller.signal.aborted)
-          return reply.code(504).send({
-            error:
-              "The interpretation took too long or was stopped. Your drawing and current world are safe.",
-          });
-        return reply.code(502).send({
+      return {
+        world: await interpretDrawing(
+          body.image,
+          body.intent ?? "",
+          connection,
+          controller.signal,
+          segmentation,
+          fetch,
+          body.inputKind === "picture" ? "picture" : "drawing",
+        ),
+      };
+    } catch (error) {
+      if (error instanceof InterpretationError)
+        return reply.code(error.status).send({ error: error.message });
+      if (controller.signal.aborted)
+        return reply.code(504).send({
           error:
-            "The drawing could not become a world this time. Your current world is unchanged.",
+            "The interpretation took too long or was stopped. Your drawing and current world are safe.",
         });
-      } finally {
-        clearTimeout(timeout);
-        reply.raw.off("close", onClose);
-        inFlight = false;
-      }
-    },
-  );
+      return reply.code(502).send({
+        error:
+          "The drawing could not become a world this time. Your current world is unchanged.",
+      });
+    } finally {
+      clearTimeout(timeout);
+      reply.raw.off("close", onClose);
+      inFlight = false;
+    }
+  });
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof CaptureError)
     return reply.code(error.status).send({ error: error.message });

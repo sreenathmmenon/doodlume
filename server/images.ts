@@ -58,11 +58,19 @@ export function pixelBox(
 export async function cropArtwork(
   buffer: Buffer,
   box: { x: number; y: number; width: number; height: number },
+  removePaper = true,
 ) {
   const meta = await sharp(buffer).metadata();
   const iw = meta.width!,
     ih = meta.height!;
   const { left, top, width, height } = pixelBox(box, iw, ih);
+  if (!removePaper)
+    return imageData(
+      await sharp(buffer)
+        .extract({ left, top, width, height })
+        .png()
+        .toBuffer(),
+    );
   const crop = await sharp(buffer)
     .extract({ left, top, width, height })
     .ensureAlpha()

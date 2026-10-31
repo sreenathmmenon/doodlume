@@ -8,6 +8,13 @@ export type EntityKind =
   | "goal"
   | "decoration";
 export type Theme = "grove" | "moon" | "sunset";
+export type InputKind = "drawing" | "picture";
+export interface ArtworkBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface WorldEntity {
   id: string;
@@ -17,8 +24,10 @@ export interface WorldEntity {
   width: number;
   height: number;
   art?: string;
-  artMethod?: "sam" | "paper";
+  artMethod?: "sam" | "paper" | "crop";
   artNote?: string;
+  artSource?: ArtworkBox;
+  artShape?: "box" | "ellipse";
   targetId?: string;
   label?: string;
 }
@@ -30,7 +39,8 @@ export interface WorldDefinition {
   theme: Theme;
   width: number;
   height: number;
-  source: "example" | "meta";
+  source: "example" | "meta" | "manual";
+  inputKind?: InputKind;
   sourceImage: string;
   entities: WorldEntity[];
   revision: number;
@@ -59,7 +69,9 @@ export function validateWorld(value: unknown): WorldDefinition {
   if (
     typeof w.id !== "string" ||
     !/^[\w-]{1,80}$/.test(w.id) ||
-    !["example", "meta"].includes(w.source) ||
+    !["example", "meta", "manual"].includes(w.source) ||
+    (w.inputKind !== undefined &&
+      !["drawing", "picture"].includes(w.inputKind)) ||
     typeof w.description !== "string" ||
     w.description.length > 500 ||
     !Number.isInteger(w.revision) ||
@@ -128,11 +140,31 @@ export function validateWorld(value: unknown): WorldDefinition {
       throw new Error("Unsupported artwork format.");
     if (
       (entity.artMethod !== undefined &&
-        !["sam", "paper"].includes(entity.artMethod)) ||
+        !["sam", "paper", "crop"].includes(entity.artMethod)) ||
       (entity.artNote !== undefined &&
         (typeof entity.artNote !== "string" || entity.artNote.length > 200))
     )
       throw new Error("Unsupported artwork extraction details.");
+    if (entity.artSource) {
+      const b = entity.artSource;
+      if (
+        ![b.x, b.y, b.width, b.height].every(Number.isFinite) ||
+        b.x < 0 ||
+        b.y < 0 ||
+        b.width <= 0 ||
+        b.height <= 0 ||
+        b.x + b.width > 1001 ||
+        b.y + b.height > 1001
+      )
+        throw new Error(
+          "An artwork selection falls outside the source picture.",
+        );
+    }
+    if (
+      entity.artShape !== undefined &&
+      !["box", "ellipse"].includes(entity.artShape)
+    )
+      throw new Error("Unsupported selection shape.");
   }
   if (
     w.entities.filter((e) => e.kind === "player").length !== 1 ||

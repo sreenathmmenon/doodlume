@@ -9,7 +9,7 @@ import {
 } from "@meta-sam/parser";
 import { cropArtwork, imageData, pixelBox } from "./images.js";
 import type { ModelConnection } from "./provider.js";
-import type { WorldEntity } from "../shared/world.js";
+import type { WorldEntity, InputKind } from "../shared/world.js";
 
 export interface SegmentationConnection {
   enabled: boolean;
@@ -207,6 +207,7 @@ export async function extractArtwork(
   connection: SegmentationConnection,
   signal: AbortSignal,
   transport: typeof fetch = fetch,
+  inputKind: InputKind = "drawing",
 ): Promise<Map<string, Artwork>> {
   signal.throwIfAborted();
   const meta = await sharp(source).metadata();
@@ -327,9 +328,12 @@ export async function extractArtwork(
     signal.throwIfAborted();
     if (!result.has(o.id))
       result.set(o.id, {
-        art: await cropArtwork(source, o),
-        artMethod: "paper",
-        artNote: fallback,
+        art: await cropArtwork(source, o, inputKind !== "picture"),
+        artMethod: inputKind === "picture" ? "crop" : "paper",
+        artNote:
+          inputKind === "picture"
+            ? "Picture crop; background is still included. A precise cutout was not available."
+            : fallback,
       });
   }
   signal.throwIfAborted();

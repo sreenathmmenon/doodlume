@@ -1,0 +1,65 @@
+import { validateWorld, type WorldDefinition } from "./world.js";
+
+export function setupFeedback(world: WorldDefinition) {
+  const errors: string[] = [],
+    warnings: string[] = [];
+  try {
+    validateWorld(world);
+  } catch (e) {
+    errors.push(
+      e instanceof Error ? e.message : "Check the objects in this world.",
+    );
+  }
+  if (world.entities.length > 24)
+    errors.push("Keep the first adventure to 24 objects or fewer.");
+  if (world.entities.some((e) => e.x + e.width > 1440 || e.y + e.height > 820))
+    errors.push("Keep every object inside the game frame.");
+  const hero = world.entities.find((e) => e.kind === "player");
+  if (hero) {
+    const body = {
+      x: hero.x + hero.width * 0.17,
+      y: hero.y + hero.height * 0.24,
+      width: hero.width * 0.66,
+      height: hero.height * 0.69,
+    };
+    const solids = world.entities.filter((e) =>
+      ["terrain", "bridge", "gate"].includes(e.kind),
+    );
+    if (
+      solids.some(
+        (e) =>
+          Math.min(body.x + body.width, e.x + e.width) - Math.max(body.x, e.x) >
+            3 &&
+          Math.min(body.y + body.height, e.y + e.height) -
+            Math.max(body.y, e.y) >
+            3,
+      )
+    )
+      errors.push(
+        "Move the character out of the ground, bridge or closed gate before starting.",
+      );
+    if (
+      !solids.some(
+        (e) =>
+          e.x < body.x + body.width &&
+          e.x + e.width > body.x &&
+          e.y >= body.y + body.height - 3,
+      )
+    )
+      warnings.push(
+        "There is no surface below your character. Add or move a platform to catch them.",
+      );
+    if (hero.height > 200 || hero.width > 220)
+      warnings.push(
+        "Your character is large for this stage. A smaller size leaves more room to explore.",
+      );
+  }
+  if (!world.entities.some((e) => e.kind === "goal"))
+    warnings.push(
+      "There is no destination yet. You can explore, or add somewhere to finish.",
+    );
+  warnings.push(
+    "This checks placement, not the whole route. Play the world to check which jumps and paths work.",
+  );
+  return { errors, warnings };
+}

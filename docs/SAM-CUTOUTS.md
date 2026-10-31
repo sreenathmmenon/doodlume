@@ -2,6 +2,8 @@
 
 Implemented October 31, 2026. This is a coded integration with local protocol verification, **not a live drawing-recognition result**.
 
+The subsequent [picture-world workflow](PICTURE-WORLDS.md) adds manually selected photo games and photo-preserving fallback crops. That later work does not establish live SAM accuracy.
+
 ## Product behavior
 
 Muse Wonder/Spark or Baseten-hosted Muse Spark Open interprets the page into supported game roles and bounding boxes. The studio then sends those boxes and the normalized original page to SAM 3.1 for masks. Original image colors, including white-filled character interiors, are retained inside accepted masks. The image canvas stays the size of the interpretation's original box: tighter SAM bounds do not stretch the artwork or move game geometry.
