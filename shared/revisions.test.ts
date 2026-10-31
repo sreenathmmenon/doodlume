@@ -117,7 +117,10 @@ test("new levers keep their chosen gate target and invalid or character-overlapp
 
 test("undo keeps later progress for surviving objects and increases the revision so old previews remain stale", () => {
   const { world, patch } = setup();
+  patch.sourceImage =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
   const applied = applyWorldPatch(world, progress, patch);
+  assert.equal(applied.world.sourceImage, patch.sourceImage);
   const later = {
     ...progress,
     player: { x: 900, y: 640 },
@@ -126,6 +129,7 @@ test("undo keeps later progress for surviving objects and increases the revision
   const undone = undoWorldPatch(applied.world, later, applied.checkpoint);
   assert.equal(undone.world.revision, 3);
   assert.deepEqual(undone.world.entities, world.entities);
+  assert.equal(undone.world.sourceImage, world.sourceImage);
   assert.deepEqual(undone.state, later);
   assert.throws(
     () => applyWorldPatch(undone.world, later, patch),

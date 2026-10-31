@@ -12,6 +12,7 @@ export interface WorldPatch {
   baseRevision: number;
   origin: "manual" | "meta";
   additions: WorldEntity[];
+  sourceImage?: string;
 }
 export interface RevisionCheckpoint {
   before: WorldDefinition;
@@ -69,6 +70,7 @@ export function applyWorldPatch(
   const next = validateWorld({
     ...structuredClone(world),
     revision: world.revision + 1,
+    ...(patch.sourceImage ? { sourceImage: patch.sourceImage } : {}),
     entities: [
       ...structuredClone(world.entities),
       ...structuredClone(patch.additions),

@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { interpretDrawing, InterpretationError } from "./interpret.js";
+import { interpretAmendment } from "./amend.js";
 import { modelConnection } from "./provider.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,7 +19,7 @@ const maxRequests = Math.max(
 const port = Number(process.env.API_PORT) || 8787;
 let requests = 0,
   inFlight = false;
-const app = Fastify({ bodyLimit: 8_500_000, logger: false });
+const app = Fastify({ bodyLimit: 17_000_000, logger: false });
 app.addHook("onRequest", async (request, reply) => {
   const origin = request.headers.origin;
   if (
@@ -46,61 +47,73 @@ app.get("/api/status", async () => ({
   enforcedSchema: connection.enforcedSchema,
   requestsRemaining: Math.max(0, maxRequests - requests),
 }));
-app.post<{ Body: { image?: unknown; intent?: unknown } }>(
-  "/api/interpret",
-  async (request, reply) => {
-    if (!connection.apiKey)
-      return reply.code(503).send({
-        error: `Add ${connection.credential} to .env.local and restart the studio to use ${connection.label}.`,
-      });
-    if (inFlight)
-      return reply.code(429).send({
-        error:
-          "One drawing is already being interpreted. Wait for it to finish.",
-      });
-    if (requests >= maxRequests)
-      return reply.code(429).send({
-        error:
-          "The local session request limit has been reached. Your current world is safe.",
-      });
-    const body = request.body;
-    if (!body || typeof body !== "object")
-      return reply.code(400).send({ error: "Choose a drawing first." });
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
-    const onClose = () => {
-      if (!reply.raw.writableFinished) controller.abort();
-    };
-    reply.raw.on("close", onClose);
-    inFlight = true;
-    requests++;
-    try {
-      const world = await interpretDrawing(
-        body.image,
-        body.intent ?? "",
-        connection,
-        controller.signal,
-      );
-      return { world };
-    } catch (error) {
-      if (error instanceof InterpretationError)
-        return reply.code(error.status).send({ error: error.message });
-      if (controller.signal.aborted)
-        return reply.code(504).send({
-          error:
-            "The interpretation took too long or was stopped. Your drawing and current world are safe.",
+for (const action of ["interpret", "amend"] as const)
+  app.post<{ Body: { image?: unknown; intent?: unknown; world?: unknown } }>(
+    `/api/${action}`,
+    async (request, reply) => {
+      if (!connection.apiKey)
+        return reply.code(503).send({
+          error: `Add ${connection.credential} to .env.local and restart the studio to use ${connection.label}.`,
         });
-      return reply.code(502).send({
-        error:
-          "The drawing could not become a world this time. Your current world is unchanged.",
-      });
-    } finally {
-      clearTimeout(timeout);
-      reply.raw.off("close", onClose);
-      inFlight = false;
-    }
-  },
-);
+      if (inFlight)
+        return reply.code(429).send({
+          error:
+            "One drawing is already being interpreted. Wait for it to finish.",
+        });
+      if (requests >= maxRequests)
+        return reply.code(429).send({
+          error:
+            "The local session request limit has been reached. Your current world is safe.",
+        });
+      const body = request.body;
+      if (!body || typeof body !== "object")
+        return reply.code(400).send({ error: "Choose a drawing first." });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      const onClose = () => {
+        if (!reply.raw.writableFinished) controller.abort();
+      };
+      reply.raw.on("close", onClose);
+      inFlight = true;
+      requests++;
+      try {
+        if (action === "amend")
+          return {
+            proposal: await interpretAmendment(
+              body.world,
+              body.image,
+              body.intent ?? "",
+              connection,
+              controller.signal,
+            ),
+          };
+        return {
+          world: await interpretDrawing(
+            body.image,
+            body.intent ?? "",
+            connection,
+            controller.signal,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof InterpretationError)
+          return reply.code(error.status).send({ error: error.message });
+        if (controller.signal.aborted)
+          return reply.code(504).send({
+            error:
+              "The interpretation took too long or was stopped. Your drawing and current world are safe.",
+          });
+        return reply.code(502).send({
+          error:
+            "The drawing could not become a world this time. Your current world is unchanged.",
+        });
+      } finally {
+        clearTimeout(timeout);
+        reply.raw.off("close", onClose);
+        inFlight = false;
+      }
+    },
+  );
 app.setErrorHandler((error, _request, reply) => {
   const status =
     error &&

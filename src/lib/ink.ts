@@ -1,13 +1,15 @@
-/** Trim the sketch to its actual ink and remove the paper, preserving drawn colors. */
-export async function extractSketchInk(image: string): Promise<string> {
-  const bitmap = await createImageBitmap(await (await fetch(image)).blob());
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const context = canvas.getContext("2d")!;
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+export interface InkMark {
+  art: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+/** Isolate real ink, retaining alpha; bounds use a normalized 0..1000 page. */
+export function extractInkLayer(canvas: HTMLCanvasElement): InkMark {
+  const pixels = canvas
+    .getContext("2d")!
+    .getImageData(0, 0, canvas.width, canvas.height);
   let left = canvas.width,
     top = canvas.height,
     right = -1,
@@ -21,7 +23,7 @@ export async function extractSketchInk(image: string): Promise<string> {
         pixels.data[i + 2],
       );
       pixels.data[i + 3] = Math.round(
-        255 * Math.min(1, Math.max(0, (244 - ink) / 20)),
+        pixels.data[i + 3] * Math.min(1, Math.max(0, (244 - ink) / 20)),
       );
       if (pixels.data[i + 3] > 12) {
         left = Math.min(left, x);
@@ -32,22 +34,44 @@ export async function extractSketchInk(image: string): Promise<string> {
     }
   if (right < left || bottom < top)
     throw new Error("Draw a little ink on the page first.");
-  context.putImageData(pixels, 0, 0);
+  left = Math.max(0, left - 4);
+  top = Math.max(0, top - 4);
+  right = Math.min(canvas.width - 1, right + 4);
+  bottom = Math.min(canvas.height - 1, bottom + 4);
+  const cleaned = document.createElement("canvas");
+  cleaned.width = canvas.width;
+  cleaned.height = canvas.height;
+  cleaned.getContext("2d")!.putImageData(pixels, 0, 0);
   const result = document.createElement("canvas");
-  result.width = right - left + 9;
-  result.height = bottom - top + 9;
+  result.width = right - left + 1;
+  result.height = bottom - top + 1;
   result
     .getContext("2d")!
     .drawImage(
-      canvas,
+      cleaned,
       left,
       top,
-      right - left + 1,
-      bottom - top + 1,
-      4,
-      4,
-      right - left + 1,
-      bottom - top + 1,
+      result.width,
+      result.height,
+      0,
+      0,
+      result.width,
+      result.height,
     );
-  return result.toDataURL("image/png");
+  return {
+    art: result.toDataURL("image/png"),
+    x: (left / canvas.width) * 1000,
+    y: (top / canvas.height) * 1000,
+    width: (result.width / canvas.width) * 1000,
+    height: (result.height / canvas.height) * 1000,
+  };
+}
+export async function extractSketchInk(image: string): Promise<string> {
+  const bitmap = await createImageBitmap(await (await fetch(image)).blob());
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return extractInkLayer(canvas).art;
 }

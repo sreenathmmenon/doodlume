@@ -6,7 +6,7 @@
 
 The local **studio foundation** is working: three explicitly labeled authored examples, original vector characters, a shared physics engine, drawing/upload input, keyboard and touch controls, device-local world saves, and a manual editor that adds to the same running world without losing progress.
 
-The server includes direct Meta and Baseten-hosted Meta interpretation adapters. **Neither live model path has been verified yet because no working provider key is configured.** Example worlds are not model results. The original plan's broader drawing-to-play milestone remains open until the real input → Meta model → original artwork → play path is demonstrated. See [the foundation record](docs/MILESTONE-1.md) and [same-world editing record](docs/MILESTONE-2.md).
+The server includes direct Meta and Baseten-hosted Meta interpretation adapters. **Neither live model path has been verified yet because no working provider key is configured.** Example worlds are not model results. The original plan's broader drawing-to-play milestone remains open until the real input → Meta model → original artwork → play path is demonstrated. See [the foundation record](docs/MILESTONE-1.md), [same-world editing record](docs/MILESTONE-2.md), and [paper-update record](docs/PAPER-UPDATES.md).
 
 ## Run locally
 
@@ -45,6 +45,8 @@ Both adapters send the selected drawing and adventure description to the chosen 
 - Interact: E near a lever, or click the nearby lever.
 - Collect the sunseeds and reach home.
 - **Keep creating** pauses the current adventure and opens the clearly labeled manual editor. Add bridges, platforms, sunseeds, gates, and levers; choose which gate each lever controls. Optionally draw original object artwork. Preview, then apply and continue from the same position.
+- **Update page** opens the current and revised drawings side by side. Draw on the original page without changing its old marks, or upload a revised photo. New strokes can transfer as one original-art object: choose its role, correct placement in preview, check connections, then apply. This manual route needs no API key.
+- For a world originally interpreted by Meta, the same flow can send both pages and stable world metadata to the selected Meta provider. Its proposed additions must be reviewed; this live inference path is implemented but not yet verified. Shifted/perspective photos need reframing or manual placement, not an assumed automatic registration.
 - **Undo** removes the most recent edit while keeping subsequent progress on surviving objects. Edits that would cover the character with a solid object are rejected.
 - Save beside the world name, then reopen through **My worlds**. The world, progress, and up to 12 undo checkpoints are saved. Saves stay in this browser. They are not cloud storage.
 
@@ -57,7 +59,7 @@ npm run test
 npm run build
 ```
 
-Only eight focused contract/regression tests are included: three world-contract checks, three revision checks, and two provider-boundary checks. Browser playthroughs are the main foundation check. The later live input validation should use 5–20 materially different drawings rather than a large unit-test suite.
+Only twelve focused contract/regression tests are included: three world-contract checks, three revision checks, two provider-boundary checks, and four paper-comparison checks. Paper-comparison tests inject a test-only transport; they validate request/response handling and real image cropping, not Meta recognition accuracy. No mocked model response is available in the product. Browser playthroughs are the main foundation check. The later live input validation should use 5–20 materially different drawings rather than a large unit-test suite.
 
 For a local production build, `npm run build` followed by `npm start` serves the studio at http://127.0.0.1:8787. This service deliberately binds to loopback. Internet hosting, authentication, paired phone capture, and deployment require a later integration pass.
 
@@ -69,7 +71,8 @@ For a local production build, `npm run build` followed by `npm start` serves the
 - `shared/world.ts`: world contract and validation; play state remains separate.
 - `shared/revisions.ts`: atomic additions, revision checks, progress retention, and undo.
 - `src/components/WorldEditor.tsx`: manual placement, gate connections, and object-art drawing.
-- `server/`: server-side Meta connection and source-art extraction adapter.
+- `server/`: server-side Meta connection, two-page comparison, validation, and source-art extraction.
+- `src/components/PaperUpdate.tsx`: before/after pages, protected-page drawing, original-ink transfer, and comparison review entry.
 - `public/art/`: original authored SVG assets and labeled example pages.
 
 ## Repository handoff

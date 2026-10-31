@@ -1,35 +1,90 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { ArrowUpRight, Eraser, Pencil, RotateCcw, Undo2 } from "lucide-react";
+import { extractInkLayer, type InkMark } from "../lib/ink";
 import { Modal } from "./Modal";
 
 const colors = ["#444b43", "#94ad7c", "#baa4cf", "#ddb46b", "#d99483"];
 export function SketchPad({
   onUse,
   onClose,
+  initialImage,
 }: {
-  onUse: (image: string) => void;
+  onUse: (image: string, mark?: InkMark) => void;
   onClose: () => void;
+  initialImage?: string;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
+  const base = useRef<HTMLCanvasElement | null>(null);
+  const [ready, setReady] = useState(!initialImage);
+  const [loadError, setLoadError] = useState("");
   const history = useRef<{ pixels: ImageData; hasInk: boolean }[]>([]);
   const [color, setColor] = useState(colors[0]);
   const [eraser, setEraser] = useState(false);
   const [hasInk, setHasInk] = useState(false);
   const [count, setCount] = useState(0);
   useEffect(() => {
-    const ctx = canvas.current!.getContext("2d")!;
-    ctx.fillStyle = "#fffdf8";
-    ctx.fillRect(0, 0, 1200, 760);
-  }, []);
+    const c = canvas.current!,
+      ctx = c.getContext("2d")!;
+    if (!initialImage) {
+      ctx.fillStyle = "#fffdf8";
+      ctx.fillRect(0, 0, c.width, c.height);
+      return;
+    }
+    let active = true;
+    const image = new Image();
+    image.onload = () => {
+      if (!active) return;
+      const scale = 1440 / Math.max(image.naturalWidth, image.naturalHeight);
+      c.width = Math.round(image.naturalWidth * scale);
+      c.height = Math.round(image.naturalHeight * scale);
+      const page = document.createElement("canvas");
+      page.width = c.width;
+      page.height = c.height;
+      page.getContext("2d")!.drawImage(image, 0, 0, c.width, c.height);
+      base.current = page;
+      setReady(true);
+    };
+    image.onerror = () => {
+      if (active)
+        setLoadError(
+          "The current page could not be opened. Upload a revised page instead.",
+        );
+    };
+    image.src = initialImage;
+    return () => {
+      active = false;
+    };
+  }, [initialImage]);
+  function useDrawing() {
+    const c = canvas.current!;
+    let mark: InkMark;
+    try {
+      mark = extractInkLayer(c);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Draw a new mark first.");
+      return;
+    }
+    if (!base.current) return onUse(c.toDataURL("image/png"));
+    const page = document.createElement("canvas");
+    page.width = c.width;
+    page.height = c.height;
+    const ctx = page.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(base.current, 0, 0);
+    ctx.drawImage(c, 0, 0);
+    onUse(page.toDataURL("image/png"), mark);
+  }
   function point(e: PointerEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     return [
-      ((e.clientX - rect.left) * 1200) / rect.width,
-      ((e.clientY - rect.top) * 760) / rect.height,
+      ((e.clientX - rect.left) * e.currentTarget.width) / rect.width,
+      ((e.clientY - rect.top) * e.currentTarget.height) / rect.height,
     ];
   }
   function start(e: PointerEvent<HTMLCanvasElement>) {
+    if (!ready) return;
     const c = canvas.current!,
       ctx = c.getContext("2d")!;
     history.current.push({
@@ -46,6 +101,8 @@ export function SketchPad({
     ctx.lineWidth = eraser ? 38 : 5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    ctx.globalCompositeOperation =
+      initialImage && eraser ? "destination-out" : "source-over";
     ctx.strokeStyle = eraser ? "#fffdf8" : color;
     ctx.lineTo(x + 0.1, y + 0.1);
     ctx.stroke();
@@ -74,16 +131,29 @@ export function SketchPad({
       hasInk,
     });
     if (history.current.length > 16) history.current.shift();
-    ctx.fillStyle = "#fffdf8";
-    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = "source-over";
+    if (initialImage) ctx.clearRect(0, 0, c.width, c.height);
+    else {
+      ctx.fillStyle = "#fffdf8";
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
     setCount(history.current.length);
     setHasInk(false);
   }
   return (
-    <Modal title="A blank page. A little possibility." onClose={onClose} wide>
+    <Modal
+      title={
+        initialImage
+          ? "A new mark. The same little world."
+          : "A blank page. A little possibility."
+      }
+      onClose={onClose}
+      wide
+    >
       <p className="modal-copy">
-        Draw a character, some ground, and somewhere to go. Keep shapes separate
-        and give your character a clear outline.
+        {initialImage
+          ? "Add to your current page. Your existing drawing is protected; the eraser and undo affect only your new strokes."
+          : "Draw a character, some ground, and somewhere to go. Keep shapes separate and give your character a clear outline."}
       </p>
       <div className="sketch-tools">
         <div className="swatches">
@@ -127,9 +197,23 @@ export function SketchPad({
           <RotateCcw size={15} /> Clear page
         </button>
       </div>
+      {loadError && (
+        <p role="alert" className="editor-error">
+          {loadError}
+        </p>
+      )}
       <div className="sketch-surface">
         <canvas
           ref={canvas}
+          style={
+            initialImage
+              ? {
+                  backgroundImage: `url("${initialImage}")`,
+                  backgroundSize: "100% 100%",
+                  backgroundColor: "transparent",
+                }
+              : undefined
+          }
           width={1200}
           height={760}
           onPointerDown={start}
@@ -149,8 +233,8 @@ export function SketchPad({
         </p>
         <button
           className="primary-button"
-          disabled={!hasInk}
-          onClick={() => onUse(canvas.current!.toDataURL("image/png"))}
+          disabled={!hasInk || !ready}
+          onClick={useDrawing}
         >
           Use this drawing <ArrowUpRight size={18} />
         </button>

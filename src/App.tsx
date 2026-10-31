@@ -29,6 +29,9 @@ import {
 import { WorldCanvas, type WorldCanvasHandle } from "./components/WorldCanvas";
 import { Modal } from "./components/Modal";
 import { SketchPad } from "./components/SketchPad";
+import { PaperUpdate } from "./components/PaperUpdate";
+import type { PaperProposal } from "../shared/amendments";
+import { readDrawingFile } from "./lib/drawing-file";
 import { WorldEditor } from "./components/WorldEditor";
 import {
   applyWorldPatch,
@@ -43,6 +46,7 @@ import {
   validateWorld,
   type PlayState,
   type WorldDefinition,
+  type WorldEntity,
 } from "../shared/world";
 import type { WorldTelemetry } from "./game/WorldScene";
 
@@ -61,7 +65,14 @@ type SavedWorld = {
   savedAt: string;
   history?: RevisionCheckpoint[];
 };
-type Dialog = "sketch" | "worlds" | "help" | "settings" | "editor" | null;
+type Dialog =
+  | "sketch"
+  | "worlds"
+  | "help"
+  | "settings"
+  | "editor"
+  | "paper"
+  | null;
 const storageKey = "doodlume.worlds.v1";
 function savedWorlds(): SavedWorld[] {
   try {
@@ -130,6 +141,11 @@ export default function App() {
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<WorldDefinition | null>(null);
   const [editorState, setEditorState] = useState<PlayState>(emptyPlayState);
+  const [paperProposal, setPaperProposal] = useState<
+    PaperProposal | undefined
+  >();
+  const [tracedAdditions, setTracedAdditions] = useState<WorldEntity[]>([]);
+  const [revisedPage, setRevisedPage] = useState<string | undefined>();
   const [history, setHistory] = useState<RevisionCheckpoint[]>([]);
   const worldNow = useRef(world);
   worldNow.current = world;
@@ -211,9 +227,9 @@ export default function App() {
     setSource(next.sourceImage);
     setCustomSource(false);
     setSourceName(
-      next.source === "example"
-        ? "An original Doodlume example"
-        : "Your original drawing",
+      next.sourceImage.startsWith("data:")
+        ? "Your world’s latest drawing"
+        : "An original Doodlume example",
     );
     setInitial(state);
     latestState.current = state;
@@ -231,10 +247,27 @@ export default function App() {
     previousPlaying.current = false;
   }
   function openEditor() {
+    setPaperProposal(undefined);
+    setRevisedPage(undefined);
+    setTracedAdditions([]);
     setEditorState(canvas.current?.snapshot() ?? latestState.current);
     setDialog("editor");
   }
+  function openPaper() {
+    setEditorState(canvas.current?.snapshot() ?? latestState.current);
+    setPaperProposal(undefined);
+    setRevisedPage(undefined);
+    setTracedAdditions([]);
+    setDialog("paper");
+  }
   function keepRevision(next: WorldDefinition, state: PlayState) {
+    setSource(next.sourceImage);
+    setSourceName(
+      next.sourceImage.startsWith("data:")
+        ? "Your world’s latest drawing"
+        : "An original Doodlume example",
+    );
+    setCustomSource(false);
     worldNow.current = next;
     setWorld(next);
     setInitial(state);
@@ -350,28 +383,12 @@ export default function App() {
     e.target.value = "";
     if (!selected) return;
     setError("");
-    if (!["image/png", "image/jpeg", "image/webp"].includes(selected.type)) {
-      setError("Choose a PNG, JPG, or WebP image.");
-      return;
-    }
-    if (selected.size > 12 * 1024 * 1024) {
-      setError("Choose an image under 12 MB. A clear phone photo is enough.");
-      return;
-    }
     try {
-      const bitmap = await createImageBitmap(selected);
-      const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
-      const surface = document.createElement("canvas");
-      surface.width = Math.round(bitmap.width * scale);
-      surface.height = Math.round(bitmap.height * scale);
-      const ctx = surface.getContext("2d")!;
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, surface.width, surface.height);
-      ctx.drawImage(bitmap, 0, 0, surface.width, surface.height);
-      bitmap.close();
-      useSource(surface.toDataURL("image/png"), selected.name);
-    } catch {
-      setError("We could not open that image. Try another photo or draw here.");
+      useSource(await readDrawingFile(selected), selected.name);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "This image could not be opened.",
+      );
     }
   }
   function useSource(image: string, name = "A drawing, made by you") {
@@ -532,7 +549,13 @@ export default function App() {
               <span className="paper-tape" />
               <img src={source} alt={sourceName} />
               <div className="source-caption">
-                <span>{customSource ? "YOUR DRAWING" : "EXAMPLE DRAWING"}</span>
+                <span>
+                  {customSource || world.source === "meta"
+                    ? "YOUR DRAWING"
+                    : source.startsWith("data:")
+                      ? "EDITED EXAMPLE"
+                      : "EXAMPLE DRAWING"}
+                </span>
                 <span>↗</span>
               </div>
             </div>
@@ -647,6 +670,15 @@ export default function App() {
                       : "Playable example"
                     : "From your drawing"}
                 </span>
+                <button
+                  className="secondary-button edit-world-button paper-update-button"
+                  aria-label="Update this world's drawing"
+                  onClick={openPaper}
+                  disabled={busy || metrics.completed}
+                >
+                  <ImagePlus size={16} />
+                  <span>Update page</span>
+                </button>
                 <button
                   className="secondary-button edit-world-button"
                   aria-label="Keep creating in this world"
@@ -1012,11 +1044,63 @@ export default function App() {
           onUse={(image) => useSource(image)}
         />
       )}
+      {dialog === "paper" && (
+        <PaperUpdate
+          world={world}
+          configured={Boolean(connection?.configured)}
+          provider={connection?.label ?? "Meta"}
+          initialImage={revisedPage}
+          initialKind={tracedAdditions[0]?.kind}
+          initialMark={
+            tracedAdditions[0]?.art
+              ? {
+                  art: tracedAdditions[0].art,
+                  x: tracedAdditions[0].x / 1.44,
+                  y: tracedAdditions[0].y / 0.82,
+                  width: tracedAdditions[0].width / 1.44,
+                  height: tracedAdditions[0].height / 0.82,
+                }
+              : undefined
+          }
+          onClose={() => setDialog(null)}
+          onManual={(image, mark, kind) => {
+            setRevisedPage(image);
+            setPaperProposal(undefined);
+            setTracedAdditions(
+              mark
+                ? [
+                    {
+                      id: `ink-${crypto.randomUUID()}`,
+                      kind: kind ?? "bridge",
+                      x: mark.x * 1.44,
+                      y: mark.y * 0.82,
+                      width: Math.max(4, mark.width * 1.44),
+                      height: Math.max(4, mark.height * 0.82),
+                      art: mark.art,
+                      label: `Drawn ${kind ?? "bridge"}`,
+                    },
+                  ]
+                : [],
+            );
+            setDialog("editor");
+          }}
+          onReview={(proposal) => {
+            setTracedAdditions([]);
+            setPaperProposal(proposal);
+            setRevisedPage(proposal.patch.sourceImage);
+            setDialog("editor");
+          }}
+        />
+      )}
       {dialog === "editor" && (
         <WorldEditor
           world={world}
           state={editorState}
           onApply={applyEdit}
+          proposal={paperProposal}
+          initialAdditions={tracedAdditions}
+          revisedImage={revisedPage}
+          onBack={revisedPage ? () => setDialog("paper") : undefined}
           onClose={() => setDialog(null)}
         />
       )}
@@ -1119,11 +1203,11 @@ export default function App() {
                 : "Not available"}
             </span>
             <span>Current build</span>
-            <span>Milestone 1 · Studio foundation</span>
+            <span>Paper updates · review and apply</span>
           </div>
           <p className="small-note">
-            The interpretation adapter is included. Live drawing quality and
-            paper updates are the next milestones; example worlds are authored
+            Drawing and page-comparison adapters are included. Live model
+            quality still needs verification; examples are authored
             demonstrations.
           </p>
           <button
@@ -1142,9 +1226,9 @@ export default function App() {
           <div className="help-lead">
             <Sprout size={30} />
             <p>
-              Doodlume turns a page into a place you can explore. This first
-              studio milestone gives you the canvas, the controls, and three
-              real playable examples.
+              Doodlume turns a page into a place you can explore. The studio
+              gives you a canvas, playable examples, and a way to keep adding to
+              the same world.
             </p>
           </div>
           <div className="help-steps">
@@ -1182,11 +1266,12 @@ export default function App() {
           <div className="help-next">
             <Layers3 size={21} />
             <div>
-              <strong>Next: your paper becomes the editor.</strong>
+              <strong>Your page can keep growing.</strong>
               <p>
-                Live Meta interpretation, original artwork extraction, and fresh
-                drawings that change the same world are still to be verified and
-                completed.
+                Use Update page to draw on your original or upload a revised
+                photo. Review and place the new objects before applying.
+                Automatic Meta comparison requires a working key and a world
+                created from your own drawing.
               </p>
             </div>
           </div>

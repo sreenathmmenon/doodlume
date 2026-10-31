@@ -12,6 +12,7 @@ import { Modal } from "./Modal";
 import { SketchPad } from "./SketchPad";
 import { extractSketchInk } from "../lib/ink";
 import { applyWorldPatch, type WorldPatch } from "../../shared/revisions";
+import type { PaperProposal } from "../../shared/amendments";
 import type {
   EntityKind,
   PlayState,
@@ -67,15 +68,29 @@ export function WorldEditor({
   state,
   onApply,
   onClose,
+  proposal,
+  initialAdditions,
+  revisedImage,
+  onBack,
 }: {
   world: WorldDefinition;
   state: PlayState;
   onApply: (patch: WorldPatch) => void;
   onClose: () => void;
+  proposal?: PaperProposal;
+  initialAdditions?: WorldEntity[];
+  revisedImage?: string;
+  onBack?: () => void;
 }) {
-  const [additions, setAdditions] = useState<WorldEntity[]>([]);
+  const [additions, setAdditions] = useState<WorldEntity[]>(() =>
+    structuredClone(proposal?.patch.additions ?? initialAdditions ?? []),
+  );
   const [tool, setTool] = useState<Tool>("bridge");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(
+    proposal?.patch.additions[0]?.id ?? initialAdditions?.[0]?.id ?? null,
+  );
+  const [reviewed, setReviewed] = useState(false);
+  const [paperVisible, setPaperVisible] = useState(Boolean(revisedImage));
   const [drag, setDrag] = useState<{
     x: number;
     y: number;
@@ -99,12 +114,13 @@ export function WorldEditor({
   const patch = useMemo<WorldPatch>(
     () => ({
       id: crypto.randomUUID(),
-      worldId: world.id,
-      baseRevision: world.revision,
-      origin: "manual",
+      worldId: proposal?.patch.worldId ?? world.id,
+      baseRevision: proposal?.patch.baseRevision ?? world.revision,
+      origin: proposal ? "meta" : "manual",
+      ...(revisedImage ? { sourceImage: revisedImage } : {}),
       additions,
     }),
-    [world.id, world.revision, additions],
+    [world.id, world.revision, additions, proposal, revisedImage],
   );
   let problem = "";
   if (additions.length) {
@@ -128,6 +144,7 @@ export function WorldEditor({
     const p = point(e);
     e.currentTarget.setPointerCapture(e.pointerId);
     setError("");
+    setReviewed(false);
     const hit = [...additions]
       .reverse()
       .find(
@@ -218,18 +235,24 @@ export function WorldEditor({
     setDrag(null);
   }
   function update(change: Partial<WorldEntity>) {
+    setReviewed(false);
     setAdditions((items) =>
       items.map((e) => (e.id === selected ? { ...e, ...change } : e)),
     );
     setError("");
   }
   function removeSelected() {
+    setReviewed(false);
     setAdditions((items) => items.filter((e) => e.id !== selected));
     setSelected(null);
     setError("");
   }
   function apply() {
     try {
+      if (revisedImage && !reviewed)
+        throw new Error(
+          "Check your additions and connections before applying.",
+        );
       applyWorldPatch(world, state, patch);
       onApply(patch);
     } catch (e) {
@@ -333,8 +356,38 @@ export function WorldEditor({
             Make a new path, a new challenge, a new little reason to explore.
             Your character and everything you’ve earned stay with you.
           </p>
-          <span className="editor-origin">Manual world edit · preview</span>
+          <span className="editor-origin">
+            {proposal
+              ? `${proposal.provider} · proposed additions`
+              : "Manual world edit · preview"}
+          </span>
         </div>
+        {revisedImage && (
+          <div className="paper-review-header">
+            <div>
+              <strong>
+                {proposal?.summary ||
+                  "Place the new marks into your existing world."}
+              </strong>
+              <p>
+                Existing objects stay fixed. Correct new shapes, sizes, and gate
+                connections here.
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              aria-pressed={paperVisible}
+              onClick={() => setPaperVisible(!paperVisible)}
+            >
+              {paperVisible ? "Show world view" : "Show revised page"}
+            </button>
+            {onBack && (
+              <button className="text-button" onClick={onBack}>
+                Back to page
+              </button>
+            )}
+          </div>
+        )}
         <div className="editor-tools" role="group" aria-label="Objects to add">
           {tools.map((t) => (
             <button
@@ -379,7 +432,17 @@ export function WorldEditor({
               fill={colors[2]}
               opacity=".45"
             />
-            {world.entities.map((e) => object(e))}
+            {paperVisible && revisedImage && (
+              <image
+                href={revisedImage}
+                width="1440"
+                height="820"
+                preserveAspectRatio="none"
+              />
+            )}
+            <g opacity={paperVisible ? 0.25 : 1}>
+              {world.entities.map((e) => object(e))}
+            </g>
             {additions.map((e) => object(e, true))}
             {drag && !drag.id && (
               <rect
@@ -420,6 +483,33 @@ export function WorldEditor({
                     <Trash2 size={16} />
                   </button>
                 </div>
+                <label>
+                  Object role
+                  <select
+                    aria-label="Selected object role"
+                    value={item.kind}
+                    onChange={(e) =>
+                      update({
+                        kind: e.target.value as EntityKind,
+                        targetId: undefined,
+                      })
+                    }
+                  >
+                    {[
+                      ["bridge", "Bridge"],
+                      ["terrain", "Platform"],
+                      ["coin", "Sunseed"],
+                      ["lever", "Lever"],
+                      ["gate", "Gate"],
+                      ["goal", "Destination"],
+                      ["decoration", "Decoration"],
+                    ].map(([kind, label]) => (
+                      <option key={kind} value={kind}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label>
                   Give it a name
                   <input
@@ -503,12 +593,35 @@ export function WorldEditor({
             )}
           </section>
           <section className="editor-summary">
+            {proposal && (
+              <div className="paper-evidence">
+                <strong>What the model saw</strong>
+                {proposal.evidence
+                  .filter((e) => additions.some((a) => a.id === e.id))
+                  .map((e) => (
+                    <p key={e.id}>
+                      <span>
+                        {e.confidence === "review"
+                          ? "Needs your review"
+                          : "Proposed"}
+                      </span>{" "}
+                      {e.reason}
+                    </p>
+                  ))}
+                {proposal.warnings.map((warning, i) => (
+                  <p key={i}>{warning}</p>
+                ))}
+              </div>
+            )}
             <h3>
               <Check size={16} /> Your adventure comes with you
             </h3>
             <p>
-              {state.collected.length} collected sunseeds ·{" "}
-              {state.activated.length} used levers · character position kept
+              {state.collected.length} collected{" "}
+              {state.collected.length === 1 ? "sunseed" : "sunseeds"} ·{" "}
+              {state.activated.length} used{" "}
+              {state.activated.length === 1 ? "lever" : "levers"} · character
+              position kept
             </p>
             <div className="editor-art-action">
               <button
@@ -533,11 +646,23 @@ export function WorldEditor({
                 {error || problem}
               </p>
             )}
+            {revisedImage && (
+              <label className="paper-review-confirm">
+                <input
+                  type="checkbox"
+                  checked={reviewed}
+                  onChange={(e) => setReviewed(e.target.checked)}
+                />
+                I checked the new objects, their placement, and lever
+                connections.
+              </label>
+            )}
             <div className="editor-apply-actions">
               <button
                 className="text-button"
                 disabled={!additions.length}
                 onClick={() => {
+                  setReviewed(false);
                   setAdditions((items) => items.slice(0, -1));
                   setSelected(null);
                   setError("");
@@ -547,7 +672,11 @@ export function WorldEditor({
               </button>
               <button
                 className="primary-button"
-                disabled={!additions.length || Boolean(problem)}
+                disabled={
+                  !additions.length ||
+                  Boolean(problem) ||
+                  (Boolean(revisedImage) && !reviewed)
+                }
                 onClick={apply}
               >
                 Apply & keep playing <ArrowUpRight size={17} />
