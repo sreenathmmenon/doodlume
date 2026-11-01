@@ -77,6 +77,7 @@ test("restoring progress keeps surviving objects and drops stale object IDs", ()
 
 test("only selected collectible and lever IDs gate a destination, with explicit missing-object feedback", () => {
   const world = freshExample(EXAMPLES[0].id);
+  delete world.goalRules; // A legacy reach-only world stays compatible.
   const start = emptyPlayState();
   assert.equal(goalProgress(world, start).ready, true);
   assert.equal(goalProgress(world, start).total, 0);

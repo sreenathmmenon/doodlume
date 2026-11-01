@@ -1,4 +1,5 @@
 import { validateWorld, type WorldDefinition } from "../../shared/world";
+import { removeBoundaryPaper } from "../../shared/paper-art";
 
 // Manual mapping is local image processing, not a simulated recognition result.
 export async function prepareSourceArtwork(
@@ -67,19 +68,8 @@ export async function prepareSourceArtwork(
     ctx.drawImage(page, x, y, w, h, 0, 0, w, h);
     if (world.inputKind !== "picture") {
       const pixels = ctx.getImageData(0, 0, w, h);
-      let ink = 0;
-      for (let i = 0; i < pixels.data.length; i += 4) {
-        const min = Math.min(
-          pixels.data[i],
-          pixels.data[i + 1],
-          pixels.data[i + 2],
-        );
-        pixels.data[i + 3] = Math.round(
-          pixels.data[i + 3] * Math.min(1, Math.max(0, (248 - min) / 22)),
-        );
-        if (pixels.data[i + 3] > 20) ink++;
-      }
-      if (ink < 3)
+      const { inkPixels } = removeBoundaryPaper(pixels.data, w, h);
+      if (inkPixels < 3)
         throw new Error(
           `“${entity.label || entity.kind}” has no clear ink. Adjust its selection.`,
         );

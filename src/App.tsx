@@ -46,6 +46,12 @@ import { setupFeedback } from "../shared/setup";
 import { WorldLibrary } from "./components/WorldLibrary";
 import { SourceInspector } from "./components/SourceInspector";
 import { GoalRules } from "./components/GoalRules";
+import { WorldRulesSummary } from "./components/WorldRulesSummary";
+import {
+  recordCreationStarted,
+  recordRecognitionReturned,
+  recordReviewAccepted,
+} from "./lib/runtime-diagnostics";
 import {
   validateRecognitionReview,
   type RecognitionReview,
@@ -90,6 +96,8 @@ type Dialog =
   | "create"
   | "source"
   | "rules"
+  | "draft-rules"
+  | "discard-creation"
   | "review"
   | "sketch"
   | "worlds"
@@ -128,6 +136,7 @@ const initialMetrics: WorldTelemetry = {
   requiredDone: 0,
   requiredTotal: 0,
   nearLever: false,
+  interactionHint: "",
   playerX: 0,
   playerY: 0,
 };
@@ -135,13 +144,17 @@ const initialMetrics: WorldTelemetry = {
 export default function App() {
   const [world, setWorld] = useState(() => freshExample(EXAMPLES[0].id));
   const [initial, setInitial] = useState<PlayState>(emptyPlayState);
-  const [source, setSource] = useState(EXAMPLES[0].sourceImage);
-  const [sourceName, setSourceName] = useState("An original Doodlume example");
+  const [source, setSource] = useState("");
+  const [sourceName, setSourceName] = useState("Your drawing");
   const [customSource, setCustomSource] = useState(false);
   const [inputKind, setInputKind] = useState<InputKind>("drawing");
-  const [intent, setIntent] = useState(
-    "Find the sunseeds, wake the gate, and bring Pip home.",
+  const [intent, setIntent] = useState("");
+  const [draftIntent, setDraftIntent] = useState("");
+  const [sketchDraft, setSketchDraft] = useState<string | undefined>();
+  const [sourceContext, setSourceContext] = useState<"creation" | "world">(
+    "creation",
   );
+  const [settingsReturn, setSettingsReturn] = useState<Dialog>(null);
   const [playing, setPlaying] = useState(false);
   const [focusedPlay, setFocusedPlay] = useState(false);
   const [mapView, setMapView] = useState(false);
@@ -169,6 +182,7 @@ export default function App() {
   >();
   const [tracedAdditions, setTracedAdditions] = useState<WorldEntity[]>([]);
   const [revisedPage, setRevisedPage] = useState<string | undefined>();
+  const [paperIntent, setPaperIntent] = useState("");
   const [pendingPhoto, setPendingPhoto] = useState<string | undefined>();
   const [pendingPhotoName, setPendingPhotoName] = useState("Your drawing");
   const [history, setHistory] = useState<RevisionCheckpoint[]>([]);
@@ -177,12 +191,59 @@ export default function App() {
   const canvas = useRef<WorldCanvasHandle>(null);
   const file = useRef<HTMLInputElement>(null);
   const sourceInspect = useRef<HTMLButtonElement>(null);
+  const worldSourceInspect = useRef<HTMLButtonElement>(null);
+  const draftRulesAnchor = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const latestState = useRef<PlayState>(emptyPlayState());
   const request = useRef<AbortController | null>(null);
   const sourceVersion = useRef(0);
   const previousPlaying = useRef(false);
   const draftFeedback = draft ? setupFeedback(draft) : null;
+  const hasCreationDraft = Boolean(
+    source ||
+      intent.trim() ||
+      draft ||
+      recognitionReview ||
+      setupEdits ||
+      sketchDraft,
+  );
+  function openCreation(entry: "create" | "sketch" | "upload" = "create") {
+    setFocusedPlay(false);
+    setDialog(entry === "sketch" ? "sketch" : "create");
+    if (entry === "upload") file.current?.click();
+  }
+  function openDraftSetup() {
+    // A prepared/paused result keeps the intent that produced it. Editing the
+    // input field does not retroactively recompile that result's requirements.
+    if (!draft && !recognitionReview && !setupEdits) setDraftIntent(intent);
+    setDialog("setup");
+  }
+  function returnToDraftReview() {
+    setDialog("review");
+    requestAnimationFrame(() =>
+      draftRulesAnchor.current
+        ?.querySelector<HTMLButtonElement>("button")
+        ?.focus(),
+    );
+  }
+  function resetCreation() {
+    sourceVersion.current++;
+    if (request.current) recordRecognitionReturned("cancelled");
+    request.current?.abort();
+    request.current = null;
+    setBusy(false);
+    setSource("");
+    setSourceName("Your drawing");
+    setInputKind("drawing");
+    setIntent("");
+    setDraftIntent("");
+    setCustomSource(false);
+    setSketchDraft(undefined);
+    setDraft(null);
+    setRecognitionReview(null);
+    setSetupEdits(null);
+    setError("");
+  }
   useEffect(() => {
     if (draft) setDialog("review");
   }, [draft]);
@@ -274,25 +335,16 @@ export default function App() {
     checkpoints: RevisionCheckpoint[] = [],
   ) {
     sourceVersion.current++;
+    if (request.current) recordRecognitionReturned("cancelled");
     request.current?.abort();
     request.current = null;
-    setRecognitionReview(null);
-    setSetupEdits(null);
     setWorldError("");
+    setPaperIntent("");
     setMapView(false);
     setBusy(false);
     setWorld(next);
     worldNow.current = next;
     setHistory(checkpoints);
-    setSource(next.sourceImage);
-    setInputKind(next.inputKind ?? "drawing");
-    setIntent(next.description);
-    setCustomSource(false);
-    setSourceName(
-      next.sourceImage.startsWith("data:")
-        ? "Your world’s latest image"
-        : "An original Doodlume example",
-    );
     setInitial(state);
     latestState.current = state;
     setMetrics({
@@ -306,7 +358,6 @@ export default function App() {
     setRun((n) => n + 1);
     setStarted(false);
     setPlaying(false);
-    setDraft(null);
     setError("");
     previousPlaying.current = false;
   }
@@ -326,6 +377,7 @@ export default function App() {
     else start();
   }
   function openEditor() {
+    setPaperIntent("");
     setPaperProposal(undefined);
     setRevisedPage(undefined);
     setTracedAdditions([]);
@@ -333,6 +385,7 @@ export default function App() {
     setDialog("editor");
   }
   function openPaper() {
+    setPaperIntent("");
     setEditorState(editableState());
     setPaperProposal(undefined);
     setRevisedPage(undefined);
@@ -340,15 +393,8 @@ export default function App() {
     setDialog("paper");
   }
   function keepRevision(next: WorldDefinition, state: PlayState) {
+    setPaperIntent("");
     setWorldError("");
-    setSource(next.sourceImage);
-    setInputKind(next.inputKind ?? "drawing");
-    setSourceName(
-      next.sourceImage.startsWith("data:")
-        ? "Your world’s latest image"
-        : "An original Doodlume example",
-    );
-    setCustomSource(false);
     worldNow.current = next;
     setWorld(next);
     setInitial(state);
@@ -368,12 +414,7 @@ export default function App() {
     setPlaying(!state.completed || Boolean(state.exploring));
     setError("");
     requestAnimationFrame(() => {
-      stage.current?.scrollIntoView({
-        block: "center",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "instant"
-          : "smooth",
-      });
+      framePlaySurface(focusedPlay);
       stage.current
         ?.querySelector<HTMLElement>(".world-canvas")
         ?.focus({ preventScroll: true });
@@ -392,7 +433,7 @@ export default function App() {
       return;
     }
     tell(
-      `${patch.additions.length === 1 ? "A new possibility" : `${patch.additions.length} new possibilities`}. Same little world. Your progress stayed with you.`,
+      `${patch.additions.length === 1 ? "A new possibility" : `${patch.additions.length} new possibilities`}. Same world. Your progress stayed with you.`,
     );
   }
   function undoEdit() {
@@ -422,16 +463,21 @@ export default function App() {
       );
     }
   }
+  function framePlaySurface(focused: boolean, instant = false) {
+    const behavior =
+      instant || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth";
+    // Focus mode reserves the entire viewport, including its heading and toolbar.
+    // Centering only the canvas would scroll those surrounding controls out of view.
+    if (focused) window.scrollTo({ top: 0, behavior });
+    else stage.current?.scrollIntoView({ block: "center", behavior });
+  }
   function start() {
     if (worldError) return;
     setStarted(true);
     setPlaying(true);
-    stage.current?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "instant"
-        : "smooth",
-      block: "center",
-    });
+    framePlaySurface(focusedPlay);
     stage.current
       ?.querySelector<HTMLElement>(".world-canvas")
       ?.focus({ preventScroll: true });
@@ -447,7 +493,7 @@ export default function App() {
     setRun((n) => n + 1);
     setStarted(true);
     setPlaying(true);
-    tell("A fresh start. Same little world.");
+    tell("A fresh start. Same world.");
   }
   async function save() {
     if (saving) return;
@@ -494,12 +540,14 @@ export default function App() {
     kind = inputKind,
   ) {
     sourceVersion.current++;
+    if (request.current) recordRecognitionReturned("cancelled");
     request.current?.abort();
     request.current = null;
     setBusy(false);
     setRecognitionReview(null);
     setSetupEdits(null);
     setSource(image);
+    setSketchDraft(undefined);
     setInputKind(kind);
     setSourceName(name);
     setCustomSource(true);
@@ -515,49 +563,69 @@ export default function App() {
   async function bringAlive() {
     setError("");
     if (!customSource) {
-      tell(
-        "You’re looking at a playable example. Upload or draw your own page to create a new world.",
-      );
+      tell("Draw or upload your own image to create a world.");
       return;
     }
     if (!connection?.configured) {
+      setSettingsReturn("create");
       setDialog("settings");
       return;
     }
     const controller = new AbortController();
+    const requestedIntent = intent;
     setSetupEdits(null);
     request.current = controller;
     setBusy(true);
     setPlaying(false);
     try {
+      recordCreationStarted();
       const response = await fetch("/api/interpret", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: source, intent, inputKind }),
+        body: JSON.stringify({
+          image: source,
+          intent: requestedIntent,
+          inputKind,
+        }),
         signal: controller.signal,
       });
       const result = await response.json();
       if (controller.signal.aborted || request.current !== controller) return;
       if (!response.ok && result.recovery) {
         const review = validateRecognitionReview(result.recovery);
+        recordRecognitionReturned("repair");
         setRecognitionReview(review);
+        setDraft(null);
+        setDraftIntent(requestedIntent);
         setDialog("setup");
         tell(
           "Your recognized objects are kept for review. Correct the highlighted details before playing.",
         );
         return;
       }
-      if (!response.ok)
+      if (!response.ok) {
+        recordRecognitionReturned(
+          response.status === 422 ? "clarification" : "error",
+        );
         throw new Error(
           result.error || "Your drawing could not be interpreted.",
         );
+      }
       setDraft(validateWorld(result.world));
+      setDraftIntent(requestedIntent);
+      recordRecognitionReturned("accepted");
       setRecognitionReview(null);
       tell(
         "Your drawing has a first interpretation. Preview it before you play.",
       );
       void checkConnection();
     } catch (e) {
+      if (request.current === controller)
+        recordRecognitionReturned(
+          e instanceof DOMException && e.name === "AbortError"
+            ? "cancelled"
+            : "error",
+        );
       if (!(e instanceof DOMException && e.name === "AbortError"))
         setError(
           e instanceof Error
@@ -572,6 +640,7 @@ export default function App() {
     }
   }
   function cancelInterpretation() {
+    recordRecognitionReturned("cancelled");
     request.current?.abort();
     setBusy(false);
     tell("Stopped. Your drawing is still here.");
@@ -587,6 +656,55 @@ export default function App() {
   const touch = (key: "left" | "right" | "jump" | "interact", value: boolean) =>
     canvas.current?.touch(key, value);
 
+  const draftRequiredCount =
+    (draft?.goalRules?.requiredCollectedIds.length ?? 0) +
+    (draft?.goalRules?.requiredActivatedIds.length ?? 0);
+  const draftOptionalCount =
+    (draft?.entities.filter(
+      (entity) => entity.kind === "coin" || entity.kind === "lever",
+    ).length ?? 0) - draftRequiredCount;
+  const reviewActions = draft ? (
+    <div className="review-footer">
+      <p
+        className="review-rule-count"
+        aria-label="Completion requirements summary"
+      >
+        {draft.entities.some((entity) => entity.kind === "goal")
+          ? `${draftRequiredCount} required · ${draftOptionalCount} optional · then reach a destination`
+          : "Free exploration · no destination"}
+      </p>
+      <div className="review-actions">
+        <button className="text-button" onClick={() => setDialog("create")}>
+          Back
+        </button>
+        <button className="secondary-button" onClick={openDraftSetup}>
+          <Pencil size={16} /> Edit objects
+        </button>
+        <button
+          className="primary-button"
+          disabled={Boolean(draftFeedback?.errors.length) || Boolean(error)}
+          onClick={() => {
+            recordReviewAccepted();
+            loadWorld(draft);
+            resetCreation();
+            setDialog(null);
+            setStarted(true);
+            setPlaying(true);
+            setFocusedPlay(true);
+            requestAnimationFrame(() => {
+              framePlaySurface(true, true);
+              stage.current
+                ?.querySelector<HTMLElement>(".world-canvas")
+                ?.focus({ preventScroll: true });
+            });
+          }}
+        >
+          <Play size={16} fill="currentColor" /> Play this world
+        </button>
+      </div>
+    </div>
+  ) : undefined;
+
   const sourcePanel = (
     <aside className="paper-panel" aria-label="Your drawing">
       <div className="panel-heading">
@@ -597,6 +715,7 @@ export default function App() {
           aria-pressed={inputKind === "drawing"}
           disabled={busy}
           onClick={() => {
+            if (inputKind === "drawing") return;
             setInputKind("drawing");
             setDraft(null);
             setRecognitionReview(null);
@@ -609,6 +728,7 @@ export default function App() {
           aria-pressed={inputKind === "picture"}
           disabled={busy}
           onClick={() => {
+            if (inputKind === "picture") return;
             setInputKind("picture");
             setDraft(null);
             setRecognitionReview(null);
@@ -618,56 +738,53 @@ export default function App() {
           Photo
         </button>
       </div>
-      <button
-        type="button"
-        ref={sourceInspect}
-        className={`paper-frame ${customSource ? "custom-paper" : ""}`}
-        aria-label="Inspect original image"
-        disabled={busy}
-        onClick={() => setDialog("source")}
-      >
-        <span className="paper-tape" />
-        <img src={source} alt={sourceName} />
-        <span className="source-inspect-hint">
-          Inspect image <Maximize2 size={12} />
-        </span>
-        <span className="source-caption">
-          <span>
-            {customSource || world.source !== "example"
-              ? inputKind === "picture"
-                ? "YOUR PICTURE"
-                : "YOUR DRAWING"
-              : source.startsWith("data:")
-                ? "EDITED EXAMPLE"
-                : "EXAMPLE DRAWING"}
+      {source ? (
+        <button
+          type="button"
+          ref={sourceInspect}
+          className={`paper-frame ${customSource ? "custom-paper" : ""}`}
+          aria-label="Inspect original image"
+          disabled={busy}
+          onClick={() => {
+            setSourceContext("creation");
+            setDialog("source");
+          }}
+        >
+          <span className="paper-tape" />
+          <img src={source} alt={sourceName} />
+          <span className="source-inspect-hint">
+            Inspect image <Maximize2 size={12} />
           </span>
-          <span>↗</span>
-        </span>
-      </button>
+          <span className="source-caption">
+            <span>
+              {inputKind === "picture" ? "YOUR PICTURE" : "YOUR DRAWING"}
+            </span>
+            <span>↗</span>
+          </span>
+        </button>
+      ) : (
+        <div className="source-empty">
+          <Pencil size={27} />
+          <strong>Start with your own image</strong>
+          <p>Draw here, or upload a drawing or picture.</p>
+        </div>
+      )}
       <div className="source-actions">
         <button
           className="secondary-button"
           onClick={() => file.current?.click()}
           disabled={busy}
         >
-          <ImagePlus size={17} />{" "}
-          {inputKind === "picture" ? "Upload photo" : "Upload drawing"}
+          <ImagePlus size={17} /> {source ? "Replace image" : "Upload image"}
         </button>
         <button
-          className="icon-button draw-button"
-          aria-label="Draw here"
+          className="secondary-button draw-button"
+          aria-label={sketchDraft ? "Continue drawing" : "Draw here"}
           onClick={() => setDialog("sketch")}
           disabled={busy}
         >
-          <Pencil size={17} />
+          <Pencil size={17} /> {sketchDraft ? "Continue drawing" : "Draw here"}
         </button>
-        <input
-          ref={file}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          hidden
-          onChange={upload}
-        />
       </div>
       <div className="capture-source-actions">
         <button
@@ -712,25 +829,32 @@ export default function App() {
           {error}
         </p>
       )}
-      {busy ? (
+      {sketchDraft && sketchDraft !== source && (
+        <p className="creation-draft-note">
+          Your unfinished drawing is kept. Continue drawing to use your changes.
+        </p>
+      )}
+      {draft && (
         <button
-          className="primary-button create-button"
-          onClick={cancelInterpretation}
+          className="secondary-button"
+          disabled={busy}
+          onClick={() => setDialog("review")}
         >
-          <LoaderCircle size={18} className="spin" /> Creating your world…{" "}
-          <X size={16} />
-        </button>
-      ) : (
-        <button className="primary-button create-button" onClick={bringAlive}>
-          <WandSparkles size={18} /> Create world <ArrowUpRight size={18} />
+          Review current result
         </button>
       )}
-      <button className="connection-note" onClick={() => setDialog("settings")}>
+      <button
+        className="connection-note"
+        onClick={() => {
+          setSettingsReturn("create");
+          setDialog("settings");
+        }}
+      >
         <span
           className={`status-dot ${connection?.configured ? "connected" : ""}`}
         />
         {connection?.configured
-          ? "Meta API key configured"
+          ? `${connection.label} · key configured`
           : connectionError
             ? "Connection unavailable"
             : "Connect Meta"}
@@ -740,7 +864,7 @@ export default function App() {
         <button
           className="secondary-button setup-source-button"
           disabled={busy}
-          onClick={() => setDialog("setup")}
+          onClick={openDraftSetup}
         >
           <Pencil size={16} />
           {setupEdits
@@ -757,6 +881,13 @@ export default function App() {
 
   return (
     <div className={`app-shell studio-v2 ${focusedPlay ? "play-focused" : ""}`}>
+      <input
+        ref={file}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        hidden
+        onChange={upload}
+      />
       <header className="topbar">
         <a className="brand" href="#studio" aria-label="Doodlume studio">
           <img src="/art/favicon.svg" alt="" />
@@ -775,11 +906,13 @@ export default function App() {
         <div className="top-actions">
           <button
             className="primary-button new-world-button"
-            aria-label="Create a new world"
-            onClick={() => setDialog("create")}
+            aria-label={
+              hasCreationDraft ? "Resume draft" : "Create a new world"
+            }
+            onClick={() => openCreation()}
           >
             <Plus size={17} />
-            <span>New world</span>
+            <span>{hasCreationDraft ? "Resume draft" : "New world"}</span>
           </button>
           <button
             className="icon-button"
@@ -791,19 +924,63 @@ export default function App() {
           <button
             className="icon-button"
             aria-label="Studio settings"
-            onClick={() => setDialog("settings")}
+            onClick={() => {
+              setSettingsReturn(null);
+              setDialog("settings");
+            }}
           >
             <Settings2 size={19} />
           </button>
         </div>
       </header>
       <main id="studio">
+        {world.source === "example" && !focusedPlay && (
+          <section
+            className="creation-invitation"
+            aria-label="Make your own game"
+          >
+            <div>
+              <h1>Your drawing. Your game.</h1>
+              <p>Make it playable, then keep creating in the same world.</p>
+            </div>
+            <div className="creation-invitation-actions">
+              <button
+                className="primary-button"
+                onClick={() => openCreation("sketch")}
+              >
+                <Pencil size={17} /> Draw here
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => openCreation("upload")}
+              >
+                <ImagePlus size={17} /> Upload image
+              </button>
+            </div>
+          </section>
+        )}
         <div className="studio-workspace">
           <section
             className={`world-panel ${focusedPlay ? "focused-play" : ""}`}
             aria-label="Your playable world"
           >
             <div className="world-heading">
+              <button
+                ref={worldSourceInspect}
+                className="world-source-thumb"
+                aria-label={
+                  world.source === "example"
+                    ? "Inspect example source artwork"
+                    : "Inspect your world's source artwork"
+                }
+                onClick={() => {
+                  setSourceContext("world");
+                  setDialog("source");
+                }}
+              >
+                <img src={world.sourceImage} alt="" />
+                <Maximize2 size={12} />
+              </button>
               <div>
                 <label className="world-name-label">
                   <span className="sr-only">World name</span>
@@ -818,7 +995,7 @@ export default function App() {
                       if (!world.name.trim())
                         setWorld((w) => ({
                           ...w,
-                          name: "An untitled little world",
+                          name: "Untitled world",
                         }));
                     }}
                   />
@@ -1135,10 +1312,7 @@ export default function App() {
                 onClick={() => {
                   setFocusedPlay(!focusedPlay);
                   requestAnimationFrame(() => {
-                    stage.current?.scrollIntoView({
-                      block: "center",
-                      behavior: "instant",
-                    });
+                    framePlaySurface(!focusedPlay, true);
                     stage.current
                       ?.querySelector<HTMLElement>(".world-canvas")
                       ?.focus({ preventScroll: true });
@@ -1171,7 +1345,16 @@ export default function App() {
               ).map(([key, Icon, label]) => (
                 <button
                   key={key}
-                  aria-label={label}
+                  aria-label={
+                    key === "interact"
+                      ? metrics.interactionHint || "Use nearby switch"
+                      : label
+                  }
+                  title={
+                    key === "interact"
+                      ? metrics.interactionHint || "Use nearby switch"
+                      : label
+                  }
                   onPointerDown={(e) => {
                     e.currentTarget.setPointerCapture(e.pointerId);
                     if (!started) start();
@@ -1182,6 +1365,7 @@ export default function App() {
                   onLostPointerCapture={() => touch(key, false)}
                 >
                   <Icon size={20} />
+                  {key === "interact" && <span>Use</span>}
                 </button>
               ))}
             </div>
@@ -1211,7 +1395,6 @@ export default function App() {
                 disabled={busy}
                 onClick={() => {
                   loadWorld(freshExample(example.id));
-                  setIntent(example.description);
                   tell(`${example.name} is ready to explore.`);
                 }}
               >
@@ -1262,7 +1445,41 @@ export default function App() {
       </div>
       {dialog === "create" && (
         <Modal
-          title="Create a world"
+          title={hasCreationDraft ? "Your creation draft" : "Create your world"}
+          className="creation-modal"
+          footer={
+            <div className="creation-footer">
+              <div>
+                <span>Current game stays open.</span>
+                {hasCreationDraft && !busy && (
+                  <button
+                    className="text-button"
+                    onClick={() => setDialog("discard-creation")}
+                  >
+                    Start over
+                  </button>
+                )}
+              </div>
+              {busy ? (
+                <button
+                  className="primary-button"
+                  onClick={cancelInterpretation}
+                >
+                  <LoaderCircle size={17} className="spin" /> Stop creating{" "}
+                  <X size={16} />
+                </button>
+              ) : (
+                <button
+                  className="primary-button"
+                  disabled={!customSource || !source}
+                  onClick={bringAlive}
+                >
+                  <WandSparkles size={18} /> Create world{" "}
+                  <ArrowUpRight size={17} />
+                </button>
+              )}
+            </div>
+          }
           onClose={() => {
             sourceVersion.current++;
             if (busy) cancelInterpretation();
@@ -1272,13 +1489,63 @@ export default function App() {
           {sourcePanel}
         </Modal>
       )}
+      {dialog === "discard-creation" && (
+        <Modal
+          title="Start a new creation draft?"
+          onClose={() => setDialog("create")}
+        >
+          <p className="modal-copy">
+            This clears the unfinished drawing, image, play idea and review.
+            Your active game and saved worlds stay as they are.
+          </p>
+          <div className="review-actions">
+            <button
+              className="secondary-button"
+              onClick={() => setDialog("create")}
+            >
+              Keep draft
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => {
+                resetCreation();
+                setDialog("create");
+              }}
+            >
+              Start new draft
+            </button>
+          </div>
+        </Modal>
+      )}
       {dialog === "source" && (
         <SourceInspector
-          image={source}
-          name={sourceName}
+          image={sourceContext === "world" ? world.sourceImage : source}
+          name={
+            sourceContext === "world"
+              ? `${world.source === "example" ? "Example source" : "Your source"} · ${world.name}`
+              : sourceName
+          }
+          backLabel={
+            sourceContext === "world" ? "Back to world" : "Back to creation"
+          }
           onClose={() => {
-            setDialog("create");
-            requestAnimationFrame(() => sourceInspect.current?.focus());
+            setDialog(sourceContext === "world" ? null : "create");
+            requestAnimationFrame(() =>
+              (sourceContext === "world"
+                ? worldSourceInspect
+                : sourceInspect
+              ).current?.focus(),
+            );
+          }}
+        />
+      )}
+      {dialog === "draft-rules" && draft && (
+        <GoalRules
+          world={draft}
+          onCancel={returnToDraftReview}
+          onApply={(goalRules) => {
+            setDraft(validateWorld({ ...draft, goalRules }));
+            returnToDraftReview();
           }}
         />
       )}
@@ -1303,6 +1570,8 @@ export default function App() {
         <Modal
           title="Review your world"
           wide
+          footer={reviewActions}
+          className="world-review-modal"
           onClose={() => setDialog("create")}
         >
           <div className="world-review-heading">
@@ -1341,46 +1610,24 @@ export default function App() {
               {message}
             </p>
           ))}
-          <ArtworkReview entities={draft.entities} />
-          <div className="review-actions">
-            <button className="text-button" onClick={() => setDialog("create")}>
-              Back
-            </button>
-            <button
-              className="secondary-button"
-              onClick={() => setDialog("setup")}
-            >
-              <Pencil size={16} /> Edit objects
-            </button>
-            <button
-              className="primary-button"
-              disabled={Boolean(draftFeedback?.errors.length) || Boolean(error)}
-              onClick={() => {
-                loadWorld(draft);
-                setDialog(null);
-                setStarted(true);
-                setPlaying(true);
-                setFocusedPlay(true);
-                requestAnimationFrame(() => {
-                  stage.current?.scrollIntoView({
-                    block: "center",
-                    behavior: "instant",
-                  });
-                  stage.current
-                    ?.querySelector<HTMLElement>(".world-canvas")
-                    ?.focus({ preventScroll: true });
-                });
-              }}
-            >
-              <Play size={16} fill="currentColor" /> Play this world
-            </button>
+          {draftIntent && (
+            <p className="review-intent">
+              <strong>Your play idea</strong> {draftIntent}
+            </p>
+          )}
+          <div ref={draftRulesAnchor}>
+            <WorldRulesSummary
+              world={draft}
+              onEdit={() => setDialog("draft-rules")}
+            />
           </div>
+          <ArtworkReview entities={draft.entities} />
         </Modal>
       )}
       {dialog === "phone" && (
         <PhonePairing
           context={{ purpose: "create", name: "A new Doodlume world" }}
-          onClose={() => setDialog(null)}
+          onClose={() => setDialog("create")}
           onReceive={(image) => {
             if (inputKind === "picture") {
               useSource(image, "Your phone picture");
@@ -1397,7 +1644,7 @@ export default function App() {
           image={pendingPhoto}
           onClose={() => {
             setPendingPhoto(undefined);
-            setDialog(null);
+            setDialog("create");
           }}
           onUse={(image) => {
             setPendingPhoto(undefined);
@@ -1417,7 +1664,9 @@ export default function App() {
           recovery={recognitionReview ?? undefined}
           resume={setupEdits ?? undefined}
           onPause={setSetupEdits}
-          intent={intent}
+          intent={
+            draft || recognitionReview || setupEdits ? draftIntent : intent
+          }
           onClose={() =>
             setDialog(
               recognitionReview ? "create" : draft ? "review" : "create",
@@ -1437,10 +1686,13 @@ export default function App() {
       )}
       {dialog === "sketch" && (
         <SketchPad
-          onClose={() => setDialog(null)}
-          onUse={(image) =>
-            useSource(image, "A drawing, made by you", "drawing")
-          }
+          resumeImage={sketchDraft}
+          onPause={setSketchDraft}
+          onClose={() => setDialog("create")}
+          onUse={(image) => {
+            useSource(image, "A drawing, made by you", "drawing");
+            setSketchDraft(image);
+          }}
         />
       )}
       {dialog === "paper" && (
@@ -1449,6 +1701,8 @@ export default function App() {
           configured={Boolean(connection?.configured)}
           provider={connection?.label ?? "Meta"}
           initialImage={revisedPage}
+          initialIntent={paperIntent}
+          onIntentChange={setPaperIntent}
           initialKind={tracedAdditions[0]?.kind}
           initialMark={
             tracedAdditions[0]?.art
@@ -1538,7 +1792,10 @@ export default function App() {
         />
       )}
       {dialog === "settings" && (
-        <Modal title="Studio settings" onClose={() => setDialog(null)}>
+        <Modal
+          title="Studio settings"
+          onClose={() => setDialog(settingsReturn)}
+        >
           <div className="connection-card">
             <div className="meta-mark">∞</div>
             <div>
@@ -1550,7 +1807,7 @@ export default function App() {
                   className={`status-dot ${connection?.configured ? "connected" : ""}`}
                 />
                 {connection?.configured
-                  ? "API key configured"
+                  ? `${connection.label} · key configured`
                   : connectionError
                     ? "Local API is unavailable"
                     : "API key not configured"}
@@ -1613,7 +1870,7 @@ export default function App() {
             <div>
               <span>02</span>
               <section>
-                <h3>Take a little adventure</h3>
+                <h3>Play your world</h3>
                 <p>
                   Move with ← → or A / D. Jump with Space, ↑, or W. Collect the
                   objects in your world. Press E near a lever to open its gate.
@@ -1627,7 +1884,7 @@ export default function App() {
             <div>
               <span>03</span>
               <section>
-                <h3>Keep the little things</h3>
+                <h3>Keep your progress</h3>
                 <p>
                   Save your world to this device. Its character position,
                   collected items and open gates come with it. Continue building

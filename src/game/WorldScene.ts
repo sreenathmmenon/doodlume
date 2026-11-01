@@ -8,6 +8,7 @@ import {
   type SceneRect,
 } from "./scene-visibility";
 import { terrainTiles } from "./terrain-tiles";
+import { objectName } from "../lib/object-name";
 import {
   emptyPlayState,
   goalProgress,
@@ -22,6 +23,7 @@ export interface WorldTelemetry {
   completed: boolean;
   exploring: boolean;
   nearLever: boolean;
+  interactionHint: string;
   goalHint: string;
   requiredDone: number;
   requiredTotal: number;
@@ -99,6 +101,8 @@ export class WorldScene extends Phaser.Scene {
     }
   >();
   private hint!: Phaser.GameObjects.Text;
+  private hintLeverId = "";
+  private hintWrapWidth = 250;
   private lastGrounded = -1000;
   private jumpQueued = -1000;
   private lastReport = 0;
@@ -330,12 +334,14 @@ export class WorldScene extends Phaser.Scene {
       Phaser.Input.Keyboard.KeyCodes.RIGHT,
     ]);
     this.hint = this.add
-      .text(0, 0, "E  ·  wake the gate", {
+      .text(0, 0, "", {
         fontFamily: "Manrope, sans-serif",
-        fontSize: "20px",
+        fontSize: "16px",
         color: "#faf8f1",
         backgroundColor: "#4c5549",
         padding: { x: 16, y: 10 },
+        wordWrap: { width: 250, useAdvancedWrap: true },
+        align: "center",
       })
       .setOrigin(0.5)
       .setDepth(30)
@@ -742,7 +748,9 @@ export class WorldScene extends Phaser.Scene {
       this.burst(gate.art.x + 25, gate.art.y + 65, 0xc9b6db, 14);
       this.soundtrack.cue("gate");
       this.ring(gate.art.x + 25, gate.art.y + 65, 0xd4c2ff, 80);
-      this.hooks.onMoment("The gate is open. A new path awaits.");
+      this.hooks.onMoment(
+        `${objectName(this.definition, lever.entity.targetId)} opened by ${objectName(this.definition, id)}.`,
+      );
     }
     this.report();
   }
@@ -801,7 +809,7 @@ export class WorldScene extends Phaser.Scene {
     this.overview = overview;
     if (!this.player) return;
     const camera = this.cameras.main;
-    if (overview || this.reducedMotion) {
+    if (overview) {
       camera
         .removeBounds()
         .setZoom(
@@ -901,14 +909,17 @@ export class WorldScene extends Phaser.Scene {
   private report() {
     if (!this.player) return;
     const state = this.snapshot();
-    const nearby = Boolean(this.nearestLever());
+    const nearby = this.nearestLever();
     const objective = goalProgress(this.definition, state);
     this.hooks.onUpdate(state, {
       collected: state.collected.length,
       total: this.definition.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
       exploring: Boolean(state.exploring),
-      nearLever: nearby,
+      nearLever: Boolean(nearby),
+      interactionHint: nearby
+        ? `Use ${objectName(this.definition, nearby.entity.id)} · opens ${objectName(this.definition, nearby.entity.targetId)}`
+        : "",
       goalHint: objective.hint,
       requiredDone: objective.done,
       requiredTotal: objective.total,
@@ -1066,30 +1077,65 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(altitude < 300)
       .setAlpha(Math.max(0.025, 0.2 - altitude / 1500))
       .setScale(Math.max(0.35, 1 - altitude / 420), 1);
-    if (!this.reducedMotion && !this.overview) {
+    if (!this.overview) {
       const camera = this.cameras.main;
-      const lookAhead = Phaser.Math.Clamp(body.velocity.x * 0.35, -105, 105);
+      const lookAhead = this.reducedMotion
+        ? 0
+        : Phaser.Math.Clamp(body.velocity.x * 0.35, -105, 105);
       const target = camera.getScroll(
         this.player.x + lookAhead,
         this.player.y + this.heroHeight / 2 + 110 - camera.displayHeight / 2,
         this.cameraTarget,
       );
-      camera.scrollX = Phaser.Math.Linear(
-        camera.scrollX,
-        target.x,
-        1 - Math.exp(-delta / 230),
-      );
-      camera.scrollY = Phaser.Math.Linear(
-        camera.scrollY,
-        target.y,
-        1 - Math.exp(-delta / 300),
-      );
+      if (this.reducedMotion) camera.setScroll(target.x, target.y);
+      else {
+        camera.scrollX = Phaser.Math.Linear(
+          camera.scrollX,
+          target.x,
+          1 - Math.exp(-delta / 230),
+        );
+        camera.scrollY = Phaser.Math.Linear(
+          camera.scrollY,
+          target.y,
+          1 - Math.exp(-delta / 300),
+        );
+      }
     }
     this.wasGrounded = grounded;
     this.lastVerticalSpeed = body.velocity.y;
     const lever = this.nearestLever();
     this.hint.setVisible(Boolean(lever));
-    if (lever) this.hint.setPosition(lever.entity.x + 25, lever.entity.y - 38);
+    if (lever) {
+      const view = sceneView(this.cameras.main);
+      const wrap = Math.max(80, Math.min(250, Math.floor(view.width - 48)));
+      if (wrap !== this.hintWrapWidth) {
+        this.hintWrapWidth = wrap;
+        this.hint.setWordWrapWidth(wrap, true);
+      }
+      if (this.hintLeverId !== lever.entity.id) {
+        this.hintLeverId = lever.entity.id;
+        this.hint.setText(
+          `E · Use ${objectName(this.definition, lever.entity.id, 30)}\nOpens ${objectName(this.definition, lever.entity.targetId, 30)}`,
+        );
+      }
+      // Keep the external cue inside the usable world; original cutout pixels stay untouched.
+      this.hint.setPosition(
+        Phaser.Math.Clamp(
+          lever.entity.x + lever.entity.width / 2,
+          Math.max(0, view.x) + this.hint.width / 2 + 8,
+          Math.min(this.definition.width, view.x + view.width) -
+            this.hint.width / 2 -
+            8,
+        ),
+        Phaser.Math.Clamp(
+          lever.entity.y - this.hint.height / 2 - 12,
+          Math.max(0, view.y) + this.hint.height / 2 + 8,
+          Math.min(this.definition.height, view.y + view.height) -
+            this.hint.height / 2 -
+            8,
+        ),
+      );
+    }
     if (time - this.lastReport > 250) {
       this.lastReport = time;
       this.report();

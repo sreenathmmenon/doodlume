@@ -94,6 +94,20 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.editor-page-art {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.editor-page-art button {
+  justify-content: center;
+  min-height: 44px;
+}
+.editor-page-art p {
+  color: #4f623e;
+  font-size: 13px;
+  line-height: 1.55;
+}
 @media (max-width: 520px) {
   .editor-viewport-toolbar {
     gap: 6px;

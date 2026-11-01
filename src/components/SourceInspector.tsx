@@ -5,10 +5,12 @@ export function SourceInspector({
   image,
   name,
   onClose,
+  backLabel = "Back to creation",
 }: {
   image: string;
   name: string;
   onClose: () => void;
+  backLabel?: string;
 }) {
   const [zoom, setZoom] = useState(100);
   return (
@@ -40,7 +42,7 @@ export function SourceInspector({
       </div>
       <div className="review-actions">
         <button className="primary-button" onClick={onClose}>
-          Back to creation
+          {backLabel}
         </button>
       </div>
     </Modal>

@@ -4,7 +4,12 @@ import { normalizeDrawing, imageData } from "./images.js";
 import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
 import { modelJSON, InterpretationError } from "./model.js";
 import { drawingRequest, type ModelConnection } from "./provider.js";
-import { validateWorld, type WorldEntity } from "../shared/world.js";
+import {
+  validateWorld,
+  type WorldEntity,
+  type WorldDefinition,
+} from "../shared/world.js";
+import { groundAmendmentBoxes } from "./amend-grounding.js";
 import type { PaperProposal } from "../shared/amendments.js";
 const properties = {
   id: { type: "string" },
@@ -46,6 +51,35 @@ interface Candidate extends WorldEntity {
   confidence: "high" | "review";
   reason: string;
   targetId?: string;
+}
+function repeatsExisting(world: WorldDefinition, object: Candidate) {
+  const candidate = {
+    x: object.x * 1.44,
+    y: object.y * 0.82,
+    width: object.width * 1.44,
+    height: object.height * 0.82,
+  };
+  return world.entities.some((entity) => {
+    if (entity.kind !== object.kind) return false;
+    const intersection =
+      Math.max(
+        0,
+        Math.min(entity.x + entity.width, candidate.x + candidate.width) -
+          Math.max(entity.x, candidate.x),
+      ) *
+      Math.max(
+        0,
+        Math.min(entity.y + entity.height, candidate.y + candidate.height) -
+          Math.max(entity.y, candidate.y),
+      );
+    return (
+      intersection /
+        (entity.width * entity.height +
+          candidate.width * candidate.height -
+          intersection) >
+      0.7
+    );
+  });
 }
 export async function interpretAmendment(
   worldInput: unknown,
@@ -95,14 +129,18 @@ export async function interpretAmendment(
   const context = JSON.stringify({
     worldId: world.id,
     revision: world.revision,
+    page: {
+      rasterWidth: am.width,
+      rasterHeight: am.height,
+      coordinateSpace: "normalized-page-0..1000",
+      baseWorldMapping: { width: 1440, height: 820 },
+    },
     objects: world.entities.map(
-      ({ id, kind, x, y, width, height, targetId, label }) => ({
+      ({ id, kind, x, y, width, height, artSource, targetId, label }) => ({
         id,
         kind,
-        x,
-        y,
-        width,
-        height,
+        gameBox: { x, y, width, height },
+        sourceBoxNormalized: artSource ?? null,
         targetId,
         label,
       }),
@@ -123,7 +161,7 @@ export async function interpretAmendment(
     { type: "image_url", image_url: { url: imageData(before) } },
     {
       type: "text",
-      text: "IMAGE 2: revised page. Locate only new marks here.",
+      text: "IMAGE 2: revised page. Locate only new marks here. Return normalized PAGE coordinates: x = 1000 × left pixel / rasterWidth, y = 1000 × top pixel / rasterHeight; normalize width and height the same way. Include the complete outline and all pen strokes. Do not select just a bottom edge or white interior. Existing sourceBoxNormalized locates original page artwork; gameBox describes gameplay geometry and may be resized, moved or outside this page. Never copy gameBox coordinates into a page selection.",
     },
     { type: "image_url", image_url: { url: afterImage } },
   ];
@@ -195,35 +233,7 @@ export async function interpretAmendment(
       throw new InterpretationError(
         "Some proposed shapes or identities are unclear. Your current world is unchanged.",
       );
-    const candidate = {
-      x: o.x * 1.44,
-      y: o.y * 0.82,
-      width: o.width * 1.44,
-      height: o.height * 0.82,
-    };
-    if (
-      world.entities.some((e) => {
-        if (e.kind !== o.kind) return false;
-        const intersection =
-          Math.max(
-            0,
-            Math.min(e.x + e.width, candidate.x + candidate.width) -
-              Math.max(e.x, candidate.x),
-          ) *
-          Math.max(
-            0,
-            Math.min(e.y + e.height, candidate.y + candidate.height) -
-              Math.max(e.y, candidate.y),
-          );
-        return (
-          intersection /
-            (e.width * e.height +
-              candidate.width * candidate.height -
-              intersection) >
-          0.7
-        );
-      })
-    )
+    if (repeatsExisting(world, o))
       throw new InterpretationError(
         "A proposed addition appears to repeat an existing object. Nothing was applied; clarify the new marks or place them manually.",
       );
@@ -240,6 +250,17 @@ export async function interpretAmendment(
         "A proposed lever points to an unknown gate. Nothing has been applied.",
       );
   }
+  raw.additions = await groundAmendmentBoxes(
+    before,
+    after,
+    raw.additions,
+    signal,
+  );
+  // Source grounding can move or expand a box; repeat the identity/geometry guard.
+  if (raw.additions.some((object) => repeatsExisting(world, object)))
+    throw new InterpretationError(
+      "A proposed addition appears to repeat an existing object. Nothing was applied; clarify the new marks or place them manually.",
+    );
   const artwork = await extractArtwork(
     after,
     raw.additions,
@@ -270,6 +291,7 @@ export async function interpretAmendment(
       y: o.y * 0.82,
       width: Math.max(4, o.width * 1.44),
       height: Math.max(4, o.height * 0.82),
+      artSource: { x: o.x, y: o.y, width: o.width, height: o.height },
       label: o.label,
       ...artwork.get(o.id),
       ...(targetId ? { targetId } : {}),

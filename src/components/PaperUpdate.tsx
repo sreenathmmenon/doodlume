@@ -23,6 +23,8 @@ export function PaperUpdate({
   initialImage,
   initialMark,
   initialKind,
+  initialIntent,
+  onIntentChange,
   onReview,
   onManual,
   onClose,
@@ -33,6 +35,8 @@ export function PaperUpdate({
   initialImage?: string;
   initialMark?: InkMark;
   initialKind?: EntityKind;
+  initialIntent?: string;
+  onIntentChange?: (intent: string) => void;
   onReview: (proposal: PaperProposal) => void;
   onManual: (image: string, mark?: InkMark, kind?: EntityKind) => void;
   onClose: () => void;
@@ -40,7 +44,7 @@ export function PaperUpdate({
   const [image, setImage] = useState(initialImage ?? "");
   const [mark, setMark] = useState<InkMark | undefined>(initialMark);
   const [kind, setKind] = useState<EntityKind>(initialKind ?? "bridge");
-  const [intent, setIntent] = useState("");
+  const [intent, setIntent] = useState(initialIntent ?? "");
   const [drawing, setDrawing] = useState(false);
   const [phone, setPhone] = useState(false);
   const [aligning, setAligning] = useState<string | undefined>();
@@ -97,7 +101,7 @@ export function PaperUpdate({
       <Modal title="More on the page. More in your world." onClose={close} wide>
         <p className="modal-copy">
           Draw something new on the same page, or upload its revised photo. Your
-          character, collected sunseeds, and used levers stay in this world.
+          character, collected items, and activated levers stay in this world.
         </p>
         <div className="paper-pair">
           <figure>
@@ -181,7 +185,7 @@ export function PaperUpdate({
               {[
                 ["bridge", "Bridge"],
                 ["terrain", "Platform"],
-                ["coin", "Sunseed"],
+                ["coin", "Collectible"],
                 ["lever", "Lever"],
                 ["gate", "Gate"],
                 ["goal", "Destination"],
@@ -203,7 +207,10 @@ export function PaperUpdate({
           <textarea
             maxLength={500}
             value={intent}
-            onChange={(e) => setIntent(e.target.value)}
+            onChange={(e) => {
+              setIntent(e.target.value);
+              onIntentChange?.(e.target.value);
+            }}
             placeholder="A bridge across the gap, and a lever for the left gate…"
             disabled={busy}
           />

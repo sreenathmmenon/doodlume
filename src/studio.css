@@ -347,9 +347,17 @@ select {
 .studio-v2.play-focused main {
   padding: 12px;
 }
-.studio-v2.play-focused .game-stage {
-  height: calc(100dvh - 163px);
-  min-height: 300px;
+.studio-v2.play-focused .world-panel {
+  height: calc(100dvh - 24px);
+  min-height: 360px;
+}
+.studio-v2.play-focused .world-panel > :not(.game-stage) {
+  flex: 0 0 auto;
+}
+.studio-v2.play-focused .world-panel > .game-stage:not(:fullscreen) {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
   max-height: none;
 }
 .studio-v2 .completion-overlay h2 {
@@ -997,10 +1005,8 @@ select:focus-visible {
   .studio-v2.play-focused main {
     padding: 6px;
   }
-  .studio-v2.play-focused .game-stage {
-    height: calc(100dvh - 202px);
-    max-height: none;
-    min-height: 250px;
+  .studio-v2.play-focused .world-panel {
+    height: calc(100dvh - 12px);
   }
   .modal {
     padding: 20px;
@@ -1183,4 +1189,344 @@ select:focus-visible {
   flex-wrap: wrap;
   justify-content: center;
   max-width: 640px;
+}
+
+/* Creation keeps a personal draft separate from the active playable world. */
+.creation-invitation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 2px 20px;
+}
+.creation-invitation h1 {
+  margin: 0 0 5px;
+  color: #2b4538;
+  font-family: Fraunces, Georgia, serif;
+  font-size: clamp(23px, 2.2vw, 30px);
+  font-weight: 500;
+  letter-spacing: -0.65px;
+  line-height: 1.15;
+}
+.creation-invitation p {
+  margin: 0;
+  color: #55674f;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.creation-invitation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+.creation-invitation-actions button {
+  min-height: 44px;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.studio-v2 .world-heading > .world-source-thumb + div {
+  min-width: 0;
+  flex: 1;
+}
+.world-source-thumb {
+  position: relative;
+  width: 48px;
+  height: 44px;
+  padding: 3px;
+  flex-shrink: 0;
+  border: 1px solid #728982;
+  border-radius: 6px;
+  background: #fcfaf5;
+}
+.world-source-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+.world-source-thumb svg {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  padding: 1px;
+  color: #234b38;
+  background: #fcfaf5;
+  border-radius: 2px;
+}
+.modal-with-footer[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100dvh - 44px);
+  padding: 0;
+  overflow: hidden;
+}
+.modal-with-footer > .modal-heading {
+  padding: 20px 22px 14px;
+  margin: 0;
+}
+.modal-scroll-body {
+  min-height: 90px;
+  overflow: auto;
+  padding: 0 22px 20px;
+  overscroll-behavior: contain;
+  scroll-padding: 16px;
+}
+.modal-action-footer {
+  padding: 14px 22px;
+  border-top: 1px solid #d5ddcc;
+  background: #fcfaf5;
+}
+.modal-action-footer .review-actions {
+  margin: 0;
+}
+.creation-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.creation-footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.creation-footer > div > span {
+  font-size: 12px;
+  color: #52634b;
+}
+.creation-footer .primary-button {
+  flex-shrink: 0;
+  min-height: 44px;
+  font-size: 13px;
+}
+.creation-footer .text-button {
+  font-size: 12px;
+}
+.modal.creation-modal .paper-frame {
+  height: 160px;
+}
+.modal.creation-modal .paper-frame img {
+  max-height: 138px;
+}
+.source-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 142px;
+  border: 1px dashed #a9b89a;
+  border-radius: 10px;
+  background: #f2f4e9;
+  color: #405b38;
+  padding: 18px;
+}
+.source-empty strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+.source-empty p {
+  margin: 0;
+  color: #506547;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.creation-draft-note {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #52634b;
+}
+.modal .source-actions .draw-button {
+  width: auto;
+  gap: 7px;
+}
+.review-intent {
+  font-size: 13px;
+  color: #52634b;
+  line-height: 1.7;
+  margin: 18px 0 12px;
+}
+.review-intent strong {
+  display: block;
+  font-weight: 650;
+  color: #304d35;
+}
+.world-rules-summary {
+  padding: 16px;
+  margin: 16px 0;
+  border: 1px solid #bdcbb1;
+  background: #f0f4e7;
+  border-radius: 9px;
+}
+.world-rules-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.world-rules-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #304d35;
+}
+.world-rules-heading .text-button {
+  font-size: 13px;
+  min-height: 40px;
+}
+.world-rules-summary dl {
+  margin: 10px 0 0;
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+}
+.world-rules-summary dl > div {
+  display: grid;
+  grid-template-columns: 65px minmax(0, 1fr);
+  gap: 10px;
+}
+.world-rules-summary dt {
+  font-weight: 650;
+  color: #304d35;
+}
+.world-rules-summary dd {
+  margin: 0;
+  color: #4b6041;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.studio-v2 .touch-controls button:has(> span) {
+  width: auto;
+  min-width: 60px;
+  padding: 0 11px;
+  gap: 7px;
+  font-size: 13px;
+}
+@media (max-width: 700px) {
+  .creation-invitation {
+    gap: 12px;
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 15px;
+  }
+  .creation-invitation h1 {
+    font-size: 25px;
+  }
+  .creation-invitation-actions {
+    width: 100%;
+  }
+  .creation-invitation-actions button {
+    flex: 1;
+    justify-content: center;
+  }
+}
+@media (max-width: 520px) {
+  .studio-v2 .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    height: auto;
+    min-height: 66px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .studio-v2 .new-world-button {
+    width: auto;
+    padding: 0 10px;
+    gap: 5px;
+  }
+  .studio-v2 .new-world-button span {
+    display: inline;
+    font-size: 12px;
+  }
+  .studio-v2 .brand {
+    font-size: 21px;
+  }
+  .studio-v2 .brand img {
+    width: 25px;
+  }
+  .world-source-thumb {
+    width: 35px;
+    height: 38px;
+  }
+  .modal-with-footer[open] {
+    max-height: calc(100dvh - 20px);
+  }
+  .modal-with-footer > .modal-heading {
+    padding: 16px 16px 12px;
+  }
+  .modal-scroll-body {
+    padding: 0 16px 16px;
+  }
+  .modal-action-footer {
+    padding: 12px 16px;
+  }
+  .creation-footer {
+    gap: 8px;
+  }
+  .creation-footer > div {
+    max-width: 120px;
+  }
+  .creation-footer > div > span {
+    font-size: 11px;
+  }
+  .world-rules-summary {
+    padding: 12px;
+  }
+}
+@media (max-height: 540px) {
+  .modal-with-footer[open] {
+    display: block;
+    overflow: auto;
+  }
+  .modal-with-footer .modal-scroll-body {
+    overflow: visible;
+    min-height: 0;
+  }
+}
+.modal-action-footer .modal-footer {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: 16px;
+}
+.modal-action-footer .modal-footer p {
+  color: #52634b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.review-rule-count {
+  margin: 0 0 9px;
+  font-size: 12px;
+  color: #52634b;
+  line-height: 1.6;
+}
+.sketch-modal .sketch-surface {
+  margin-bottom: 0;
+}
+@media (max-width: 520px) {
+  .modal-action-footer .modal-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .modal-action-footer .modal-footer p {
+    margin: 0;
+  }
+  .modal-action-footer .modal-footer .primary-button {
+    min-height: 44px;
+  }
+}
+
+/* Short landscape viewports keep every control reachable through page scroll. */
+@media (max-height: 420px) {
+  .studio-v2.play-focused .world-panel {
+    height: auto;
+  }
+  .studio-v2.play-focused .world-panel > .game-stage:not(:fullscreen) {
+    flex: 1 0 200px;
+    height: 200px;
+    min-height: 200px;
+  }
 }

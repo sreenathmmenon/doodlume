@@ -245,15 +245,28 @@ test("revised-page SAM cutouts retain existing identities and collected progress
       }),
   );
   const before = structuredClone(world);
+  // The revised page adds a distinct real mark; existing source pixels stay unchanged.
+  const revised = await sharp(image)
+    .composite([
+      {
+        input: Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="50" y="60" width="30" height="27" fill="#45678a"/></svg>',
+        ),
+      },
+    ])
+    .png()
+    .toBuffer();
   const result = await interpretAmendment(
     world,
-    imageData(image),
+    imageData(revised),
     "Add decoration",
     direct,
     signal,
     async (url) =>
       String(url).endsWith("responses")
-        ? stream()
+        ? stream(
+            line.replace("x1=20;y1=30;x2=79;y2=56", "x1=20;y1=60;x2=79;y2=86"),
+          )
         : json({
             summary: "Added mark",
             clarification: "",
@@ -262,6 +275,9 @@ test("revised-page SAM cutouts retain existing identities and collected progress
             additions: [
               {
                 ...object,
+                x: 500,
+                y: 600,
+                width: 300,
                 id: "new-mark",
                 kind: "decoration",
                 targetId: null,
@@ -274,6 +290,7 @@ test("revised-page SAM cutouts retain existing identities and collected progress
     sam,
   );
   assert.equal(result.patch.additions[0].artMethod, "sam");
+  assert.notEqual(result.patch.sourceImage, world.sourceImage);
   const applied = applyWorldPatch(
     world,
     { ...emptyPlayState(), collected: ["seed"] },

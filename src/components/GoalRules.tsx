@@ -10,6 +10,7 @@ import {
 } from "../../shared/world";
 import { Modal } from "./Modal";
 import "./GoalRules.css";
+import { objectName } from "../lib/object-name";
 
 export function GoalRules({
   world,
@@ -80,7 +81,7 @@ export function GoalRules({
               <small>
                 {Math.round(entity.x)}, {Math.round(entity.y)}
                 {kind === "lever" &&
-                  ` → ${world.entities.find((e) => e.id === entity.targetId)?.label || entity.targetId}`}
+                  ` → ${objectName(world, entity.targetId, 60)}`}
               </small>
             </span>
             {(

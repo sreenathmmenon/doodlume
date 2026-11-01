@@ -10,6 +10,7 @@ import { modelConnection } from "./provider.js";
 import { imageData } from "./images.js";
 import { validateRecognitionReview } from "../shared/recognition-review.js";
 import { setupFeedback } from "../shared/setup.js";
+import { validateWorld } from "../shared/world.js";
 
 const connection = modelConnection({
   MODEL_PROVIDER: "meta",
@@ -159,5 +160,150 @@ test("unreadable geometry and unresolved gate links stay actionable review data;
     (error: unknown) =>
       error instanceof InterpretationError &&
       !(error instanceof RecognitionReviewError),
+  );
+
+  const objects = [
+    object("hero", "player", 100, 500, 60, 100),
+    object("ground", "terrain", 0, 800, 1000, 100),
+    object("star", "coin", 400, 600, 40, 40),
+    object("switch", "lever", 600, 600, 40, 80, "gate"),
+    object("gate", "gate", 800, 650, 30, 150),
+    object("house", "goal", 900, 650, 70, 150),
+  ];
+  const required = {
+    requiredCollectedIds: ["star"],
+    requiredActivatedIds: ["switch"],
+  };
+  let request: any;
+  async function interpretRules(
+    goalRules: unknown,
+    intent = "Collect the star, activate the switch, then reach the house",
+    withGoal = true,
+  ) {
+    return interpretDrawing(
+      image,
+      intent,
+      connection,
+      new AbortController().signal,
+      { enabled: false, apiKey: "" },
+      async (_url, init) => {
+        request = JSON.parse(String(init?.body));
+        return response({
+          ...interpretation(
+            withGoal ? objects : objects.filter((o) => o.kind !== "goal"),
+          ),
+          ...(goalRules === undefined ? {} : { goalRules }),
+        });
+      },
+      "picture",
+    );
+  }
+  const requiredWorld = await interpretRules(required);
+  assert.deepEqual(requiredWorld.goalRules, required);
+  assert.deepEqual(
+    request.response_format.json_schema.schema.properties.goalRules.required,
+    ["requiredCollectedIds", "requiredActivatedIds"],
+  );
+  assert.match(
+    request.messages[0].content,
+    /collect the two stars and reach the house/,
+  );
+  const optional = { requiredCollectedIds: [], requiredActivatedIds: [] };
+  assert.deepEqual(
+    (
+      await interpretRules(
+        optional,
+        "Collectibles and switches are optional. Reach the house or explore.",
+      )
+    ).goalRules,
+    optional,
+  );
+  for (const intent of [
+    "Explore freely.",
+    "All collectibles and switches are optional. Reach the house or freely explore.",
+    "Everything is optional. Collect the star and reach the house if you want.",
+  ])
+    await assert.rejects(
+      () => interpretRules(required, intent),
+      (error: unknown) => {
+        assert.ok(error instanceof RecognitionReviewError);
+        assert.equal(error.recovery.rulesNeedConfirmation, true);
+        assert.deepEqual(error.recovery.draft.goalRules, required);
+        assert.match(
+          error.recovery.draft.entities[0].art!,
+          /^data:image\/png;base64,/,
+        );
+        return true;
+      },
+    );
+  const switchOnly = {
+    requiredCollectedIds: [],
+    requiredActivatedIds: ["switch"],
+  };
+  assert.deepEqual(
+    (
+      await interpretRules(
+        switchOnly,
+        "All stars are optional. Activate the switch and reach the house.",
+      )
+    ).goalRules,
+    switchOnly,
+  );
+  const starOnly = { requiredCollectedIds: ["star"], requiredActivatedIds: [] };
+  assert.deepEqual(
+    (
+      await interpretRules(
+        starOnly,
+        "Switches are optional. Collect the star and reach the house.",
+      )
+    ).goalRules,
+    starOnly,
+  );
+  for (const badRules of [
+    { requiredCollectedIds: ["star", "star"], requiredActivatedIds: [] },
+    { requiredCollectedIds: ["switch"], requiredActivatedIds: [] },
+    { requiredCollectedIds: ["missing"], requiredActivatedIds: [] },
+    { requiredCollectedIds: null, requiredActivatedIds: [] },
+    null,
+    optional,
+    undefined,
+  ]) {
+    await assert.rejects(
+      () => interpretRules(badRules),
+      (error: unknown) => {
+        assert.ok(error instanceof RecognitionReviewError);
+        const recovered = validateRecognitionReview(error.recovery);
+        assert.equal(recovered.rulesNeedConfirmation, true);
+        assert.match(
+          recovered.draft.entities[0].art!,
+          /^data:image\/png;base64,/,
+        );
+        assert.ok(
+          recovered.issues.some((issue) =>
+            /requirement|objective/i.test(issue.label),
+          ),
+        );
+        return true;
+      },
+    );
+  }
+  await assert.rejects(
+    () =>
+      interpretRules(
+        required,
+        "Collect the star and reach a destination",
+        false,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof RecognitionReviewError);
+      assert.equal(error.recovery.rulesNeedConfirmation, true);
+      assert.deepEqual(error.recovery.draft.goalRules, required);
+      assert.match(
+        setupFeedback(error.recovery.draft).errors.join(" "),
+        /destination/i,
+      );
+      assert.throws(() => validateWorld(error.recovery.draft), /destination/i);
+      return true;
+    },
   );
 });

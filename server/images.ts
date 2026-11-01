@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { InterpretationError } from "./model.js";
+import { removeBoundaryPaper } from "../shared/paper-art.js";
 
 export async function normalizeDrawing(image: unknown): Promise<Buffer> {
   if (
@@ -76,15 +77,12 @@ export async function cropArtwork(
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  let ink = 0;
-  for (let i = 0; i < crop.data.length; i += 4) {
-    const min = Math.min(crop.data[i], crop.data[i + 1], crop.data[i + 2]);
-    crop.data[i + 3] = Math.round(
-      255 * Math.min(1, Math.max(0, (248 - min) / 22)),
-    );
-    if (crop.data[i + 3] > 20) ink++;
-  }
-  if (ink < 3)
+  const { inkPixels } = removeBoundaryPaper(
+    crop.data,
+    crop.info.width,
+    crop.info.height,
+  );
+  if (inkPixels < 3)
     throw new InterpretationError(
       "A proposed object contains no clear ink. Nothing has been applied.",
     );

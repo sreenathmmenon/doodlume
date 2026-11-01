@@ -6,11 +6,15 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  footer,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  footer?: ReactNode;
+  className?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -22,7 +26,7 @@ export function Modal({
   return (
     <dialog
       ref={dialog}
-      className={`modal ${wide ? "modal-wide" : ""}`}
+      className={`modal ${wide ? "modal-wide" : ""} ${footer ? "modal-with-footer" : ""} ${className}`}
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
@@ -50,7 +54,14 @@ export function Modal({
           <X size={20} />
         </button>
       </div>
-      {children}
+      {footer ? (
+        <>
+          <div className="modal-scroll-body">{children}</div>
+          <footer className="modal-action-footer">{footer}</footer>
+        </>
+      ) : (
+        children
+      )}
     </dialog>
   );
 }

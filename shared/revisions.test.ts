@@ -176,6 +176,7 @@ test("undo keeps later progress for surviving objects and increases the revision
 
 test("changing destination rules is a reversible revision that keeps earned achievements and discoveries", () => {
   const { world, patch } = setup();
+  const originalRules = structuredClone(world.goalRules);
   const earned = { ...progress, completed: true, exploring: true };
   const rules = {
     requiredCollectedIds: ["sunseed-two"],
@@ -192,7 +193,7 @@ test("changing destination rules is a reversible revision that keeps earned achi
   assert.equal(goalProgress(changed.world, changed.state).ready, false);
   const undone = undoWorldPatch(changed.world, earned, changed.checkpoint);
   assert.equal(undone.world.revision, 3);
-  assert.equal(undone.world.goalRules, undefined);
+  assert.deepEqual(undone.world.goalRules, originalRules);
   assert.deepEqual(undone.state, earned);
   const cleared = applyWorldPatch(changed.world, earned, {
     ...patch,
@@ -213,5 +214,5 @@ test("changing destination rules is a reversible revision that keeps earned achi
       }),
     /requirement/,
   );
-  assert.equal(world.goalRules, undefined);
+  assert.deepEqual(world.goalRules, originalRules);
 });

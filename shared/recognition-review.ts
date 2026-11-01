@@ -1,4 +1,9 @@
-import { validateWorld, type WorldDefinition } from "./world.js";
+import {
+  validateWorld,
+  type WorldDefinition,
+  type GoalRules,
+  type WorldEntity,
+} from "./world.js";
 
 /** Review data is not a playable world. Only WorldSetup's validated output may enter the engine. */
 export interface RecognitionReview {
@@ -6,12 +11,77 @@ export interface RecognitionReview {
   version: 1;
   draft: WorldDefinition;
   issues: RecognitionIssue[];
+  rulesNeedConfirmation?: boolean;
 }
 export interface RecognitionIssue {
   id: string;
   objectId?: string;
   label: string;
   message: string;
+}
+
+/** Keep only grounded requirement IDs; callers must quarantine every reported issue. */
+export function reviewGoalRules(
+  value: unknown,
+  entities: WorldEntity[],
+  requireDestination = true,
+): { rules: GoalRules; issues: string[] } {
+  const rules: GoalRules = {
+    requiredCollectedIds: [],
+    requiredActivatedIds: [],
+  };
+  const issues: string[] = [];
+  if (value === undefined) return { rules, issues };
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return {
+      rules,
+      issues: [
+        "The finishing requirements were unreadable. Choose the required actions below.",
+      ],
+    };
+  const input = value as Record<string, unknown>;
+  for (const [key, kind] of [
+    ["requiredCollectedIds", "coin"],
+    ["requiredActivatedIds", "lever"],
+  ] as const) {
+    const values = input[key] === undefined ? [] : input[key];
+    if (!Array.isArray(values) || values.length > 160) {
+      issues.push(
+        `Choose valid ${kind === "coin" ? "collectibles" : "switches"} for the finishing requirements.`,
+      );
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const id of values) {
+      if (
+        typeof id !== "string" ||
+        !/^[\w-]{1,60}$/.test(id) ||
+        !entities.some((entity) => entity.id === id && entity.kind === kind)
+      ) {
+        issues.push(
+          `A required ${kind === "coin" ? "collectible" : "switch"} could not be matched to its recognized object. Choose it below rather than guessing.`,
+        );
+        continue;
+      }
+      if (seen.has(id)) {
+        issues.push(
+          "A finishing requirement was repeated. Confirm the intended actions below.",
+        );
+        continue;
+      }
+      seen.add(id);
+      rules[key].push(id);
+    }
+  }
+  if (
+    requireDestination &&
+    (rules.requiredCollectedIds.length || rules.requiredActivatedIds.length) &&
+    !entities.some((entity) => entity.kind === "goal")
+  )
+    issues.push(
+      "Add a destination before requiring these actions to finish, or make the actions optional.",
+    );
+  return { rules, issues: [...new Set(issues)] };
 }
 
 export function validateRecognitionReview(value: unknown): RecognitionReview {
@@ -22,6 +92,8 @@ export function validateRecognitionReview(value: unknown): RecognitionReview {
   if (
     review.kind !== "recognition-review" ||
     review.version !== 1 ||
+    (review.rulesNeedConfirmation !== undefined &&
+      typeof review.rulesNeedConfirmation !== "boolean") ||
     !draft ||
     draft.source !== "meta" ||
     draft.width !== 1440 ||
@@ -34,6 +106,8 @@ export function validateRecognitionReview(value: unknown): RecognitionReview {
     review.issues.length > 80
   )
     throw new Error("The repair draft could not be read.");
+  if (reviewGoalRules(draft.goalRules, draft.entities, false).issues.length)
+    throw new Error("The repair draft has unmatched finishing requirements.");
   for (const entity of draft.entities) {
     if (
       !entity ||
@@ -69,6 +143,7 @@ export function validateRecognitionReview(value: unknown): RecognitionReview {
     prefix += "x";
   validateWorld({
     ...draft,
+    goalRules: undefined,
     entities: [
       ...draft.entities.map((e) => ({
         ...e,

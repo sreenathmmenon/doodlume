@@ -4,10 +4,12 @@ import { Modal } from "./Modal";
 import { prepareSourceArtwork } from "../lib/source-art";
 import { setupFeedback } from "../../shared/setup";
 import type { RecognitionReview } from "../../shared/recognition-review";
+import "./WorldSetupRules.css";
 import type {
   ArtworkBox,
   EntityKind,
   InputKind,
+  GoalRules,
   WorldDefinition,
   WorldEntity,
 } from "../../shared/world";
@@ -101,6 +103,9 @@ export function WorldSetup({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [sourceAspect, setSourceAspect] = useState(1440 / 820);
+  const [rulesConfirmed, setRulesConfirmed] = useState(
+    !recovery?.rulesNeedConfirmation,
+  );
   const start = useRef<{ x: number; y: number } | null>(null),
     request = useRef<AbortController | null>(null);
   const move = useRef<{
@@ -121,6 +126,74 @@ export function WorldSetup({
   }, [image]);
   const item = world.entities.find((e) => e.id === selected);
   const feedback = setupFeedback(world);
+  const goalRules = world.goalRules ?? {
+    requiredCollectedIds: [],
+    requiredActivatedIds: [],
+  };
+  function toggleRule(key: keyof GoalRules, id: string) {
+    setWorld((current) => {
+      const rules = current.goalRules ?? {
+        requiredCollectedIds: [],
+        requiredActivatedIds: [],
+      };
+      return {
+        ...current,
+        goalRules: {
+          ...rules,
+          [key]: rules[key].includes(id)
+            ? rules[key].filter((value) => value !== id)
+            : [...rules[key], id],
+        },
+      };
+    });
+    if (recovery?.rulesNeedConfirmation) setRulesConfirmed(false);
+    setError("");
+  }
+  function ruleChoices(key: keyof GoalRules, kind: "coin" | "lever") {
+    const choices = world.entities.filter((entity) => entity.kind === kind);
+    const unavailable = goalRules[key].filter(
+      (id) => !choices.some((entity) => entity.id === id),
+    );
+    return (
+      <fieldset className="setup-rule-group">
+        <legend>
+          {kind === "coin"
+            ? "Collect before finishing"
+            : "Activate before finishing"}
+        </legend>
+        {!choices.length && !unavailable.length && (
+          <p>
+            No {kind === "coin" ? "collectibles" : "switches"} selected yet.
+          </p>
+        )}
+        {choices.map((entity) => (
+          <label key={entity.id}>
+            <input
+              type="checkbox"
+              checked={goalRules[key].includes(entity.id)}
+              onChange={() => toggleRule(key, entity.id)}
+            />
+            <span>
+              {entity.label || (kind === "coin" ? "Collectible" : "Switch")}
+            </span>
+          </label>
+        ))}
+        {unavailable.map((id) => (
+          <label key={id} className="setup-rule-unavailable">
+            <input
+              type="checkbox"
+              checked
+              onChange={() => toggleRule(key, id)}
+            />
+            <span>
+              Unavailable {kind === "coin" ? "collectible" : "switch"}: {id}.
+              Uncheck it or restore its role.
+            </span>
+          </label>
+        ))}
+      </fieldset>
+    );
+  }
   function update(change: Partial<WorldEntity>) {
     setWorld((w) => ({
       ...w,
@@ -216,6 +289,12 @@ export function WorldSetup({
       );
   }
   async function prepare() {
+    if (!rulesConfirmed) {
+      setError(
+        "Confirm the finishing requirements before preparing your world.",
+      );
+      return;
+    }
     const controller = new AbortController();
     request.current = controller;
     setBusy(true);
@@ -739,6 +818,43 @@ export function WorldSetup({
           </section>
         )}
       </fieldset>
+      <fieldset className="setup-rules" disabled={busy}>
+        <legend>Finishing requirements</legend>
+        <p>
+          Choose what must happen before a destination finishes your game.
+          Unchecked objects stay optional.
+        </p>
+        {recovery?.rulesNeedConfirmation && (
+          <p className="setup-rule-attention">
+            Meta could not confirm every part of your objective. Check these
+            choices, then confirm them. Leaving every box unchecked makes the
+            actions optional.
+          </p>
+        )}
+        <div className="setup-rule-columns">
+          {ruleChoices("requiredCollectedIds", "coin")}
+          {ruleChoices("requiredActivatedIds", "lever")}
+        </div>
+        <p className="setup-rule-summary">
+          {!world.entities.some((entity) => entity.kind === "goal")
+            ? "No destination yet. Add one to give this world a finish."
+            : goalRules.requiredCollectedIds.length +
+                goalRules.requiredActivatedIds.length
+              ? `${goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length} required actions, then reach a destination.`
+              : "Reach a destination. Collection and switches are optional."}
+        </p>
+        {recovery?.rulesNeedConfirmation && (
+          <label className="setup-rule-confirm">
+            <input
+              type="checkbox"
+              checked={rulesConfirmed}
+              disabled={feedback.errors.length > 0}
+              onChange={(event) => setRulesConfirmed(event.target.checked)}
+            />
+            <span>I confirm these finishing requirements.</span>
+          </label>
+        )}
+      </fieldset>
       <div className="setup-feedback" aria-live="polite">
         {feedback.errors.map((m) => (
           <p className="setup-error" key={m}>
@@ -763,7 +879,7 @@ export function WorldSetup({
         </span>
         <button
           className="primary-button"
-          disabled={busy || feedback.errors.length > 0}
+          disabled={busy || feedback.errors.length > 0 || !rulesConfirmed}
           onClick={() => void prepare()}
         >
           {busy ? (

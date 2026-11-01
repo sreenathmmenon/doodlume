@@ -8,15 +8,19 @@ export function SketchPad({
   onUse,
   onClose,
   initialImage,
+  resumeImage,
+  onPause,
 }: {
   onUse: (image: string, mark?: InkMark) => void;
   onClose: () => void;
   initialImage?: string;
+  resumeImage?: string;
+  onPause?: (image: string | undefined) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const base = useRef<HTMLCanvasElement | null>(null);
-  const [ready, setReady] = useState(!initialImage);
+  const [ready, setReady] = useState(!initialImage && !resumeImage);
   const [loadError, setLoadError] = useState("");
   const history = useRef<{ pixels: ImageData; hasInk: boolean }[]>([]);
   const [color, setColor] = useState(colors[0]);
@@ -26,6 +30,28 @@ export function SketchPad({
   useEffect(() => {
     const c = canvas.current!,
       ctx = c.getContext("2d")!;
+    if (resumeImage) {
+      let active = true;
+      const image = new Image();
+      image.onload = () => {
+        if (!active) return;
+        c.width = image.naturalWidth;
+        c.height = image.naturalHeight;
+        ctx.drawImage(image, 0, 0);
+        setHasInk(true);
+        setReady(true);
+      };
+      image.onerror = () => {
+        if (active)
+          setLoadError(
+            "Your paused drawing could not be reopened. Your source image is unchanged.",
+          );
+      };
+      image.src = resumeImage;
+      return () => {
+        active = false;
+      };
+    }
     if (!initialImage) {
       ctx.fillStyle = "#fffdf8";
       ctx.fillRect(0, 0, c.width, c.height);
@@ -55,7 +81,7 @@ export function SketchPad({
     return () => {
       active = false;
     };
-  }, [initialImage]);
+  }, [initialImage, resumeImage]);
   function useDrawing() {
     const c = canvas.current!;
     let mark: InkMark;
@@ -144,11 +170,40 @@ export function SketchPad({
     <Modal
       title={
         initialImage
-          ? "A new mark. The same little world."
-          : "A blank page. A little possibility."
+          ? "A new mark. The same world."
+          : resumeImage
+            ? "Continue your drawing"
+            : "Draw your world"
       }
-      onClose={onClose}
+      onClose={() => {
+        if (onPause && ready) {
+          try {
+            extractInkLayer(canvas.current!);
+            onPause(canvas.current!.toDataURL("image/png"));
+          } catch {
+            onPause(undefined);
+          }
+        }
+        onClose();
+      }}
       wide
+      className="sketch-modal"
+      footer={
+        <div className="modal-footer">
+          <p>
+            {initialImage
+              ? "Your existing world stays unchanged until you apply."
+              : "Your drawing stays in this draft until you use it."}
+          </p>
+          <button
+            className="primary-button"
+            disabled={!hasInk || !ready}
+            onClick={useDrawing}
+          >
+            Use this drawing <ArrowUpRight size={18} />
+          </button>
+        </div>
+      }
     >
       <p className="modal-copy">
         {initialImage
@@ -226,18 +281,6 @@ export function SketchPad({
           }}
           aria-label="Drawing canvas. Draw with your pointer or upload a drawing from the studio."
         />
-      </div>
-      <div className="modal-footer">
-        <p>
-          Your page stays in this browser until you choose to bring it alive.
-        </p>
-        <button
-          className="primary-button"
-          disabled={!hasInk || !ready}
-          onClick={useDrawing}
-        >
-          Use this drawing <ArrowUpRight size={18} />
-        </button>
       </div>
     </Modal>
   );

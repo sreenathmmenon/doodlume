@@ -14,8 +14,38 @@ let lcp = 0,
 let tileSurfaces = { count: 0, maxWidth: 0, maxHeight: 0 };
 let firstWorldReadyMs: number | null = null,
   latestWorldSetupMs: number | null = null;
+type CreationOutcome = "accepted" | "repair" | "clarification" | "error" | "cancelled";
+let creation: { startedAt: number; returnedAt?: number; acceptedAt?: number; readyAt?: number; outcome?: CreationOutcome } | undefined;
+/** Opt-in timings only: no source pixels, text, IDs or credentials are recorded. */
+export function recordCreationStarted() {
+  if (diagnosticsEnabled) creation = { startedAt: performance.now() };
+}
+export function recordRecognitionReturned(outcome: CreationOutcome) {
+  if (diagnosticsEnabled && creation && !creation.returnedAt) {
+    creation.returnedAt = performance.now();
+    creation.outcome = outcome;
+  }
+}
+export function recordReviewAccepted() {
+  if (diagnosticsEnabled && creation && ["accepted", "repair"].includes(creation.outcome ?? "")) {
+    creation.acceptedAt = performance.now();
+    delete creation.readyAt;
+  }
+}
+function creationReadings() {
+  if (!creation) return null;
+  const duration = (end?: number, start = creation!.startedAt) => end === undefined ? null : Number((end - start).toFixed(1));
+  return {
+    outcome: creation.outcome ?? "pending",
+    requestToReviewMs: duration(creation.returnedAt),
+    reviewDelayMs: creation.returnedAt ? duration(creation.acceptedAt, creation.returnedAt) : null,
+    acceptToPlayableMs: creation.acceptedAt ? duration(creation.readyAt, creation.acceptedAt) : null,
+    requestToPlayableMs: duration(creation.readyAt),
+  };
+}
 export function recordWorldReady(startedAt: number) {
   if (!diagnosticsEnabled) return;
+  if (creation?.acceptedAt && !creation.readyAt) creation.readyAt = performance.now();
   firstWorldReadyMs ??= Number(performance.now().toFixed(1));
   latestWorldSetupMs = Number((performance.now() - startedAt).toFixed(1));
 }
@@ -98,6 +128,7 @@ export function diagnosticSnapshot() {
   ).memory;
   return {
     recording,
+    creation: creationReadings(),
     samples: intervals.length,
     frameP50Ms: percentile(0.5),
     frameP95Ms: percentile(0.95),

@@ -18,6 +18,8 @@ import {
   Plus,
   Trash2,
   Undo2,
+  Crop,
+  LoaderCircle,
 } from "lucide-react";
 import { Modal } from "./Modal";
 import "./editor-viewport.css";
@@ -30,6 +32,7 @@ import {
 import { SketchPad } from "./SketchPad";
 import { ArtworkReview } from "./ArtworkReview";
 import { extractSketchInk } from "../lib/ink";
+import { prepareSourceArtwork } from "../lib/source-art";
 import { applyWorldPatch, type WorldPatch } from "../../shared/revisions";
 import type { PaperProposal } from "../../shared/amendments";
 import type {
@@ -134,6 +137,21 @@ export function WorldEditor({
   const [error, setError] = useState("");
   const [drawing, setDrawing] = useState(false);
   const [customArt, setCustomArt] = useState<string | null>(null);
+  const [preparingArtwork, setPreparingArtwork] = useState(false);
+  const artworkRequest = useRef<AbortController | null>(null);
+  const selectedNow = useRef(selected);
+  selectedNow.current = selected;
+  const pageNow = useRef({
+    image: revisedImage,
+    worldId: world.id,
+    revision: world.revision,
+  });
+  pageNow.current = {
+    image: revisedImage,
+    worldId: world.id,
+    revision: world.revision,
+  };
+  useEffect(() => () => artworkRequest.current?.abort(), []);
   const canvas = useRef<SVGSVGElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 360 });
@@ -202,6 +220,121 @@ export function WorldEditor({
     setDrag(null);
   }
   const item = additions.find((e) => e.id === selected);
+  function cancelArtwork() {
+    artworkRequest.current?.abort();
+    artworkRequest.current = null;
+    setPreparingArtwork(false);
+  }
+  function selectObject(id: string | null) {
+    if (id !== selectedNow.current) cancelArtwork();
+    selectedNow.current = id;
+    setSelected(id);
+  }
+  useEffect(() => {
+    cancelArtwork();
+  }, [revisedImage, world.id, world.revision]);
+  async function usePageArtwork() {
+    if (!item || !revisedImage || artworkRequest.current) return;
+    const snapshot = { ...item },
+      image = revisedImage;
+    if (
+      snapshot.x < 0 ||
+      snapshot.y < 0 ||
+      snapshot.width <= 0 ||
+      snapshot.height <= 0 ||
+      snapshot.x + snapshot.width > 1440 ||
+      snapshot.y + snapshot.height > 820
+    ) {
+      setError(
+        "This selection is outside the revised page's 1440 × 820 area. Move its box over the complete page mark before cropping. Artwork is unchanged.",
+      );
+      return;
+    }
+    const source = {
+      x: snapshot.x / 1.44,
+      y: snapshot.y / 0.82,
+      width: snapshot.width / 1.44,
+      height: snapshot.height / 0.82,
+    };
+    const controller = new AbortController();
+    artworkRequest.current = controller;
+    setPreparingArtwork(true);
+    setReviewed(false);
+    setError("");
+    const worldId = world.id,
+      revision = world.revision;
+    try {
+      const prepared = await prepareSourceArtwork(
+        {
+          ...world,
+          sourceImage: image,
+          entities: [
+            ...world.entities.map((entity) => ({
+              ...entity,
+              artSource: undefined,
+            })),
+            {
+              ...snapshot,
+              // Role-independent cropping must also work before a new lever is connected.
+              kind: "decoration",
+              art: undefined,
+              artMethod: undefined,
+              artNote: undefined,
+              artSource: source,
+              artShape: "box",
+            },
+          ],
+        },
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted ||
+        artworkRequest.current !== controller ||
+        selectedNow.current !== snapshot.id ||
+        pageNow.current.image !== image ||
+        pageNow.current.worldId !== worldId ||
+        pageNow.current.revision !== revision
+      )
+        return;
+      const crop = prepared.entities.find(
+        (entity) => entity.id === snapshot.id,
+      );
+      if (!crop?.art)
+        throw new Error(
+          "The selected page artwork could not be prepared. Artwork is unchanged.",
+        );
+      setAdditions((items) =>
+        items.map((entity) =>
+          entity.id === snapshot.id &&
+          (["x", "y", "width", "height"] as const).every(
+            (key) => entity[key] === snapshot[key],
+          )
+            ? {
+                ...entity,
+                art: crop.art,
+                artSource: source,
+                artShape: "box",
+                artMethod: crop.artMethod,
+                artNote:
+                  world.inputKind === "picture"
+                    ? "Selected by you from the revised picture. Background inside this crop is included."
+                    : "Selected by you from the revised page with paper-background removal. Check the complete outline.",
+              }
+            : entity,
+        ),
+      );
+    } catch (reason) {
+      if (!controller.signal.aborted && artworkRequest.current === controller)
+        setError(
+          `${reason instanceof Error ? reason.message : "The page artwork could not be prepared."} Artwork is unchanged.`,
+        );
+    } finally {
+      if (artworkRequest.current === controller) {
+        artworkRequest.current = null;
+        if (!controller.signal.aborted) setPreparingArtwork(false);
+      }
+    }
+  }
   const gates = [...world.entities, ...additions].filter(
     (e) => e.kind === "gate",
   );
@@ -278,7 +411,7 @@ export function WorldEditor({
           p.y <= a.y + a.height,
       );
     if (hit) {
-      setSelected(hit.id);
+      selectObject(hit.id);
       setDrag({
         ...p,
         currentX: p.x,
@@ -289,7 +422,7 @@ export function WorldEditor({
       return;
     }
     if (tool === "move") {
-      setSelected(null);
+      selectObject(null);
       return;
     }
     if (world.entities.length + additions.length >= 160) {
@@ -312,6 +445,7 @@ export function WorldEditor({
     if (!drag) return;
     const p = point(e);
     if (drag.id && drag.original) {
+      cancelArtwork();
       const original = drag.original;
       setAdditions((items) =>
         items.map((a) =>
@@ -374,12 +508,13 @@ export function WorldEditor({
           : {}),
       };
       setAdditions((items) => [...items, entity]);
-      setSelected(entity.id);
+      selectObject(entity.id);
       setCustomArt(null);
     }
     setDrag(null);
   }
   function update(change: Partial<WorldEntity>) {
+    cancelArtwork();
     setReviewed(false);
     setAdditions((items) =>
       items.map((e) => (e.id === selected ? { ...e, ...change } : e)),
@@ -416,7 +551,7 @@ export function WorldEditor({
         : {}),
     };
     setAdditions((items) => [...items, entity]);
-    setSelected(entity.id);
+    selectObject(entity.id);
     setCustomArt(null);
     setReviewed(false);
     setError("");
@@ -505,10 +640,11 @@ export function WorldEditor({
   function removeSelected() {
     setReviewed(false);
     setAdditions((items) => items.filter((e) => e.id !== selected));
-    setSelected(null);
+    selectObject(null);
     setError("");
   }
   function apply() {
+    if (preparingArtwork || artworkRequest.current) return;
     try {
       if (revisedImage && !reviewed)
         throw new Error(
@@ -664,7 +800,7 @@ export function WorldEditor({
               onClick={() => {
                 setTool(t.kind);
                 setPanMode(false);
-                setSelected(null);
+                selectObject(null);
               }}
             >
               <Plus size={13} />
@@ -702,7 +838,7 @@ export function WorldEditor({
                 aria-label="Select a new object"
                 value={selected ?? ""}
                 onChange={(e) => {
-                  setSelected(e.target.value || null);
+                  selectObject(e.target.value || null);
                   const next = additions.find((a) => a.id === e.target.value);
                   if (next) focusObject(next);
                 }}
@@ -896,12 +1032,13 @@ export function WorldEditor({
                 </div>
                 {item.art && (
                   <div className="editor-inspected-art">
-                    <img
-                      src={item.art}
-                      alt={`${title(item)} original artwork`}
-                    />
+                    <img src={item.art} alt={`${title(item)} artwork`} />
                     <span>
-                      Original artwork
+                      {item.artSource
+                        ? "Source-page artwork"
+                        : item.art.startsWith("/art/")
+                          ? "Built-in artwork"
+                          : "Custom artwork"}
                       <br />
                       {Math.round(item.width)} × {Math.round(item.height)} world
                       units
@@ -987,6 +1124,33 @@ export function WorldEditor({
                     </label>
                   ))}
                 </div>
+                {revisedImage && (
+                  <div className="editor-page-art">
+                    <button
+                      className="secondary-button"
+                      disabled={preparingArtwork}
+                      aria-busy={preparingArtwork}
+                      onClick={() => void usePageArtwork()}
+                    >
+                      {preparingArtwork ? (
+                        <LoaderCircle size={16} className="spin" />
+                      ) : (
+                        <Crop size={16} />
+                      )}
+                      {preparingArtwork
+                        ? "Preparing artwork…"
+                        : "Use page artwork"}
+                    </button>
+                    <p>
+                      {item.artSource &&
+                      item.artNote?.startsWith(
+                        "Selected by you from the revised",
+                      )
+                        ? item.artNote
+                        : "Crops this box from your revised page. Include the complete mark before applying."}
+                    </p>
+                  </div>
+                )}
                 {item.kind === "lever" && (
                   <label>
                     Which gate should it wake?
@@ -1094,7 +1258,7 @@ export function WorldEditor({
                 onClick={() => {
                   setReviewed(false);
                   setAdditions((items) => items.slice(0, -1));
-                  setSelected(null);
+                  selectObject(null);
                   setError("");
                 }}
               >
@@ -1104,6 +1268,7 @@ export function WorldEditor({
                 className="primary-button"
                 disabled={
                   (!additions.length && !expanded) ||
+                  preparingArtwork ||
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
                 }

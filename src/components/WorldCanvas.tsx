@@ -49,6 +49,16 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const [failed, setFailed] = useState(false);
     const scene = useRef<WorldScene | undefined>(undefined);
     const startupFailed = useRef(false);
+    const rendered = useRef(false);
+    const recovery = useRef<
+      | {
+          worldId: string;
+          revision: number;
+          initial: PlayState | undefined;
+          state: PlayState;
+        }
+      | undefined
+    >(undefined);
     const callbacks = useRef(props);
     callbacks.current = props;
     useImperativeHandle(
@@ -56,7 +66,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       () => ({
         snapshot: () =>
           startupFailed.current
-            ? structuredClone(callbacks.current.initial ?? emptyPlayState())
+            ? structuredClone(
+                recovery.current?.state ??
+                  callbacks.current.initial ??
+                  emptyPlayState(),
+              )
             : scene.current?.snapshot(),
         explore: () =>
           startupFailed.current
@@ -71,11 +85,25 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     );
     useEffect(() => {
       let active = true;
-      let settled = false;
+      let sceneReady = false;
       let game: Phaser.Game | undefined;
       let disposed = false;
+      let canvas: HTMLCanvasElement | undefined;
+      let width = 0,
+        height = 0;
       let readyTimeout: ReturnType<typeof setTimeout> | undefined;
       startupFailed.current = false;
+      rendered.current = false;
+      // Retry retains the failed run. A new world or an explicit Replay supplies
+      // a different initial state and must never inherit a recovery snapshot.
+      const initial =
+        recovery.current?.worldId === props.world.id &&
+        recovery.current.revision === props.world.revision &&
+        recovery.current.initial === props.initial
+          ? recovery.current.state
+          : props.initial;
+      recovery.current = undefined;
+      let lastState = structuredClone(initial ?? emptyPlayState());
       function clearStartupWait() {
         clearTimeout(readyTimeout);
         window.removeEventListener("error", startupException);
@@ -90,15 +118,33 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         else if (!game.loop.running) game.loop.wake();
       }
       function failStartup(message: string) {
-        if (!active || settled) return;
-        settled = true;
+        if (!active || startupFailed.current) return;
+        try {
+          lastState = current.snapshot();
+        } catch {
+          /* Keep the last valid update. */
+        }
+        recovery.current = {
+          worldId: props.world.id,
+          revision: props.world.revision,
+          initial: props.initial,
+          state: structuredClone(lastState),
+        };
         startupFailed.current = true;
+        rendered.current = false;
         clearStartupWait();
         current.setPlaying(false);
         current.setMuted(true);
+        setReady(false);
         setFailed(true);
         callbacks.current.onError?.(message);
         disposeGame();
+      }
+      function contextLost(event: Event) {
+        event.preventDefault();
+        failStartup(
+          "The game display stopped. Your source, world and progress are kept. Retry artwork to reopen it.",
+        );
       }
       function startupException(event: ErrorEvent) {
         const origin = `${event.filename} ${event.error?.stack ?? ""}`;
@@ -110,38 +156,40 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       setReady(false);
       setFailed(false);
       const startedAt = performance.now();
-      const current = new WorldScene(props.world, props.initial, {
+      const current = new WorldScene(props.world, initial, {
         onUpdate: (s, m) => {
-          if (active && !startupFailed.current)
+          if (active && !startupFailed.current) {
+            lastState = s;
             callbacks.current.onUpdate(s, m);
+          }
         },
         onMoment: (m) => {
           if (active && !startupFailed.current) callbacks.current.onMoment(m);
         },
         onError: failStartup,
         onReady: (ready) => {
-          if (!active || settled) return;
-          settled = true;
-          clearStartupWait();
-          setReady(true);
-          recordWorldReady(startedAt);
-          ready.setViewportWidth(
-            host.current?.clientWidth ?? 900,
-            callbacks.current.overview,
-          );
-          ready.setPlaying(active && callbacks.current.playing);
+          if (!active || startupFailed.current) return;
+          sceneReady = true;
+          ready.setViewportWidth(width, callbacks.current.overview);
           ready.setMuted(callbacks.current.muted);
         },
       });
       scene.current = current;
       const resize = new ResizeObserver(([entry]) => {
+        const nextWidth = Math.floor(entry.contentRect.width);
+        const nextHeight = Math.floor(entry.contentRect.height);
         if (
           !active ||
           startupFailed.current ||
-          entry.contentRect.width < 2 ||
-          entry.contentRect.height < 2
+          !Number.isFinite(nextWidth) ||
+          !Number.isFinite(nextHeight) ||
+          nextWidth < 2 ||
+          nextHeight < 2 ||
+          (nextWidth === width && nextHeight === height)
         )
           return;
+        width = nextWidth;
+        height = nextHeight;
         // Dialog children mount before showModal gives their host a size.
         // Wait for a real layout before allocating the renderer framebuffer.
         if (!game) {
@@ -156,8 +204,39 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           try {
             game = new Phaser.Game({
               callbacks: {
+                postBoot: (instance) => {
+                  canvas = instance.canvas;
+                  canvas.addEventListener("webglcontextlost", contextLost);
+                },
                 preBoot: (instance) => {
                   game = instance;
+                  // Catch this renderer's own loop, including ScaleManager
+                  // refresh failures after loading. A global startup listener
+                  // cannot safely attribute errors from an older game instance.
+                  const step = instance.step;
+                  instance.step = (time, delta) => {
+                    try {
+                      step.call(instance, time, delta);
+                    } catch {
+                      failStartup(
+                        "The game display stopped. Your source, world and progress are kept. Retry artwork to reopen it.",
+                      );
+                    }
+                  };
+                  instance.events.on(Phaser.Core.Events.POST_RENDER, () => {
+                    if (
+                      !active ||
+                      startupFailed.current ||
+                      !sceneReady ||
+                      rendered.current
+                    )
+                      return;
+                    rendered.current = true;
+                    clearStartupWait();
+                    setReady(true);
+                    recordWorldReady(startedAt);
+                    current.setPlaying(callbacks.current.playing);
+                  });
                   if (diagnosticsEnabled) {
                     recordGameCreated();
                     instance.events.once(
@@ -169,8 +248,8 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               },
               type: Phaser.AUTO,
               parent: host.current!,
-              width: entry.contentRect.width,
-              height: entry.contentRect.height,
+              width,
+              height,
               backgroundColor: "#f1f0df",
               transparent: false,
               antialias: true,
@@ -179,8 +258,12 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
                 arcade: { gravity: { x: 0, y: 1450 }, debug: false },
               },
               scale: {
-                mode: Phaser.Scale.RESIZE,
-                autoCenter: Phaser.Scale.CENTER_BOTH,
+                // One resize owner. RESIZE also measures the parent on Phaser
+                // ticks and can send fractional/zero dimensions to WebGL while
+                // our observer is changing the same framebuffer.
+                mode: Phaser.Scale.NONE,
+                autoRound: true,
+                autoCenter: Phaser.Scale.NO_CENTER,
               },
               scene: current,
               audio: { noAudio: true },
@@ -216,28 +299,33 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           }
           return;
         }
-        game.scale.resize(entry.contentRect.width, entry.contentRect.height);
-        current.setViewportWidth(
-          entry.contentRect.width,
-          callbacks.current.overview,
-        );
+        try {
+          game.scale.resize(width, height);
+          current.setViewportWidth(width, callbacks.current.overview);
+        } catch {
+          failStartup(
+            "The game display could not resize. Your source, world and progress are kept. Retry artwork to reopen it.",
+          );
+        }
       });
       resize.observe(host.current!);
       return () => {
         resize.disconnect();
         active = false;
         clearStartupWait();
+        canvas?.removeEventListener("webglcontextlost", contextLost);
         disposeGame();
         scene.current = undefined;
       };
     }, [props.world.id, props.run]);
     useEffect(() => {
-      if (!startupFailed.current) scene.current?.setPlaying(props.playing);
+      if (!startupFailed.current && rendered.current)
+        scene.current?.setPlaying(props.playing);
     }, [props.playing]);
     useEffect(() => {
       if (!startupFailed.current)
         scene.current?.setViewportWidth(
-          host.current?.clientWidth ?? 900,
+          Math.max(2, Math.floor(host.current?.clientWidth ?? 900)),
           props.overview,
         );
     }, [props.overview]);

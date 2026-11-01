@@ -1,4 +1,5 @@
 import { validateWorld, type WorldDefinition } from "./world.js";
+import { reviewGoalRules } from "./recognition-review.js";
 
 export function setupFeedback(world: WorldDefinition) {
   const errors: string[] = [],
@@ -27,6 +28,7 @@ export function setupFeedback(world: WorldDefinition) {
         `Choose the gate opened by “${entity.label || "Switch"}” in its object settings, or change its role.`,
       );
   }
+  errors.push(...reviewGoalRules(world.goalRules, world.entities).issues);
   try {
     validateWorld(world);
   } catch (e) {

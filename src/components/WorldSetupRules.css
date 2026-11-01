@@ -1,0 +1,83 @@
+.setup-rules {
+  margin: 22px 0 16px;
+  padding: 18px;
+  border: 1px solid #c5cbb9;
+  border-radius: 15px;
+  color: #35452f;
+  background: #f5f5eb;
+}
+.setup-rules > legend {
+  padding: 0 8px;
+  font-weight: 700;
+}
+.setup-rules p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.setup-rule-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.setup-rule-group {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.setup-rule-group legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.setup-rule-group label,
+.setup-rule-confirm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1.45;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.setup-rule-group input,
+.setup-rule-confirm input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  accent-color: #48643c;
+}
+.setup-rule-group p {
+  color: #53634c;
+}
+.setup-rule-unavailable {
+  color: #8b352d;
+}
+.setup-rules .setup-rule-attention {
+  color: #663d1e;
+  background: #fff0d8;
+  border-radius: 8px;
+  padding: 12px;
+}
+.setup-rules .setup-rule-summary {
+  margin: 14px 0 0;
+  font-weight: 600;
+}
+.setup-rule-confirm {
+  margin-top: 12px;
+  border-top: 1px solid #ccd1c1;
+  padding-top: 14px;
+  font-weight: 650;
+}
+@media (max-width: 600px) {
+  .setup-rule-columns {
+    grid-template-columns: 1fr;
+  }
+  .setup-rules {
+    padding: 14px;
+  }
+}
