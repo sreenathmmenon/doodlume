@@ -37,3 +37,13 @@ Code inspection found three contributing risks:
 Proper follow-up requires explicit source-assembly failure reasons and a source-aligned art policy, with original scene geometry and moving-actor removal handled together. Simply enabling the full image backdrop can introduce duplicated actors and misleading collision geometry. Recoloring the strips or forcing another game mode would conceal the issue rather than correct it.
 
 The UI pass is verified within the stated scope. Whole-product production quality and 10/10 scores are not established.
+
+## Subsequent simplicity pass
+
+- Kept Original, Edit and Save visible; moved image update, rules, undo and version/adaptation details into More world options. Removed duplicate navigation/help and repeated status captions.
+- Focused play hides the studio heading and authoring controls. Objective, progress, play controls and Back to studio remain accessible.
+- Creation puts the image and optional idea first. Gameplay choices use a native disclosure whose closed label retains the selected mode.
+- Editor position/size fields use a native disclosure. Existing field handlers and object identities are unchanged.
+- Library width adapts for one or two entries; larger collections retain the gallery layout.
+- Verified at 973×724: More → Rules, More → Update image, library and Escape dismissal, creation mode selection and summary (restored to Auto), editor object selection and precision disclosure, play/pause and studio return. Saved world remained available after reload. Inspected screenshots are in `outputs/simplicity-pass/`.
+- TypeScript and production build passed. No new generation or broad game-quality claim is made by this UI-only change. The game-art defect above remains open.

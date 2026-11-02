@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   Save,
+  Ellipsis,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -101,6 +102,7 @@ type Connection = {
 type Dialog =
   | "create"
   | "source"
+  | "world-options"
   | "rules"
   | "draft-rules"
   | "discard-creation"
@@ -993,8 +995,24 @@ export default function App() {
       </div>
       <div className="creation-intent-column">
         <div className="panel-heading">
-          <h2>Game direction</h2>
+          <h2>Make it yours</h2>
         </div>
+        <label className="intent-label" htmlFor="world-intent">
+          Your idea <span className="field-optional">Optional</span>
+        </label>
+        <div className="intent-box">
+          <textarea
+            id="world-intent"
+            value={intent}
+            maxLength={400}
+            onChange={(e) => setIntent(e.target.value)}
+            placeholder="What would make this image interesting to play?"
+            disabled={busy}
+          />
+          <Sparkles size={15} aria-hidden="true" />
+        </div>
+        <details className="creation-gameplay-options">
+          <summary>Gameplay <span>{creationStyle === "auto" ? "Auto" : creationStyle === "platform" ? "Adventure" : creationStyle === "roam" ? "Explore" : "Discover"}</span></summary>
         <fieldset className="creation-modes" disabled={busy}>
           <legend>Gameplay</legend>
           <div>
@@ -1017,23 +1035,7 @@ export default function App() {
             ))}
           </div>
         </fieldset>
-        <label className="intent-label" htmlFor="world-intent">
-          Your idea
-        </label>
-        <p className="creation-intent-caption">
-          Optional · A goal, a mood, a moment to discover.
-        </p>
-        <div className="intent-box">
-          <textarea
-            id="world-intent"
-            value={intent}
-            maxLength={400}
-            onChange={(e) => setIntent(e.target.value)}
-            placeholder="What would make this image interesting to play?"
-            disabled={busy}
-          />
-          <Sparkles size={15} aria-hidden="true" />
-        </div>
+        </details>
         {error && (
           <p role="alert" className="source-error">
             {error}
@@ -1103,9 +1105,6 @@ export default function App() {
           </span>
         </a>
         <nav aria-label="Main navigation">
-          <a className="nav-current" href="#studio">
-            Studio
-          </a>
           <button onClick={() => setDialog("worlds")}>
             My worlds <span className="nav-count">{saved.length}</span>
           </button>
@@ -1128,13 +1127,6 @@ export default function App() {
           </button>
           <button
             className="icon-button"
-            aria-label="How to play"
-            onClick={() => setDialog("help")}
-          >
-            <CircleHelp size={19} />
-          </button>
-          <button
-            className="icon-button"
             aria-label="Studio settings"
             onClick={() => {
               setSettingsReturn(null);
@@ -1154,8 +1146,7 @@ export default function App() {
             <div>
               <h1>Your image. Your game.</h1>
               <p>
-                Start with a sketch or photo. Play it, then keep shaping the
-                same world.
+                Draw something. Make it playable.
               </p>
             </div>
             <div className="creation-invitation-actions">
@@ -1181,7 +1172,7 @@ export default function App() {
           >
             <div className="world-heading">
               <div className="world-title-block">
-                <span className="world-stage-label">{modeLabel}{isCreativeAdaptation(world) ? " · Creative adaptation" : ""}<span className="world-version">Version {world.revision}</span></span>
+                <span className="world-stage-label">{modeLabel}</span>
                 <label className="world-name-label">
                   <span className="sr-only">World name</span>
                   <input
@@ -1205,19 +1196,6 @@ export default function App() {
                 </label>
               </div>
               <div className="world-heading-actions">
-                <span className="example-badge">
-                  {world.source === "example"
-                    ? world.revision > 1
-                      ? "Edited example"
-                      : "Playable example"
-                    : world.source === "manual"
-                      ? "Chosen by you"
-                      : isCreativeAdaptation(world)
-                        ? "Creative adaptation"
-                        : world.inputKind === "picture"
-                          ? "From your picture"
-                          : "From your drawing"}
-                </span>
               <button
                 ref={worldSourceInspect}
                 className="world-source-thumb"
@@ -1235,15 +1213,6 @@ export default function App() {
                 <span>Original</span>
               </button>
                 <button
-                  className="secondary-button edit-world-button paper-update-button"
-                  aria-label="Update image"
-                  onClick={openPaper}
-                  disabled={busy}
-                >
-                  <ImagePlus size={16} />
-                  <span>Update image</span>
-                </button>
-                <button
                   className="secondary-button edit-world-button"
                   aria-label="Edit world"
                   onClick={openEditor}
@@ -1251,29 +1220,6 @@ export default function App() {
                 >
                   <Pencil size={15} />
                   <span>Edit world</span>
-                </button>
-                <button
-                  className="secondary-button world-rules-button"
-                  aria-label="Set destination rules"
-                  title="Destination rules"
-                  disabled={busy}
-                  onClick={() => {
-                    setEditorState(
-                      canvas.current?.snapshot() ?? latestState.current,
-                    );
-                    setDialog("rules");
-                  }}
-                >
-                  <Flag size={17} /><span>Rules</span>
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="Undo last world edit"
-                  title="Undo last world edit"
-                  onClick={undoEdit}
-                  disabled={!history.length || busy}
-                >
-                  <Undo2 size={17} />
                 </button>
                 <button
                   className="secondary-button save-button"
@@ -1284,17 +1230,11 @@ export default function App() {
                 >
                   <Save size={18} /><span>Save</span>
                 </button>
+                <button className="icon-button" aria-label="More world options" title="More" onClick={() => setDialog("world-options")}>
+                  <Ellipsis size={20} />
+                </button>
               </div>
             </div>
-            {world.revision > 1 && history.length > 0 && (
-              <div className="revision-strip" role="status">
-                <Check size={12} /> Version {world.revision}{" "}
-                <span>
-                  {history.length} {history.length === 1 ? "edit" : "edits"} you
-                  can undo
-                </span>
-              </div>
-            )}
             {worldError && (
               <div className="world-error" role="alert">
                 <p>{worldError}</p>
@@ -1323,19 +1263,6 @@ export default function App() {
             >
               <div className="world-progress-row">
                 <div className="world-mission">
-                  <span>
-                    {metrics.completed && !metrics.exploring
-                      ? "COMPLETE"
-                      : metrics.exploring
-                        ? "EXPLORING"
-                        : mode === "discover" && started
-                          ? "CURRENT CLUE"
-                          : objective.total
-                            ? "REQUIRED"
-                            : destination
-                              ? "DESTINATION"
-                              : "EXPLORE"}
-                  </span>
                   <strong aria-live="polite">{missionText}</strong>
                 </div>
                 <div className="world-progress-counts">
@@ -1351,7 +1278,7 @@ export default function App() {
                       <b>
                         {objective.done}/{objective.total}
                       </b>{" "}
-                      required · View
+                      complete
                     </button>
                   )}
                   {optionalObjects.length > 0 && (
@@ -1408,13 +1335,9 @@ export default function App() {
                         <Play size={20} fill="currentColor" />
                         {metrics.exploring ? "Continue exploring" : started ? "Resume" : "Play world"}
                       </button>
-                      <span className="play-subcaption">
-                        {metrics.exploring
-                          ? "Achievement kept."
-                          : started
-                            ? "Your progress is kept."
-                            : world.gameplay?.instructions || world.description}
-                      </span>
+                      {!started && !metrics.exploring && (
+                        <span className="play-subcaption">{world.gameplay?.instructions || world.description}</span>
+                      )}
                     </div>
                   )}
                 {metrics.completed && !metrics.exploring && (
@@ -1422,15 +1345,8 @@ export default function App() {
                     <div className="completion-icon">
                       <Sparkles size={25} />
                     </div>
-                    <span className="eyebrow">
-                      {modeLabel.toUpperCase()} COMPLETE
-                    </span>
                     <h2>World complete</h2>
-                    <p>
-                      {objective.ready
-                        ? "Required actions complete."
-                        : "Achievement from an earlier version retained."}
-                    </p>
+                    {!objective.ready && <p>Achievement from an earlier version retained.</p>}
                     <div>
                       <button
                         className="primary-button"
@@ -1454,7 +1370,6 @@ export default function App() {
                   <div className="reading-overlay">
                     <LoaderCircle size={30} className="spin" />
                     <h3>Creating your world.</h3>
-                    <p>Your current world stays open.</p>
                     <button
                       className="text-button"
                       onClick={cancelInterpretation}
@@ -1727,6 +1642,46 @@ export default function App() {
           </>
         )}
       </div>
+      {dialog === "world-options" && (
+        <Modal title="World options" onClose={() => setDialog(null)} className="world-options-modal">
+          <div className="world-options-list">
+            <button
+              className="secondary-button edit-world-button paper-update-button"
+              aria-label="Update image"
+              onClick={openPaper}
+              disabled={busy}
+            >
+              <ImagePlus size={16} />
+              <span>Update image</span>
+            </button>
+            <button
+              className="secondary-button world-rules-button"
+              aria-label="Set destination rules"
+              title="Destination rules"
+              disabled={busy}
+              onClick={() => {
+                setEditorState(
+                  canvas.current?.snapshot() ?? latestState.current,
+                );
+                setDialog("rules");
+              }}
+            >
+              <Flag size={17} /><span>Rules</span>
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Undo last world edit"
+              title="Undo last world edit"
+              onClick={() => { undoEdit(); setDialog(null); }}
+              disabled={!history.length || busy}
+            >
+              <Undo2 size={17} /><span>Undo last edit</span>
+            </button>
+
+          </div>
+          <p className="world-options-meta">{modeLabel} · Version {world.revision}{isCreativeAdaptation(world) ? " · Creative adaptation" : ""}</p>
+        </Modal>
+      )}
       {dialog === "create" && (
         <Modal
           title="Create a world"

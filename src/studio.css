@@ -247,10 +247,10 @@ body {
 .studio-v2 .world-heading {
   position: relative;
   z-index: 6;
-  min-height: 88px;
+  min-height: 76px;
   flex-wrap: wrap;
-  padding: 0 0 20px;
-  gap: 24px;
+  padding: 0 0 16px;
+  gap: 20px;
   background: transparent;
   color: var(--ink);
 }
@@ -321,7 +321,7 @@ body {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: 100%;
-  height: clamp(380px, calc(100dvh - 278px), 920px);
+  height: clamp(400px, calc(100dvh - 256px), 960px);
   min-height: 0;
   margin: 0;
   border: 1px solid var(--stage-border);
@@ -344,7 +344,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 12px 24px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--stage-border);
   background: var(--stage);
   color: var(--stage-ink);
@@ -616,29 +616,8 @@ body {
   border-color: var(--stage-border);
 }
 .studio-v2.play-focused .world-heading {
-  min-height: 72px;
-  padding: 12px 16px;
-  border-radius: 12px 12px 0 0;
-  background: var(--stage);
-  color: var(--stage-ink);
-  border-bottom: 1px solid var(--stage-border);
-}
-.studio-v2.play-focused .world-name-label input {
-  color: var(--stage-ink);
-}
-.studio-v2.play-focused .world-name-label svg,
-.studio-v2.play-focused .world-heading-actions,
-.studio-v2.play-focused .example-badge {
-  color: var(--stage-muted);
-}
-.studio-v2.play-focused .world-heading-actions .icon-button:hover,
-.studio-v2.play-focused .world-heading-actions .secondary-button:hover {
-  background: var(--stage-hover);
-}
-.studio-v2.play-focused .world-stage-label {
   display: none;
 }
-.studio-v2.play-focused .world-source-thumb { color: var(--ink); }
 .studio-v2.play-focused .world-panel > :not(.game-stage) {
   flex: 0 0 auto;
 }
@@ -663,8 +642,7 @@ body {
 .creation-invitation h1 {
   margin: 0 0 8px;
   color: var(--ink);
-  font:
-    500 36px/44px Fraunces, Georgia, serif;
+  font: 700 32px/40px Manrope, sans-serif;
   letter-spacing: -1px;
 }
 .creation-invitation p {
@@ -2546,6 +2524,8 @@ select:focus-visible {
 
 /* The library leads with the user's artwork; file management is secondary. */
 .modal.world-library-modal { width: 960px; max-width: min(960px, 94vw); }
+.modal.world-library-modal.library-single { width: 420px; }
+.modal.world-library-modal.library-pair { width: 680px; }
 .library-meta { color: var(--muted); font-size: 13px; margin: -8px 0 20px; }
 .library-utilities { margin: 0 0 20px; }
 .library-utilities > summary { display: flex; align-items: center; gap: 8px; width: fit-content; cursor: pointer; list-style: none; font-size: 13px; color: var(--ink); }
@@ -2566,3 +2546,29 @@ select:focus-visible {
 
 .world-library-modal .saved-world-backup svg { color: var(--muted); }
 .world-library-modal .saved-world-backup:hover { background: var(--surface-hover); color: var(--ink); }
+
+/* Progressive disclosure keeps the everyday canvas quiet without removing tools. */
+.modal.world-options-modal { width: 380px; }
+.world-options-list { display: grid; gap: 4px; }
+.world-options-list > button.secondary-button,
+.world-options-list > button.icon-button {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 12px; width: 100%; height: auto; min-height: 48px;
+  padding: 12px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--ink); font: 500 14px/20px Manrope, sans-serif;
+}
+.world-options-list > button:hover:not(:disabled) { background: var(--surface-hover); }
+.world-options-list > button:disabled { color: var(--disabled-ink); }
+.world-options-meta { margin: 20px 12px 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+.field-optional { margin-left: 8px; color: var(--muted); font-weight: 400; font-size: 12px; }
+.creation-gameplay-options { margin-top: 20px; border-top: 1px solid var(--border); }
+.creation-gameplay-options > summary { display: flex; gap: 12px; align-items: center; cursor: pointer; padding: 16px 0; color: var(--ink); font-size: 13px; list-style: none; }
+.creation-gameplay-options > summary::-webkit-details-marker { display: none; }
+.creation-gameplay-options > summary > span { margin-left: auto; color: var(--muted); }
+.creation-gameplay-options > summary::after { content: "+"; width: 16px; text-align: center; color: var(--muted); }
+.creation-gameplay-options[open] > summary::after { content: "−"; }
+.creation-gameplay-options .creation-modes { margin: 0 0 12px; }
+.creation-gameplay-options .creation-modes legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.editor-precision { border-top: 1px solid var(--border); margin-top: 16px; }
+.editor-precision > summary { padding: 14px 0; cursor: pointer; color: var(--muted); font-size: 12px; }
+.editor-precision .editor-dimensions { margin-top: 0; }

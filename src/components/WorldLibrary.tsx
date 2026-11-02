@@ -154,7 +154,7 @@ export function WorldLibrary({
     }
   }
   return (
-    <Modal title="Your worlds" onClose={onClose} wide className="world-library-modal">
+    <Modal title="Your worlds" onClose={onClose} wide className={`world-library-modal ${entries.length <= 1 ? "library-single" : entries.length === 2 ? "library-pair" : ""}`}>
       <div className="library-meta"><span>{entries.length} {entries.length === 1 ? "world" : "worlds"} · Saved on this device</span></div>
       <details className="library-utilities">
         <summary>Import &amp; backup <ChevronDown size={14} /></summary>

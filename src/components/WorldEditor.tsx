@@ -901,7 +901,7 @@ export function WorldEditor({
                   className="secondary-button"
                   onClick={() => { selectObject(null); setDrawing(true); }}
                 >
-                  <ImagePlus size={15} /> Draw your own object
+                  <ImagePlus size={15} /> Draw object
                 </button>
                 {customArt && (
                   <span>
@@ -1180,6 +1180,8 @@ export function WorldEditor({
                   />
                 </label>
                 {item.kind === "player" && <p className="editor-scope">Starting position · current run unchanged</p>}
+                <details className="editor-precision" key={item.id}>
+                  <summary>Position &amp; size</summary>
                 <div className="editor-dimensions">
                   {(["x", "y", "width", "height"] as const).map((key) => (
                     <label key={key}>
@@ -1223,6 +1225,7 @@ export function WorldEditor({
                     </label>
                   ))}
                 </div>
+                </details>
                 {revisedImage && mode !== "discover" && !existingSelected && (
                   <div className="editor-page-art">
                     <button
@@ -1280,7 +1283,7 @@ export function WorldEditor({
               <div className="editor-empty-selection">
                 <Move size={22} />
                 <p>
-                  Select an object in the image or the object list.
+                  Select an object to edit.
                 </p>
               </div>
             )}
