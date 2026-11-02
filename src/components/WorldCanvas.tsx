@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  type ReactNode,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -37,6 +38,7 @@ export interface WorldCanvasHandle {
   interactAt: (point: { x: number; y: number }) => boolean;
 }
 interface Props {
+  overlay?: ReactNode;
   world: WorldDefinition;
   initial?: PlayState;
   playing: boolean;
@@ -431,6 +433,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               </span>
             </span>
           )}
+          {props.overlay}
         </div>
         {mode === "discover" && ready && !failed && (
           <div
@@ -476,6 +479,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               }}
             >
               <summary>Keyboard play</summary>
+              <div className="discovery-keyboard-fields">
               <label>
                 Choose an object in the image
                 <select
@@ -527,6 +531,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               >
                 Inspect object
               </button>
+              </div>
             </details>
           </div>
         )}

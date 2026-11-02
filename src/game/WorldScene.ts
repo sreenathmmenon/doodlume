@@ -962,6 +962,7 @@ export class WorldScene extends Phaser.Scene {
       }
       return false;
     }
+    const wasCompleted = this.state.completed;
     if (e.kind === "goal") {
       const progress = goalProgress(this.definition, this.state);
       if (!progress.ready) {
@@ -985,8 +986,10 @@ export class WorldScene extends Phaser.Scene {
       Math.min(48, Math.max(e.width, e.height) / 2),
     );
     this.hooks.onMoment(
-      this.state.completed
-        ? "Every clue found. Your image, explored."
+      wasCompleted
+        ? "Detail found."
+        : this.state.completed
+        ? "World complete."
         : (this.nextDiscoveryClue()?.text ??
             goalProgress(this.definition, this.state).hint),
     );

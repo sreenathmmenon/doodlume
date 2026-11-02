@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   ChevronRight,
+  ChevronDown,
   FolderHeart,
 } from "lucide-react";
 import { Modal } from "./Modal";
@@ -153,10 +154,10 @@ export function WorldLibrary({
     }
   }
   return (
-    <Modal title="Your worlds" onClose={onClose}>
-      <p className="modal-copy">
-        Saved on this device. Back up your creations to keep a portable copy.
-      </p>
+    <Modal title="Your worlds" onClose={onClose} wide className="world-library-modal">
+      <div className="library-meta"><span>{entries.length} {entries.length === 1 ? "world" : "worlds"} · Saved on this device</span></div>
+      <details className="library-utilities">
+        <summary>Import &amp; backup <ChevronDown size={14} /></summary>
       <div className="library-actions">
         <button
           className="secondary-button"
@@ -190,6 +191,7 @@ export function WorldLibrary({
           onChange={choose}
         />
       </div>
+      </details>
       {loadError && (
         <div className="library-error" role="alert">
           <p>{loadError}</p>
@@ -297,10 +299,10 @@ export function WorldLibrary({
                 <span>
                   <strong>{entry.world.name}</strong>
                   <small>
-                    {entry.state.collected.length}{" "}
-                    {entry.state.collected.length === 1 ? "item" : "items"}{" "}
-                    found · {new Date(entry.savedAt).toLocaleDateString()}
-                    {entry.state.completed ? " · Completed" : ""}
+                    {entry.state.completed
+                      ? "Completed"
+                      : `${entry.state.collected.length} ${entry.state.collected.length === 1 ? "item" : "items"} found`}
+                    {" · "}{new Date(entry.savedAt).toLocaleDateString()}
                   </small>
                 </span>
                 <ChevronRight size={18} />

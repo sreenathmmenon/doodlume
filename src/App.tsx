@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
-  ArrowDownToLine,
+  Save,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -895,7 +895,7 @@ export default function App() {
     <aside className="paper-panel" aria-label="Your image and game idea">
       <div className="creation-source-column">
         <div className="panel-heading">
-          <h2>Start with an image</h2>
+          <h2>Image</h2>
         </div>
         {source ? (
           <button
@@ -922,21 +922,22 @@ export default function App() {
             </span>
           </button>
         ) : (
-          <div className="source-empty">
+          <button className="source-empty" aria-label="Upload image" onClick={() => file.current?.click()} disabled={busy}>
             <span className="creation-image-symbol">
               <ImagePlus size={29} />
             </span>
-            <strong>Your drawing or photo</strong>
-          </div>
+            <strong>Choose an image</strong>
+            <span className="source-formats">PNG, JPG or WebP</span>
+          </button>
         )}
         <div className="source-actions">
-          <button
+          {source && <button
             className="secondary-button"
             onClick={() => file.current?.click()}
             disabled={busy}
           >
-            <ImagePlus size={17} /> {source ? "Replace image" : "Upload image"}
-          </button>
+            <ImagePlus size={17} /> Replace image
+          </button>}
           <button
             className="secondary-button draw-button"
             aria-label={sketchDraft ? "Continue drawing" : "Draw here"}
@@ -992,10 +993,10 @@ export default function App() {
       </div>
       <div className="creation-intent-column">
         <div className="panel-heading">
-          <h2>Shape the game</h2>
+          <h2>Game direction</h2>
         </div>
         <fieldset className="creation-modes" disabled={busy}>
-          <legend>AI game style</legend>
+          <legend>Gameplay</legend>
           <div>
             {(
               [
@@ -1097,7 +1098,6 @@ export default function App() {
       />
       <header className="topbar">
         <a className="brand" href="#studio" aria-label="Doodlume studio">
-          <img src="/art/favicon.svg" alt="" />
           <span>
             doodlume<span className="brand-dot">.</span>
           </span>
@@ -1112,7 +1112,7 @@ export default function App() {
         </nav>
         <div className="top-actions">
           <button
-            className="primary-button new-world-button"
+            className="secondary-button new-world-button"
             aria-label={
               hasCreationDraft ? "Resume draft" : "Create a new world"
             }
@@ -1175,78 +1175,18 @@ export default function App() {
           </section>
         )}
         <div className="studio-workspace">
-          <aside className="source-workspace" aria-label="Original artwork">
-            <div className="source-workspace-heading">
-              <span>Original image</span>
-              <span className="source-origin">
-                {world.source === "example" ? "Example" : "Yours"}
-              </span>
-            </div>
-            <button
-              ref={!focusedPlay ? worldSourceInspect : undefined}
-              className="source-artwork-preview"
-              aria-label={
-                world.source === "example"
-                  ? "Inspect example source artwork"
-                  : "Inspect your world's source artwork"
-              }
-              onClick={() => {
-                setSourceContext("world");
-                setDialog("source");
-              }}
-            >
-              <img
-                src={world.sourceImage}
-                alt="Original artwork used for this world"
-              />
-              <span>
-                <Maximize2 size={13} /> Inspect original
-              </span>
-            </button>
-            <div className="source-workspace-actions">
-              <button
-                className="secondary-button"
-                onClick={openPaper}
-                disabled={busy}
-              >
-                <ImagePlus size={16} /> Update image
-              </button>
-              <button
-                className="secondary-button"
-                onClick={openEditor}
-                disabled={busy}
-              >
-                <Pencil size={15} /> Edit world
-              </button>
-            </div>
-          </aside>
           <section
             className={`world-panel ${focusedPlay ? "focused-play" : ""}`}
             aria-label="Your playable world"
           >
             <div className="world-heading">
-              <button
-                ref={focusedPlay ? worldSourceInspect : undefined}
-                className="world-source-thumb"
-                aria-label={
-                  world.source === "example"
-                    ? "Inspect example source artwork"
-                    : "Inspect your world's source artwork"
-                }
-                onClick={() => {
-                  setSourceContext("world");
-                  setDialog("source");
-                }}
-              >
-                <img src={world.sourceImage} alt="" />
-                <Maximize2 size={12} />
-              </button>
               <div className="world-title-block">
-                <span className="world-stage-label">{modeLabel} world</span>
+                <span className="world-stage-label">{modeLabel}{isCreativeAdaptation(world) ? " · Creative adaptation" : ""}<span className="world-version">Version {world.revision}</span></span>
                 <label className="world-name-label">
                   <span className="sr-only">World name</span>
                   <input
                     aria-label="World name"
+                    title={world.name}
                     value={world.name}
                     maxLength={80}
                     onChange={(e) => {
@@ -1278,18 +1218,34 @@ export default function App() {
                           ? "From your picture"
                           : "From your drawing"}
                 </span>
+              <button
+                ref={worldSourceInspect}
+                className="world-source-thumb"
+                aria-label={
+                  world.source === "example"
+                    ? "Inspect example source artwork"
+                    : "Inspect your world's source artwork"
+                }
+                onClick={() => {
+                  setSourceContext("world");
+                  setDialog("source");
+                }}
+              >
+                <img src={world.sourceImage} alt="" />
+                <span>Original</span>
+              </button>
                 <button
-                  className="secondary-button edit-world-button paper-update-button focus-only-action"
-                  aria-label="Update this world's drawing"
+                  className="secondary-button edit-world-button paper-update-button"
+                  aria-label="Update image"
                   onClick={openPaper}
                   disabled={busy}
                 >
                   <ImagePlus size={16} />
-                  <span>Update page</span>
+                  <span>Update image</span>
                 </button>
                 <button
-                  className="secondary-button edit-world-button focus-only-action"
-                  aria-label="Keep creating in this world"
+                  className="secondary-button edit-world-button"
+                  aria-label="Edit world"
                   onClick={openEditor}
                   disabled={busy}
                 >
@@ -1297,7 +1253,7 @@ export default function App() {
                   <span>Edit world</span>
                 </button>
                 <button
-                  className="icon-button"
+                  className="secondary-button world-rules-button"
                   aria-label="Set destination rules"
                   title="Destination rules"
                   disabled={busy}
@@ -1308,7 +1264,7 @@ export default function App() {
                     setDialog("rules");
                   }}
                 >
-                  <Flag size={17} />
+                  <Flag size={17} /><span>Rules</span>
                 </button>
                 <button
                   className="icon-button"
@@ -1320,13 +1276,13 @@ export default function App() {
                   <Undo2 size={17} />
                 </button>
                 <button
-                  className="icon-button save-button"
+                  className="secondary-button save-button"
                   aria-label="Save world on this device"
                   onClick={() => void save()}
                   disabled={saving}
                   aria-busy={saving}
                 >
-                  <ArrowDownToLine size={18} />
+                  <Save size={18} /><span>Save</span>
                 </button>
               </div>
             </div>
@@ -1430,7 +1386,7 @@ export default function App() {
                     setMetrics(m);
                   }}
                   onMoment={tell}
-                />
+                  overlay={<>
                 {!playing &&
                   !worldError &&
                   (!metrics.completed || metrics.exploring) &&
@@ -1507,6 +1463,8 @@ export default function App() {
                     </button>
                   </div>
                 )}
+                  </>}
+                />
               </div>
             </div>
             <div className="game-toolbar">
@@ -1594,6 +1552,7 @@ export default function App() {
               <button
                 className="icon-button"
                 aria-label="Full screen world"
+                title="Full screen"
                 onClick={fullscreen}
               >
                 <Maximize2 size={17} />
