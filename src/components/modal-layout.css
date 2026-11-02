@@ -1,0 +1,24 @@
+/* Every dialog keeps its title and exit outside the scrolling task surface. */
+.modal.modal-stable[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+  padding: 0;
+}
+.modal.modal-stable.modal-with-footer[open] { grid-template-rows: auto minmax(0, 1fr) auto; }
+.modal.modal-stable > .modal-heading { margin: 0; padding: 20px 24px 16px; }
+.modal.modal-stable > .modal-scroll-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0 24px 24px;
+}
+.modal.modal-stable > .modal-action-footer { padding: 14px 24px; }
+@media (max-height: 640px), (max-width: 520px) {
+  .modal.modal-stable[open] { max-height: calc(100dvh - 20px); }
+  .modal.modal-stable > .modal-heading { padding: 14px 16px 12px; }
+  .modal.modal-stable > .modal-scroll-body { padding: 0 16px 16px; }
+  .modal.modal-stable > .modal-action-footer { padding: 10px 16px; }
+}

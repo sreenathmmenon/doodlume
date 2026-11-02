@@ -30,7 +30,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
   padding: 0;
   flex: 1 1 320px;
@@ -38,7 +38,7 @@
   color: var(--ink);
   border: 0;
   font:
-    500 12px/16px Manrope,
+    500 13px/18px Manrope,
     sans-serif;
 }
 .discovery-hint,
@@ -208,8 +208,17 @@
 }
 
 @media (min-width: 801px) {
-  .discovery-keyboard[open] { width: min(520px, 100%); max-width: 520px; }
+  .discovery-keyboard[open] { width: min(420px, 100%); max-width: 420px; }
   .discovery-keyboard-fields { display: flex; align-items: end; gap: 8px; }
   .discovery-keyboard-fields label { flex: 1; min-width: 0; margin-bottom: 0; margin-right: 0; }
   .discovery-keyboard-fields button { flex-shrink: 0; min-height: 40px; margin-left: 0; }
+}
+
+@media (min-width: 801px) {
+  .discovery-access { flex: 1 1 400px; column-gap: 10px; row-gap: 8px; padding-left: 12px; border-left: 1px solid var(--border); }
+  .discovery-keyboard { margin-left: auto; }
+  .discovery-keyboard[open] { padding-bottom: 10px; }
+  .discovery-keyboard-fields label { font-size: 13px; }
+  .discovery-keyboard-fields { align-items: end; }
+  .discovery-keyboard-fields button { margin-right: 10px; }
 }

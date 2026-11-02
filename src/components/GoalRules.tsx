@@ -11,6 +11,7 @@ import {
   type WorldEntity,
 } from "../../shared/world";
 import { Modal } from "./Modal";
+import { WrappingTextarea } from "./WrappingTextarea";
 import "./GoalRules.css";
 import { objectName } from "../lib/object-name";
 
@@ -151,7 +152,7 @@ export function GoalRules({
             ].filter((id): id is string => Boolean(id)).map(id => (
               <label className="goal-clue-field" key={id}>
                 {objectiveObjectLabel(world, id)}
-                <input aria-label={`Clue for ${objectiveObjectLabel(world,id)}`} maxLength={160}
+                <WrappingTextarea rows={3} aria-label={`Clue for ${objectiveObjectLabel(world,id)}`} maxLength={160}
                   value={clueTexts[id] ?? `Find ${objectiveObjectLabel(world,id)}.`}
                   onChange={event => { setError("");setClueTexts(old => ({...old,[id]:event.target.value})); }} />
               </label>

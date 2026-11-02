@@ -55,6 +55,7 @@ interface Props {
 export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
   function WorldCanvas(props, ref) {
     const host = useRef<HTMLDivElement>(null);
+    const discoveryChoice = useRef<HTMLSelectElement>(null);
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
     const [openingSlow, setOpeningSlow] = useState(false);
@@ -412,6 +413,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               <label>
                 Choose an object in the image
                 <select
+                  ref={discoveryChoice}
                   value={selectedDiscovery}
                   onChange={(event) => {
                     setSelectedDiscovery(event.target.value);
@@ -455,6 +457,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
                   if (scene.current?.selectDiscovery(selectedDiscovery)) {
                     setSelectedDiscovery("");
                     scene.current?.focusDiscovery();
+                    discoveryChoice.current?.focus({ preventScroll: true });
                   }
                 }}
               >
@@ -476,7 +479,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
               : mode === "roam"
                 ? "Exploration game. Start play, then click or tap to move, or use arrow keys or W A S D. E interacts with nearby objects."
-                : "Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."
+                : "Playable drawing world. Use arrow keys or A and D to move, Space to jump, Down and Space to drop through a thin platform, and E near a lever."
           }
           role="application"
           aria-describedby={

@@ -1,10 +1,10 @@
 .setup-rules {
   margin: 22px 0 16px;
   padding: 18px;
-  border: 1px solid #c5cbb9;
+  border: 1px solid var(--border);
   border-radius: 15px;
-  color: #35452f;
-  background: #f5f5eb;
+  color: var(--ink);
+  background: var(--field);
 }
 .setup-rules > legend {
   padding: 0 8px;
@@ -49,17 +49,17 @@
   width: 20px;
   height: 20px;
   flex: 0 0 20px;
-  accent-color: #48643c;
+  accent-color: var(--primary);
 }
 .setup-rule-group p {
-  color: #53634c;
+  color: var(--muted);
 }
 .setup-rule-unavailable {
-  color: #8b352d;
+  color: var(--danger);
 }
 .setup-rules .setup-rule-attention {
-  color: #663d1e;
-  background: #fff0d8;
+  color: var(--danger);
+  background: var(--danger-surface);
   border-radius: 8px;
   padding: 12px;
 }
@@ -69,7 +69,7 @@
 }
 .setup-rule-confirm {
   margin-top: 12px;
-  border-top: 1px solid #ccd1c1;
+  border-top: 1px solid var(--border);
   padding-top: 14px;
   font-weight: 650;
 }

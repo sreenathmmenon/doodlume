@@ -8,6 +8,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { Modal } from "./Modal";
+import "./PageAlignment.css";
 import {
   fullPage,
   pageTransform,
@@ -40,11 +41,11 @@ export function PageAlignment({
     drag = useRef<number | null>(null);
   useEffect(() => () => request.current?.abort(), []);
   useEffect(() => {
-    if (preview)
-      resultPanel.current?.scrollIntoView({
-        block: "center",
-        behavior: "instant",
-      });
+    if (!preview || !resultPanel.current) return;
+    const panel = resultPanel.current;
+    const body = panel.closest<HTMLElement>(".modal-scroll-body");
+    panel.focus({ preventScroll: true });
+    if (body) body.scrollTop += panel.getBoundingClientRect().top - body.getBoundingClientRect().top - 12;
   }, [preview]);
   useEffect(() => {
     let active = true;
@@ -120,7 +121,24 @@ export function PageAlignment({
   }
   return (
     <Modal
-      title="A clear page. A better beginning."
+      title="Align your page"
+      className="alignment-modal"
+      footer={      <div className="modal-footer">
+        <button
+          className="text-button"
+          disabled={busy}
+          onClick={() => onUse(photo)}
+        >
+          Use photo as it is
+        </button>
+        <button
+          className="primary-button"
+          disabled={!preview || busy}
+          onClick={() => onUse(preview)}
+        >
+          Use aligned page <ArrowUpRight size={16} />
+        </button>
+      </div>}
       wide
       onClose={() => {
         request.current?.abort();
@@ -176,7 +194,7 @@ export function PageAlignment({
                   .map((p) => `${p.x * 1000},${p.y * 1000}`)
                   .join(" ")}
                 fill="none"
-                stroke="#d3ecaa"
+                stroke="#2457e6"
                 strokeWidth="4"
               />
               {corners.map((p, i) => (
@@ -185,15 +203,15 @@ export function PageAlignment({
                     cx={p.x * 1000}
                     cy={p.y * 1000}
                     r={i === selected ? 17 : 13}
-                    fill={i === selected ? "#e8f7c9" : "#fffdf8"}
-                    stroke="#667953"
+                    fill={i === selected ? "#e8eeff" : "#ffffff"}
+                    stroke="#2457e6"
                     strokeWidth="4"
                   />
                   <text
                     x={p.x * 1000}
                     y={p.y * 1000 + 4}
                     textAnchor="middle"
-                    fill="#526443"
+                    fill="#17398f"
                     fontSize="16"
                   >
                     {i + 1}
@@ -331,7 +349,7 @@ export function PageAlignment({
         </section>
       </div>
       {preview && (
-        <section className="alignment-result" ref={resultPanel}>
+        <section className="alignment-result" ref={resultPanel} tabIndex={-1} aria-label="Straightened page preview. Check the edges and ink before applying.">
           <div>
             <Check size={16} />
             <strong>Your straightened page</strong>
@@ -349,22 +367,7 @@ export function PageAlignment({
           </div>
         </section>
       )}
-      <div className="modal-footer">
-        <button
-          className="text-button"
-          disabled={busy}
-          onClick={() => onUse(photo)}
-        >
-          Use photo as it is
-        </button>
-        <button
-          className="primary-button"
-          disabled={!preview || busy}
-          onClick={() => onUse(preview)}
-        >
-          Use aligned page <ArrowUpRight size={16} />
-        </button>
-      </div>
+
     </Modal>
   );
 }

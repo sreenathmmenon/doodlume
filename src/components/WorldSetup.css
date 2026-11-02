@@ -1,0 +1,214 @@
+/* Manual authoring keeps artwork ahead of metadata and optional checks. */
+.modal.world-setup-modal {
+  --setup-canvas-height: 340px;
+  width: 1120px;
+  max-width: min(1120px, 96vw);
+}
+.modal.world-setup-modal .setup-context-note {
+  position: absolute;
+  top: 28px;
+  right: 68px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.modal.world-setup-modal .setup-roles {
+  gap: 6px;
+  margin: 0;
+}
+.modal.world-setup-modal .setup-roles button,
+.modal.world-setup-modal .setup-object-list button {
+  min-height: 38px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.modal.world-setup-modal .setup-roles button.selected,
+.modal.world-setup-modal .setup-object-list button[aria-pressed="true"] {
+  color: var(--primary);
+  background: var(--surface-hover);
+  border-color: var(--primary);
+}
+.modal.world-setup-modal .setup-tool-guidance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 10px 0 18px;
+}
+.modal.world-setup-modal .setup-instruction {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.modal.world-setup-modal .setup-tool-guidance > button {
+  flex-shrink: 0;
+  min-height: 36px;
+  font-size: 13px;
+}
+.modal.world-setup-modal .setup-canvases {
+  gap: 24px;
+}
+.modal.world-setup-modal .setup-canvases h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.modal.world-setup-modal .setup-canvases h3 span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.modal.world-setup-modal .setup-artboard {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: var(--setup-canvas-height);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--field);
+}
+.modal.world-setup-modal .setup-source-wrap {
+  width: 100%;
+  max-height: var(--setup-canvas-height);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.modal.world-setup-modal .setup-empty-layout {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+.modal.world-setup-modal .setup-crop-note { padding: 0; font-size: 12px; color: var(--muted); }
+.modal.world-setup-modal .setup-crop-note > summary { cursor: pointer; min-height: 48px; padding-top: 16px; }
+.modal.world-setup-modal .setup-crop-note > p { margin: 0 0 12px; line-height: 1.5; }
+.modal.world-setup-modal .setup-game {
+  max-height: var(--setup-canvas-height);
+  max-width: calc(var(--setup-canvas-height) * 1440 / 820);
+  height: auto;
+  margin-inline: auto;
+  border: 0;
+  border-radius: 0;
+  margin-bottom: 0;
+}
+.modal.world-setup-modal .setup-canvases .small-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 10px 0 0;
+}
+.modal.world-setup-modal .setup-add-object {
+  min-height: 48px;
+  padding-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.modal.world-setup-modal .setup-add-object .secondary-button {
+  min-height: 38px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.modal.world-setup-modal .setup-add-object .small-note { margin: 0; }
+.modal.world-setup-modal .setup-object-list:empty { display: none; }
+.modal.world-setup-modal .setup-object-list {
+  padding-top: 16px;
+  margin: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.modal.world-setup-modal .setup-inspector {
+  margin: 16px 0;
+  padding: 16px;
+  border-radius: 8px;
+}
+.modal.world-setup-modal .setup-inspector-heading h3 { font-size: 14px; }
+.modal.world-setup-modal .setup-inspector .text-button { font-size: 13px; }
+.modal.world-setup-modal .setup-fieldset label,
+.modal.world-setup-modal .setup-inspector h4 {
+  color: var(--ink);
+  font-size: 13px;
+}
+.modal.world-setup-modal .setup-fieldset input,
+.modal.world-setup-modal .setup-fieldset select,
+.modal.world-setup-modal .setup-fieldset textarea {
+  min-height: 40px;
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 9px 10px;
+  width: 100%;
+}
+.modal.world-setup-modal .setup-fieldset textarea { resize: vertical; }
+.modal.world-setup-modal .setup-disclosure {
+  border-top: 1px solid var(--border);
+  padding: 0;
+  margin: 0;
+}
+.modal.world-setup-modal .setup-disclosure > summary {
+  padding: 12px 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.modal.world-setup-modal .setup-disclosure > summary > span {
+  margin-left: 12px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.modal.world-setup-modal .setup-world-details { padding-bottom: 10px; }
+.modal.world-setup-modal .setup-world-details:not([open]) { padding-bottom: 0; }
+.modal.world-setup-modal .setup-recovery { margin-bottom: 14px; }
+.modal.world-setup-modal .setup-recovery p { font-size: 13px; line-height: 1.5; }
+.modal.world-setup-modal .setup-rules {
+  margin: 0 0 16px;
+  padding: 14px;
+}
+.modal.world-setup-modal .setup-feedback {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.modal.world-setup-modal .setup-error { color: var(--danger); }
+.modal.world-setup-modal .setup-footer { width: 100%; }
+.modal.world-setup-modal .setup-footer-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.modal.world-setup-modal .setup-footer-status .setup-error { max-width: 560px; }
+.modal.world-setup-modal .setup-footer-status .text-button { font-size: 13px; padding: 4px 0; }
+.modal.world-setup-modal .setup-footer .primary-button { flex-shrink: 0; min-height: 42px; }
+@media (max-height: 700px) and (min-width: 760px) {
+  .modal.world-setup-modal { --setup-canvas-height: 190px; }
+  .modal.world-setup-modal .setup-tool-guidance { margin-bottom: 12px; }
+
+}
+@media (max-width: 759px) {
+  .modal.world-setup-modal .setup-context-note { position: static; display: block; margin: 0 0 10px; }
+  .modal.world-setup-modal .setup-canvases { grid-template-columns: 1fr; }
+  .modal.world-setup-modal .setup-tool-guidance,
+  .modal.world-setup-modal .setup-add-object { align-items: flex-start; flex-wrap: wrap; }
+}

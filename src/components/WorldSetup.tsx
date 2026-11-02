@@ -5,6 +5,7 @@ import { prepareSourceArtwork } from "../lib/source-art";
 import { setupFeedback } from "../../shared/setup";
 import type { RecognitionReview } from "../../shared/recognition-review";
 import "./WorldSetupRules.css";
+import "./WorldSetup.css";
 import type {
   ArtworkBox,
   EntityKind,
@@ -106,6 +107,7 @@ export function WorldSetup({
   const [rulesConfirmed, setRulesConfirmed] = useState(
     !recovery?.rulesNeedConfirmation,
   );
+  const checks = useRef<HTMLDetailsElement>(null);
   const start = useRef<{ x: number; y: number } | null>(null),
     request = useRef<AbortController | null>(null);
   const move = useRef<{
@@ -330,31 +332,48 @@ export function WorldSetup({
   return (
     <Modal
       wide
-      title="Pick. Place. Play."
+      title="Arrange your world"
+      className="world-setup-modal"
+      footer={
+        <div className="setup-footer">
+          <div className="setup-footer-status">
+            {error ? <span className="setup-error" role="alert">{error}</span> : <span>{world.entities.length} / 24 objects</span>}
+            {feedback.errors.length > 0 ? (
+              <button className="text-button" onClick={() => {
+                if (checks.current) {
+                  checks.current.open = true;
+                  checks.current.scrollIntoView({ block: "nearest" });
+                  checks.current.querySelector("summary")?.focus();
+                }
+              }}>
+                {feedback.errors.length} {feedback.errors.length === 1 ? "check" : "checks"} to resolve
+              </button>
+            ) : <span>{rulesConfirmed ? "Ready to preview" : "Confirm finishing requirements"}</span>}
+          </div>
+          <button
+            className="primary-button"
+            disabled={busy || feedback.errors.length > 0 || !rulesConfirmed}
+            onClick={() => void prepare()}
+          >
+            {busy ? <LoaderCircle size={17} className="spin" /> : <ArrowUpRight size={17} />}
+            {busy ? "Preparing preview…" : "Prepare preview"}
+          </button>
+        </div>
+      }
       onClose={() => {
         request.current?.abort();
         onPause?.(structuredClone(world));
         onClose();
       }}
     >
-      <p className="modal-copy">
-        {recovery
-          ? "Your recognized selections are kept below. Correct the highlighted issues before preparing the game. Repairing here uses no model requests."
-          : initial
-            ? "Fine-tune the first interpretation before it becomes your game."
-            : "Choose what comes alive in your picture. Mark an object, give it a role, then arrange your adventure."}
-        {world.source === "manual" &&
-          " This is your selection—not an AI recognition result."}
-      </p>
+      <span className="setup-context-note" title={world.source === "manual" ? "Selected and arranged by you" : "Meta interpretation with your adjustments"}>
+        {world.source === "manual" ? "Manual" : "Meta interpretation"}
+      </span>
       {recovery && (
-        <section
-          className="setup-feedback"
-          aria-label="Recognition repair notes"
-        >
-          <h3>Selections to check</h3>
+        <details className="setup-disclosure setup-recovery">
+          <summary>Recognition notes · {recovery.issues.length} to review</summary>
           <p className="small-note">
-            These notes describe the original result. Use the current placement
-            checks below as you make corrections.
+            Original recognition notes. Placement checks update as you edit.
           </p>
           {recovery.issues.map((issue) => (
             <div key={issue.id}>
@@ -372,47 +391,9 @@ export function WorldSetup({
                 )}
             </div>
           ))}
-        </section>
+        </details>
       )}
       <fieldset disabled={busy} inert={busy} className="setup-fieldset">
-        <div className="setup-title-fields">
-          <label>
-            World name
-            <input
-              value={world.name}
-              maxLength={80}
-              onChange={(e) =>
-                setWorld((w) => ({ ...w, name: e.target.value }))
-              }
-            />
-          </label>
-          <label>
-            Atmosphere
-            <select
-              value={world.theme}
-              onChange={(e) =>
-                setWorld((w) => ({
-                  ...w,
-                  theme: e.target.value as WorldDefinition["theme"],
-                }))
-              }
-            >
-              <option value="grove">Quiet grove</option>
-              <option value="moon">Moonlit</option>
-              <option value="sunset">Warm afternoon</option>
-            </select>
-          </label>
-        </div>
-        <label>
-          Adventure
-          <input
-            value={world.description}
-            maxLength={500}
-            onChange={(e) =>
-              setWorld((w) => ({ ...w, description: e.target.value }))
-            }
-          />
-        </label>
         <div
           className="setup-roles"
           role="group"
@@ -429,25 +410,26 @@ export function WorldSetup({
             </button>
           ))}
         </div>
+        <div className="setup-tool-guidance">
         <p className="setup-instruction">
-          {roles.find((r) => r.kind === tool)!.help} Drag a box around it in the
-          picture. Or{" "}
+          <strong>{roles.find((r) => r.kind === tool)!.name}.</strong> {roles.find((r) => r.kind === tool)!.help} Drag around it in the source image.
+        </p>
           <button
             className="text-button"
             onClick={() => add({ x: 100, y: 100, width: 200, height: 200 })}
           >
-            add an adjustable selection
+            <Plus size={14} /> Add selection
           </button>
-          .
-        </p>
+        </div>
         <div className="setup-canvases">
           <section>
-            <h3>1 · Pick from your picture</h3>
+            <h3>Source image <span>Select artwork</span></h3>
+            <div className="setup-artboard">
             <div
               className="setup-source-wrap"
               style={{
                 aspectRatio: sourceAspect,
-                maxWidth: sourceAspect * 420,
+                maxWidth: `min(100%, calc(var(--setup-canvas-height) * ${sourceAspect}))`,
               }}
             >
               <svg
@@ -490,8 +472,8 @@ export function WorldSetup({
                     <rect
                       key={e.id}
                       {...e.artSource}
-                      fill={e.id === selected ? "#d9baf63b" : "#fff0"}
-                      stroke={e.id === selected ? "#76589b" : "#526c4b"}
+                      fill={e.id === selected ? "#3458d426" : "#fff0"}
+                      stroke={e.id === selected ? "#3458d4" : "#6b7688"}
                       strokeWidth="4"
                       vectorEffect="non-scaling-stroke"
                       pointerEvents="none"
@@ -501,21 +483,22 @@ export function WorldSetup({
                   <rect
                     {...selection}
                     fill="#ffffff44"
-                    stroke="#76589b"
+                    stroke="#3458d4"
                     strokeWidth="4"
                     vectorEffect="non-scaling-stroke"
                   />
                 )}
               </svg>
             </div>
-            <p className="small-note">
-              The picture stays intact. Each box becomes separate artwork.
-              Picture crops keep their background unless a precise cutout is
-              available.
-            </p>
+            </div>
+            <details className="setup-crop-note">
+              <summary>About artwork crops</summary>
+              <p>Crops retain their background unless a precise cutout is available.</p>
+            </details>
           </section>
           <section>
-            <h3>2 · Arrange the adventure</h3>
+            <h3>Game layout <span>Drag objects to place</span></h3>
+            <div className="setup-artboard setup-layout-artboard">
             <svg
               className="setup-game"
               viewBox="0 0 1440 820"
@@ -552,13 +535,7 @@ export function WorldSetup({
               <rect
                 width="1440"
                 height="820"
-                fill={
-                  world.theme === "moon"
-                    ? "#e6e0ef"
-                    : world.theme === "sunset"
-                      ? "#f2dfd2"
-                      : "#e4eadb"
-                }
+                fill="var(--field)"
               />
               {world.entities.map((e) => (
                 <g
@@ -629,7 +606,7 @@ export function WorldSetup({
                       width={e.width}
                       height={e.height}
                       rx="8"
-                      fill={e.kind === "gate" ? "#b4a0c4" : "#a6b58f"}
+                      fill={e.kind === "gate" ? "#aab6d0" : "#b5bfcd"}
                     />
                   )}
                   <rect
@@ -638,29 +615,31 @@ export function WorldSetup({
                     width={e.width}
                     height={e.height}
                     fill="transparent"
-                    stroke={e.id === selected ? "#76589b" : "#526c4b"}
+                    stroke={e.id === selected ? "#3458d4" : "#6b7688"}
                     strokeWidth={e.id === selected ? 5 : 2}
                   />
                   <text
                     x={e.x + 3}
                     y={Math.max(20, e.y - 9)}
                     fontSize="21"
-                    fill="#374631"
+                    fill="var(--ink)"
                   >
                     {e.label || e.kind}
                   </text>
                 </g>
               ))}
             </svg>
-            <button className="secondary-button" onClick={() => add()}>
+            {!world.entities.length && <span className="setup-empty-layout">Select artwork to start arranging</span>}
+            </div>
+            <div className="setup-add-object">
+            {tool !== "player" && tool !== "decoration" && <button className="secondary-button" onClick={() => add()}>
               <Plus size={15} />
-              Add {roles.find((r) => r.kind === tool)!.name.toLowerCase()} to
-              the game
-            </button>
+              Add {roles.find((r) => r.kind === tool)!.name.toLowerCase()}
+            </button>}
             <p className="small-note">
-              Added objects are your game design choices. They are not presented
-              as things found in the picture.
+              {tool === "player" || tool === "decoration" ? "Source artwork required" : "Without source artwork"}
             </p>
+            </div>
           </section>
         </div>
         <div
@@ -680,7 +659,7 @@ export function WorldSetup({
         {item && (
           <section className="setup-inspector">
             <div className="setup-inspector-heading">
-              <h3>Fine-tune {item.label || item.kind}</h3>
+              <h3>Selected object</h3>
               <button
                 className="text-button"
                 onClick={() => {
@@ -698,7 +677,8 @@ export function WorldSetup({
             <div className="setup-title-fields">
               <label>
                 Object name
-                <input
+                <textarea
+                  rows={2}
                   value={item.label || ""}
                   maxLength={80}
                   onChange={(e) => update({ label: e.target.value })}
@@ -817,13 +797,55 @@ export function WorldSetup({
             )}
           </section>
         )}
+        <details className="setup-disclosure setup-world-details">
+          <summary>World details <span>{world.name}</span></summary>
+        <div className="setup-title-fields">
+          <label>
+            World name
+            <textarea
+              rows={2}
+              value={world.name}
+              maxLength={80}
+              onChange={(e) =>
+                setWorld((w) => ({ ...w, name: e.target.value }))
+              }
+            />
+          </label>
+          <label>
+            Atmosphere
+            <select
+              value={world.theme}
+              onChange={(e) =>
+                setWorld((w) => ({
+                  ...w,
+                  theme: e.target.value as WorldDefinition["theme"],
+                }))
+              }
+            >
+              <option value="grove">Quiet grove</option>
+              <option value="moon">Moonlit</option>
+              <option value="sunset">Warm afternoon</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Adventure
+          <textarea
+            rows={2}
+            value={world.description}
+            maxLength={500}
+            onChange={(e) =>
+              setWorld((w) => ({ ...w, description: e.target.value }))
+            }
+          />
+        </label>
+        </details>
       </fieldset>
+      <details className="setup-disclosure setup-finishing" open={recovery?.rulesNeedConfirmation || undefined}>
+      <summary>Finishing requirements <span>{goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length} required actions</span></summary>
       <fieldset className="setup-rules" disabled={busy}>
-        <legend>Finishing requirements</legend>
-        <p>
-          Choose what must happen before a destination finishes your game.
-          Unchecked objects stay optional.
-        </p>
+        <legend className="sr-only">Finishing requirements</legend>
+        <p>Choose what is required before reaching the destination. Unchecked objects are optional.</p>
         {recovery?.rulesNeedConfirmation && (
           <p className="setup-rule-attention">
             Meta could not confirm every part of your objective. Check these
@@ -855,6 +877,9 @@ export function WorldSetup({
           </label>
         )}
       </fieldset>
+      </details>
+      <details ref={checks} className="setup-disclosure setup-checks">
+        <summary>Placement checks <span>{feedback.errors.length ? `${feedback.errors.length} to resolve` : "No blocking issues"}</span></summary>
       <div className="setup-feedback" aria-live="polite">
         {feedback.errors.map((m) => (
           <p className="setup-error" key={m}>
@@ -865,31 +890,7 @@ export function WorldSetup({
           <p key={m}>{m}</p>
         ))}
       </div>
-      {error && (
-        <p className="setup-error" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="setup-footer">
-        <span>
-          {world.entities.length} / 24 objects ·{" "}
-          {world.source === "meta"
-            ? "Meta interpretation, with your corrections"
-            : "Chosen and arranged by you"}
-        </span>
-        <button
-          className="primary-button"
-          disabled={busy || feedback.errors.length > 0 || !rulesConfirmed}
-          onClick={() => void prepare()}
-        >
-          {busy ? (
-            <LoaderCircle size={17} className="spin" />
-          ) : (
-            <ArrowUpRight size={17} />
-          )}
-          Prepare playable preview
-        </button>
-      </div>
+      </details>
     </Modal>
   );
 }

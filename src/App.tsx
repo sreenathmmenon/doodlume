@@ -69,6 +69,8 @@ import {
   type RevisionCheckpoint,
 } from "../shared/revisions";
 import { EXAMPLES, freshExample } from "./lib/examples";
+import { copyExample } from "./lib/example-copy";
+import { isSourceAlignedScenery } from "../shared/source-scenery";
 import {
   rememberedWorldId,
   rememberWorld,
@@ -218,6 +220,16 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [creationError, setCreationError] = useState("");
+  const [requestSeconds, setRequestSeconds] = useState(0);
+  const [lastCreation, setLastCreation] = useState<"untested" | "success" | "failed" | "review">("untested");
+  useEffect(() => {
+    if (!busy) return;
+    const began = Date.now();
+    setRequestSeconds(0);
+    const timer = window.setInterval(() => setRequestSeconds(Math.floor((Date.now() - began) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
   const [worldError, setWorldError] = useState("");
   const [draft, setDraft] = useState<WorldDefinition | null>(null);
   const [recognitionReview, setRecognitionReview] =
@@ -230,6 +242,18 @@ export default function App() {
   const [tracedAdditions, setTracedAdditions] = useState<WorldEntity[]>([]);
   const [revisedPage, setRevisedPage] = useState<string | undefined>();
   const [paperIntent, setPaperIntent] = useState("");
+  const paperDrafts = useRef(new globalThis.Map<string, { proposal?: PaperProposal; image?: string; additions: WorldEntity[]; intent: string }>());
+  function paperDraftKey(value: WorldDefinition) { return `${value.id}:${value.revision}`; }
+  function restorePaperDraft(value: WorldDefinition) {
+    const kept = paperDrafts.current.get(paperDraftKey(value));
+    setPaperProposal(kept?.proposal); setRevisedPage(kept?.image);
+    setTracedAdditions(kept?.additions ?? []); setPaperIntent(kept?.intent ?? "");
+  }
+  function rememberPaperDraft() {
+    if (!paperProposal && !revisedPage && !tracedAdditions.length && !paperIntent) return;
+    paperDrafts.current.set(paperDraftKey(worldNow.current), { proposal: paperProposal, image: revisedPage, additions: tracedAdditions, intent: paperIntent });
+    if (paperDrafts.current.size > 12) paperDrafts.current.delete(paperDrafts.current.keys().next().value!);
+  }
   const [pendingPhoto, setPendingPhoto] = useState<string | undefined>();
   const [pendingPhotoName, setPendingPhotoName] = useState("Your drawing");
   const [history, setHistory] = useState<RevisionCheckpoint[]>(
@@ -264,6 +288,7 @@ export default function App() {
   const sourceVersion = useRef(0);
   const previousPlaying = useRef(false);
   const draftFeedback = draft ? setupFeedback(draft) : null;
+  const sourcePageSize = world.entities.find(isSourceAlignedScenery) ?? { width: 1440, height: 820 };
   const mode = movementMode(world);
   const modeLabel =
     mode === "discover"
@@ -312,6 +337,7 @@ export default function App() {
     setCreationStyle("auto");
     setDraftIntent("");
     setCustomSource(false);
+    setCreationError("");
     setSketchDraft(undefined);
     setDraft(null);
     setRecognitionReview(null);
@@ -426,7 +452,8 @@ export default function App() {
     request.current?.abort();
     request.current = null;
     setWorldError("");
-    setPaperIntent("");
+    rememberPaperDraft();
+    restorePaperDraft(next);
     setMapView(false);
     setBusy(false);
     setWorld(next);
@@ -463,26 +490,28 @@ export default function App() {
     if (build) openEditor();
     else start();
   }
+  function beginPersonalEdit(state: PlayState) {
+    const personal = copyExample(worldNow.current, history);
+    if (personal.world !== worldNow.current) {
+      setWorld(personal.world); worldNow.current = personal.world;
+      setHistory(personal.history);
+      setInitial(state); latestState.current = state;
+    }
+    setEditorState(state);
+  }
   function openEditor() {
     allowStartupRestore.current = false;
-    setPaperIntent("");
-    setPaperProposal(undefined);
-    setRevisedPage(undefined);
-    setTracedAdditions([]);
-    setEditorState(editableState());
+    beginPersonalEdit(editableState());
     setDialog("editor");
   }
   function openPaper() {
     allowStartupRestore.current = false;
-    setPaperIntent("");
-    setEditorState(editableState());
-    setPaperProposal(undefined);
-    setRevisedPage(undefined);
-    setTracedAdditions([]);
+    beginPersonalEdit(editableState());
     setDialog("paper");
   }
   function keepRevision(next: WorldDefinition, state: PlayState) {
-    setPaperIntent("");
+    paperDrafts.current.delete(paperDraftKey(worldNow.current));
+    setPaperIntent(""); setPaperProposal(undefined); setRevisedPage(undefined); setTracedAdditions([]);
     setWorldError("");
     worldNow.current = next;
     setWorld(next);
@@ -510,9 +539,11 @@ export default function App() {
     });
   }
   function applyEdit(patch: WorldPatch) {
+    // Rules can also be edited directly from an example's options.
     const result = applyWorldPatch(worldNow.current, editorState, patch);
-    setHistory((items) => [...items, result.checkpoint].slice(-12));
-    keepRevision(result.world, result.state);
+    const personal = copyExample(result.world, [...history, result.checkpoint].slice(-12));
+    setHistory(personal.history);
+    keepRevision(personal.world, result.state);
     if (patch.goalRules) {
       tell("Destination rules updated.");
       return;
@@ -587,10 +618,12 @@ export default function App() {
   async function save() {
     if (saving) return;
     allowStartupRestore.current = false;
+    const savingWorld = worldNow.current;
+    const personal = copyExample(savingWorld, history);
     const entry: SavedWorld = {
-      world,
+      world: personal.world,
       state: canvas.current?.snapshot() ?? latestState.current,
-      history,
+      history: personal.history,
       savedAt: new Date().toISOString(),
     };
     setSaving(true);
@@ -598,8 +631,17 @@ export default function App() {
     try {
       const next = await updateLibrary(saved, entry);
       setSaved(next);
-      rememberWorld(world);
-      tell("World saved.");
+      // Saving must never replace a world opened or edited while storage was busy.
+      if (worldNow.current === savingWorld) {
+        rememberWorld(personal.world);
+        if (personal.world !== savingWorld) {
+          const currentState = canvas.current?.snapshot() ?? latestState.current;
+          setInitial(currentState); latestState.current = currentState;
+          setWorld(personal.world); worldNow.current = personal.world;
+          setHistory(personal.history);
+        }
+      }
+      tell(`Saved ${personal.world.name}.`);
     } catch {
       setError(
         "This browser could not save the world. Your open world and earlier saves are unchanged.",
@@ -613,14 +655,14 @@ export default function App() {
     e.target.value = "";
     if (!selected) return;
     const version = ++sourceVersion.current;
-    setError("");
+    setCreationError("");
     try {
       const image = await readDrawingFile(selected);
       if (version !== sourceVersion.current) return;
       useSource(image, selected.name);
     } catch (e) {
       if (version !== sourceVersion.current) return;
-      setError(
+      setCreationError(
         e instanceof Error ? e.message : "This image could not be opened.",
       );
     }
@@ -644,13 +686,13 @@ export default function App() {
     setCustomSource(true);
     setDraft(null);
     setPlaying(false);
-    setError("");
+    setCreationError("");
     setDialog("create");
     previousPlaying.current = false;
     tell("Image ready.");
   }
   async function bringAlive() {
-    setError("");
+    setCreationError("");
     if (!customSource) {
       tell("Draw or upload your own image to create a world.");
       return;
@@ -663,7 +705,7 @@ export default function App() {
     const controller = new AbortController();
     const requestedIntent = creationIntent();
     if (requestedIntent.length > 500) {
-      setError("Shorten your idea to leave room for the selected game style.");
+      setCreationError("Shorten your idea to leave room for the selected game style.");
       return;
     }
     setSetupEdits(null);
@@ -686,6 +728,7 @@ export default function App() {
       if (controller.signal.aborted || request.current !== controller) return;
       if (!response.ok && result.recovery) {
         const review = validateRecognitionReview(result.recovery);
+        setLastCreation("review");
         recordRecognitionReturned("repair");
         setRecognitionReview(review);
         setDraft(null);
@@ -704,6 +747,7 @@ export default function App() {
           result.error || "Your drawing could not be interpreted.",
         );
       }
+      setLastCreation("success");
       setDraft(validateWorld(result.world));
       setDraftIntent(requestedIntent);
       recordRecognitionReturned("accepted");
@@ -719,12 +763,16 @@ export default function App() {
             ? "cancelled"
             : "error",
         );
-      if (!(e instanceof DOMException && e.name === "AbortError"))
-        setError(
-          e instanceof Error
+      if (!(e instanceof DOMException && e.name === "AbortError") && request.current === controller) {
+        setLastCreation("failed");
+        setCreationError(
+          e instanceof TypeError && /fetch|network|load failed/i.test(e.message)
+            ? "The creation service couldn’t be reached. Try again when the connection returns."
+            : e instanceof Error
             ? e.message
             : "Something interrupted the request. Your drawing is safe.",
         );
+      }
     } finally {
       if (request.current === controller) {
         setBusy(false);
@@ -735,6 +783,7 @@ export default function App() {
   function cancelInterpretation() {
     recordRecognitionReturned("cancelled");
     request.current?.abort();
+    request.current = null;
     setBusy(false);
     tell("Stopped. Your drawing is still here.");
   }
@@ -1039,11 +1088,15 @@ export default function App() {
           </div>
         </fieldset>
         </details>
-        {error && (
-          <p role="alert" className="source-error">
-            {error}
-          </p>
-        )}
+        {busy && <div className="creation-progress" role="status">
+          <LoaderCircle size={20} className="spin" />
+          <div><strong>Creating your world</strong><span aria-hidden="true">{requestSeconds}s elapsed</span></div>
+        </div>}
+        {creationError && <div role="alert" className="creation-failure">
+          <strong>Creation couldn’t finish</strong>
+          <p>{creationError}</p>
+          <span>Your image and idea are kept.</span>
+        </div>}
         {sketchDraft && sketchDraft !== source && (
           <p className="creation-draft-note">
             Your unfinished drawing is kept. Continue drawing to use your
@@ -1093,7 +1146,7 @@ export default function App() {
 
   if (libraryLoading) return <main className="studio-loading" role="status">Opening your studio…</main>;
   return (
-    <div className={`app-shell studio-v2 ${focusedPlay ? "play-focused" : ""}`}>
+    <div className={`app-shell studio-v2 ${focusedPlay ? "play-focused" : ""} ${world.source === "example" ? "showing-example" : ""}`}>
       <input
         ref={file}
         type="file"
@@ -1175,7 +1228,7 @@ export default function App() {
           >
             <div className="world-heading">
               <div className="world-title-block">
-                <span className="world-stage-label">{modeLabel}</span>
+                <span className="world-stage-label">{world.source === "example" ? "Example · " : ""}{modeLabel}</span>
                 <label className="world-name-label">
                   <span className="sr-only">World name</span>
                   <span className="world-name-measure" aria-hidden="true">{world.name || "Untitled world"}</span>
@@ -1223,7 +1276,7 @@ export default function App() {
                   disabled={busy}
                 >
                   <Pencil size={15} />
-                  <span>Edit world</span>
+                  <span>{world.source === "example" ? "Make a copy" : "Edit world"}</span>
                 </button>
                 <button
                   className="secondary-button save-button"
@@ -1232,7 +1285,7 @@ export default function App() {
                   disabled={saving}
                   aria-busy={saving}
                 >
-                  <Save size={18} /><span>Save</span>
+                  <Save size={18} /><span>{world.source === "example" ? "Save a copy" : "Save"}</span>
                 </button>
                 <button className="icon-button" aria-label="More world options" title="More" onClick={() => setDialog("world-options")}>
                   <Ellipsis size={20} />
@@ -1273,7 +1326,7 @@ export default function App() {
                   {objective.total > 0 && (
                     <button
                       className="required-progress"
-                      aria-label={`View requirements: ${objective.done} of ${objective.total} complete`}
+                      aria-label={`View requirements: ${objective.done} of ${objective.total} ${mode === "discover" ? "found" : "done"}`}
                       onClick={() => {
                         setEditorState(canvas.current?.snapshot() ?? latestState.current);
                         setDialog("rules");
@@ -1282,7 +1335,7 @@ export default function App() {
                       <b>
                         {objective.done}/{objective.total}
                       </b>{" "}
-                      complete
+                      {mode === "discover" ? "found" : "done"}
                     </button>
                   )}
                   {optionalObjects.length > 0 && (
@@ -1604,9 +1657,14 @@ export default function App() {
                 key={example.id}
                 className={`example-card example-${example.theme} ${(world.exampleId ?? world.id) === example.id ? "selected" : ""}`}
                 disabled={busy}
-                onClick={() => {
+                onClick={(event) => {
+                  const examples = event.currentTarget.closest("details");
+                  if (examples) examples.open = false;
                   loadWorld(freshExample(example.id));
-                  tell(`${example.name} is ready to explore.`);
+                  requestAnimationFrame(() => {
+                    framePlaySurface(false, true);
+                    stage.current?.querySelector<HTMLElement>(".world-canvas")?.focus({ preventScroll: true });
+                  });
                 }}
               >
                 <div className="example-art">
@@ -1713,11 +1771,10 @@ export default function App() {
               </div>
               {busy ? (
                 <button
-                  className="primary-button"
+                  className="secondary-button"
                   onClick={cancelInterpretation}
                 >
-                  <LoaderCircle size={17} className="spin" /> Stop creating{" "}
-                  <X size={16} />
+                  <X size={16} /> Stop creating
                 </button>
               ) : (
                 <button
@@ -1727,7 +1784,7 @@ export default function App() {
                   }
                   onClick={bringAlive}
                 >
-                  <WandSparkles size={18} /> Create world
+                  {creationError ? <RotateCcw size={18} /> : <WandSparkles size={18} />} {creationError ? "Try again" : "Create world"}
                 </button>
               )}
             </div>
@@ -2025,10 +2082,10 @@ export default function App() {
             tracedAdditions[0]?.art
               ? {
                   art: tracedAdditions[0].art,
-                  x: tracedAdditions[0].x / 1.44,
-                  y: tracedAdditions[0].y / 0.82,
-                  width: tracedAdditions[0].width / 1.44,
-                  height: tracedAdditions[0].height / 0.82,
+                  x: tracedAdditions[0].x / sourcePageSize.width * 1000,
+                  y: tracedAdditions[0].y / sourcePageSize.height * 1000,
+                  width: tracedAdditions[0].width / sourcePageSize.width * 1000,
+                  height: tracedAdditions[0].height / sourcePageSize.height * 1000,
                 }
               : undefined
           }
@@ -2042,10 +2099,10 @@ export default function App() {
                     {
                       id: `ink-${crypto.randomUUID()}`,
                       kind: kind ?? "bridge",
-                      x: mark.x * 1.44,
-                      y: mark.y * 0.82,
-                      width: Math.max(4, mark.width * 1.44),
-                      height: Math.max(4, mark.height * 0.82),
+                      x: mark.x / 1000 * sourcePageSize.width,
+                      y: mark.y / 1000 * sourcePageSize.height,
+                      width: Math.max(4, mark.width / 1000 * sourcePageSize.width),
+                      height: Math.max(4, mark.height / 1000 * sourcePageSize.height),
                       art: mark.art,
                       label: `Drawn ${kind ?? "bridge"}`,
                     },
@@ -2077,6 +2134,7 @@ export default function App() {
       {dialog === "worlds" && (
         <WorldLibrary
           entries={saved}
+          onCreate={() => openCreation()}
           loadError={libraryError}
           onRetry={() => {
             void updateLibrary(savedWorlds())
@@ -2121,10 +2179,10 @@ export default function App() {
               </strong>
               <p>
                 <span
-                  className={`status-dot ${connection?.configured ? "connected" : ""}`}
+                  className={`status-dot ${lastCreation === "success" ? "connected" : lastCreation === "failed" ? "failed" : ""}`}
                 />
                 {connection?.configured
-                  ? "API key configured"
+                  ? lastCreation === "success" ? "Last creation succeeded" : lastCreation === "failed" ? "Last creation failed" : lastCreation === "review" ? "Last creation needs review" : "Configured · not yet tested"
                   : connectionError
                     ? "Local API is unavailable"
                     : "API key not configured"}
@@ -2144,10 +2202,7 @@ export default function App() {
             <span>Storage</span>
             <span>This browser · {saved.length} saved worlds</span>
           </div>
-          <p className="modal-copy">
-            This checks local configuration without spending model credits. A
-            configured key does not confirm provider availability.
-          </p>
+          <p className="modal-copy">{lastCreation === "failed" ? "Your creation draft is kept. Return to it to retry." : lastCreation === "review" ? "Recognized objects are kept. Return to your draft to review them." : "Connection status updates after a creation request."}</p>
           {!connection?.configured && (
             <p className="modal-copy">
               Connect a Meta provider on the server to create worlds from new
@@ -2175,7 +2230,7 @@ export default function App() {
                 <div>
                   <dt>Find</dt>
                   <dd>
-                    Read the current clue, then click or tap the detail in your
+                    Read the current clue, then click the detail in your
                     image.
                   </dd>
                 </div>
@@ -2199,21 +2254,20 @@ export default function App() {
                 <div>
                   <dt>Move</dt>
                   <dd>
-                    Click or tap an open area. Or hold WASD, arrow keys, or a
-                    direction button.
+                    Click an open area, or hold WASD or the arrow keys.
                   </dd>
                 </div>
                 <div>
                   <dt>Take control</dt>
                   <dd>
-                    A direction key or button takes over from the pointer
+                    A direction key takes over from the pointer
                     destination.
                   </dd>
                 </div>
                 {world.entities.some((entity) => entity.kind === "lever") && (
                   <div>
                     <dt>Interact</dt>
-                    <dd>Press E or Use near an interactive object.</dd>
+                    <dd>Press E near an interactive object.</dd>
                   </div>
                 )}
               </>
@@ -2221,16 +2275,20 @@ export default function App() {
               <>
                 <div>
                   <dt>Move</dt>
-                  <dd>← → or A / D. On phones, hold a direction button.</dd>
+                  <dd>← → or A / D.</dd>
                 </div>
                 <div>
                   <dt>Jump</dt>
-                  <dd>Space, ↑ or W. On phones, use the jump button.</dd>
+                  <dd>Space, ↑ or W.</dd>
+                </div>
+                <div>
+                  <dt>Drop down</dt>
+                  <dd>↓ + Space or S + Space through a thin platform.</dd>
                 </div>
                 {world.entities.some((entity) => entity.kind === "lever") && (
                   <div>
                     <dt>Interact</dt>
-                    <dd>Press E or Use near a switch.</dd>
+                    <dd>Press E near a switch.</dd>
                   </div>
                 )}
               </>

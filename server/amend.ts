@@ -11,6 +11,8 @@ import {
 } from "../shared/world.js";
 import { groundAmendmentBoxes } from "./amend-grounding.js";
 import type { PaperProposal } from "../shared/amendments.js";
+import { isSourceAlignedScenery } from "../shared/source-scenery.js";
+import { sourceScenery } from "./source-scenery.js";
 const properties = {
   id: { type: "string" },
   kind: {
@@ -310,12 +312,24 @@ export async function interpretAmendment(
     throw new InterpretationError(
       "A new lever needs a drawn gate to control. Add a gate or clarify the page.",
     );
+  const sourceBackdrop = world.entities.find(isSourceAlignedScenery);
+  const movingSourceEntities = world.entities.filter(entity => entity.artSource && (entity.kind === "player" ||
+    (entity.kind === "gate" && [...world.entities,...additions].some(other => other.kind === "lever" && other.targetId === entity.id))));
+  if (sourceBackdrop && movingSourceEntities.some(entity => !entity.art))
+    throw new InterpretationError("The moving artwork is missing from this preview. Reopen Update image and compare again; your world is unchanged.");
+  signal.throwIfAborted();
+  const revisedScenery = sourceBackdrop ? {
+    id: sourceBackdrop.id,
+    art: await sourceScenery(after, [...world.entities, ...additions]),
+  } : undefined;
+  signal.throwIfAborted();
   const patch = {
     id: randomUUID(),
     worldId: world.id,
     baseRevision: world.revision,
     origin: "meta" as const,
     sourceImage: afterImage,
+    ...(revisedScenery ? {sourceScenery: revisedScenery} : {}),
     additions,
   };
   try {
@@ -323,7 +337,7 @@ export async function interpretAmendment(
       ...world,
       sourceImage: afterImage,
       entities: [
-        ...world.entities,
+        ...world.entities.map(entity => revisedScenery?.id === entity.id ? {...entity,art:revisedScenery.art} : entity),
         ...additions.filter((e) => e.kind !== "lever" || e.targetId),
       ],
     });

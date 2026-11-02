@@ -188,7 +188,7 @@ class LocalSamRunner {
 /** Local inference only. Neither this process nor its child has an HTTP client,
  * inference credentials, provider fallbacks or automatic model downloads.
  */
-export async function localSegmentationArtwork(source: Buffer, boxes: LocalMaskBox[], config: LocalSegmentationConfig, signal: AbortSignal): Promise<Map<string, string>> {
+export async function localSegmentationArtwork(source: Buffer, boxes: LocalMaskBox[], config: LocalSegmentationConfig, signal: AbortSignal, options: { selectPrincipalComponent?: boolean } = {}): Promise<Map<string, string>> {
   signal.throwIfAborted();
   if (!config.configured || !boxes.length || boxes.length > 24 || source.length * 4 / 3 > MAX_INPUT)
     throw new Error("Local cutout input is unavailable or exceeds its bounds.");
@@ -234,7 +234,9 @@ export async function localSegmentationArtwork(source: Buffer, boxes: LocalMaskB
         if (actual[at * 4 + 3] > 20) visible++;
       }
     if (visible !== record.visible) throw new Error("Local cutout visibility metadata did not match its pixels.");
-    if (!coherentMask(actual, width, height, visible)) continue;
+    // Expanded actor contexts deliberately include neighboring marks. Their
+    // caller selects a bounded principal component before accepting artwork.
+    if (!options.selectPrincipalComponent && !coherentMask(actual, width, height, visible)) continue;
       result.set(record.id, `data:image/png;base64,${record.png}`);
     }
     return result;

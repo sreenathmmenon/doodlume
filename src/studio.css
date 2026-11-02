@@ -21,10 +21,10 @@
   --selection-muted: #667aaf;
   --accent-ink: #ffffff;
   --paper: #ffffff;
-  --workspace: #f1f3f6;
-  --border: #d5dbe4;
+  --workspace: #f5f5f3;
+  --border: #dadfdf;
   --surface-hover: #eaf0fa;
-  --field: #f7f9fc;
+  --field: #f7f8f8;
   --danger: #b33336;
   --danger-surface: #fff0f0;
   --disabled-ink: #727b8a;
@@ -2605,9 +2605,41 @@ select:focus-visible {
 }
 .studio-v2 .world-panel:fullscreen > .game-toolbar { flex: 0 0 auto; border-radius: 0; }
 
-/* Keep viewport actions together as contextual play controls wrap. */
+/* Desktop composition owns its available height; disclosures reflow inside it. */
 .game-view-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
-@media (min-width: 801px) and (min-height: 600px) {
-  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) { height: calc(100dvh - 116px); min-height: 0; }
-  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) > .game-stage { flex: 1 1 0; height: auto; min-height: 220px; }
+.studio-v2 { overflow-anchor: none; }
+.studio-v2 .status-dot { background: #8b9098; }
+.studio-v2 .status-dot.connected { background: #387253; }
+.studio-v2 .status-dot.failed { background: #b34444; }
+.creation-progress { display: flex; align-items: center; gap: 12px; margin-top: 24px; padding: 16px 0; color: var(--primary); }
+.creation-progress > div { display: grid; gap: 4px; }
+.creation-progress strong { font-size: 14px; color: var(--ink); }
+.creation-progress span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.creation-failure { padding: 16px; margin-top: 20px; border: 1px solid #e5c9c5; border-radius: 8px; background: #fff8f6; }
+.creation-failure strong { color: #8b352e; font-size: 14px; }
+.creation-failure p { margin: 7px 0; font-size: 13px; line-height: 1.55; color: var(--ink); }
+.creation-failure > span { color: var(--muted); font-size: 12px; }
+@media (min-width: 801px) and (min-height: 540px) {
+  .studio-v2:not(.play-focused) main { height: calc(100dvh - 60px); display: flex; flex-direction: column; gap: 0; padding: 24px 28px 16px; }
+  .studio-v2:not(.play-focused) .studio-workspace { flex: 1 1 0; min-height: 0; }
+  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) > .game-stage { flex: 1 1 0; height: auto; min-height: 160px; }
+  .studio-v2:not(.play-focused) .world-heading { flex: 0 0 auto; min-height: 68px; padding-bottom: 14px; }
+  .studio-v2:not(.play-focused) .example-section { flex: 0 0 auto; margin: 14px 0 0; }
+  .studio-v2:not(.play-focused) main:has(.example-section[open]) { height: auto; min-height: calc(100dvh - 60px); }
+  .studio-v2:not(.play-focused) main:has(.example-section[open]) .studio-workspace { flex: none; height: calc(100dvh - 160px); }
+  .studio-v2:not(.play-focused).showing-example main:has(.example-section[open]) .studio-workspace { height: calc(100dvh - 260px); }
+  .studio-v2 .creation-invitation { margin: 0 0 24px; padding: 0 0 20px; border-bottom: 1px solid var(--border); }
+  .studio-v2 .creation-invitation h1 { font-size: clamp(26px, 2.4vw, 34px); letter-spacing: -1.2px; line-height: 1.2; }
+  .studio-v2 .creation-invitation p { margin-top: 8px; font-size: 14px; }
+  .studio-v2 .world-stage-label { font-size: 12px; line-height: 18px; letter-spacing: 0; }
+  .studio-v2 .game-toolbar { align-items: center; gap: 12px; padding: 10px 14px; }
+  .studio-v2 .game-toolbar .icon-button { width: 36px; height: 36px; }
+  .studio-v2 .game-context-controls { display: contents; }
+}
+@media (min-width: 801px) and (max-height: 700px) {
+  .studio-v2:not(.play-focused) main { padding: 16px 24px 12px; }
+  .studio-v2 .creation-invitation { margin-bottom: 16px; padding-bottom: 14px; }
+  .studio-v2:not(.play-focused) .world-heading { min-height: 60px; padding-bottom: 10px; }
+  .studio-v2 .world-name-label { font-size: 25px; line-height: 34px; }
 }

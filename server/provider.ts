@@ -8,6 +8,7 @@ export interface ModelConnection {
   credential: "MODEL_API_KEY" | "BASETEN_API_KEY" | "FIREWORKS_API_KEY";
   endpoint: string;
   enforcedSchema: boolean;
+  reserveRequest?: () => void;
 }
 
 export function modelConnection(

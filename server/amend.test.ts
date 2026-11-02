@@ -302,3 +302,37 @@ test("blank object crops and provider failures are explicit errors, never replac
   );
 });
 const awaitableImage = await drawing();
+
+test("revised source scenes rebuild derived scenery while removing the original actor and preserving new ink", async () => {
+  const {SOURCE_SCENERY_NOTE}=await import('../shared/source-scenery.js');
+  const red=await sharp({create:{width:12,height:12,channels:4,background:{r:220,g:20,b:20,alpha:1}}}).png().toBuffer();
+  const addActor=async(image:string)=>'data:image/png;base64,'+(await sharp(Buffer.from(image.split(',')[1],'base64')).composite([{input:red,left:100,top:100}]).png().toBuffer()).toString('base64');
+  const world=await setup();world.sourceImage=await addActor(world.sourceImage!);
+  const hero=world.entities.find(entity=>entity.kind==='player')!;
+  Object.assign(hero,{art:'data:image/png;base64,'+red.toString('base64'),artMethod:'sam',artSource:{x:100,y:100/600*1000,width:12,height:12/600*1000}});
+  world.entities.unshift({id:'source-scene',kind:'decoration',x:0,y:0,width:1440,height:820,art:world.sourceImage,artMethod:'crop',artNote:SOURCE_SCENERY_NOTE});
+  const result=await interpretAmendment(world,await addActor(await drawing()),'Add the new bridge',connection,signal,transport(proposal()));
+  assert.equal(result.patch.sourceScenery?.id,'source-scene');
+  assert.ok(result.patch.sourceScenery?.art);
+  assert.notEqual(result.patch.sourceScenery.art,result.patch.sourceImage);
+  const{data,info}=await sharp(Buffer.from(result.patch.sourceScenery.art.split(',')[1],'base64')).raw().toBuffer({resolveWithObject:true});
+  const pixel=(x:number,y:number)=>[...data.subarray((y*info.width+x)*info.channels,(y*info.width+x)*info.channels+3)];
+  assert.ok(pixel(105,105).every(value=>value>230),'actor is removed from the revised background');
+  assert.ok(pixel(450,360).every(value=>value<20),'new ink remains in the revised background');
+  const applied=applyWorldPatch(world,emptyPlayState(),result.patch);
+  assert.ok(applied.world.entities.find(entity=>entity.id==='source-scene')?.art===result.patch.sourceScenery.art);
+  assert.equal(applied.world.entities.find(entity=>entity.id===hero.id)?.art,hero.art);
+  const {default:Fastify}=await import('fastify');
+  const {installSourceScenery}=await import('./source-scenery-route.js');
+  const app=Fastify({bodyLimit:17_000_000});installSourceScenery(app);
+  try{
+    const response=await app.inject({method:'POST',url:'/api/source-scenery',payload:{world,image:result.patch.sourceImage,additions:result.patch.additions}});
+    assert.equal(response.statusCode,200);
+    const derived=response.json().sourceScenery;
+    assert.equal(derived.id,'source-scene');
+    assert.ok(derived.art===result.patch.sourceScenery.art,'manual preparation and automatic amendment use the same source reconstruction');
+    const missingMask=structuredClone(world);delete missingMask.entities.find(entity=>entity.id===hero.id)!.art;
+    const rejected=await app.inject({method:'POST',url:'/api/source-scenery',payload:{world:missingMask,image:result.patch.sourceImage,additions:[]}});
+    assert.equal(rejected.statusCode,422);
+  }finally{await app.close();}
+});

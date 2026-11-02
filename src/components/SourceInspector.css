@@ -1,0 +1,49 @@
+.modal.source-inspector-modal .source-inspector-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.modal.source-inspector-modal .source-inspector-controls > input[type="range"] {
+  flex: 1 1 140px;
+  min-width: 100px;
+  max-width: 360px;
+  width: auto;
+  accent-color: var(--primary);
+}
+.modal.source-inspector-modal .source-inspector-controls .secondary-button {
+  min-height: 40px;
+  font-size: 14px;
+}
+.modal.source-inspector-modal .source-inspector-controls .source-zoom-step {
+  width: 40px;
+  padding: 8px;
+  justify-content: center;
+}
+.modal.source-inspector-modal .zoom-percent {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.modal.source-inspector-modal .zoom-percent input {
+  width: 56px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 4px;
+  font-size: 14px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+.modal.source-inspector-modal .zoom-percent input::-webkit-inner-spin-button { appearance: none; }
+.modal.source-inspector-modal .source-inspector-view { height: min(60dvh, 600px); max-height: 60dvh; }
+.modal.source-inspector-modal .source-inspector-art { display: grid; place-items: center; }
+.modal.source-inspector-modal .source-inspector-art img { max-width: none; height: auto; }
+@media (max-height: 700px) {
+  .modal.source-inspector-modal .source-inspector-view { height: 50dvh; max-height: 50dvh; }
+}

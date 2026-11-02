@@ -16,7 +16,12 @@ import { readDrawingFile } from "../lib/drawing-file";
 import type { InkMark } from "../lib/ink";
 import type { EntityKind, WorldDefinition } from "../../shared/world";
 import type { PaperProposal } from "../../shared/amendments";
-export function PaperUpdate({
+type PaperDraft = { initialImage?: string; image: string; mark?: InkMark; kind: EntityKind; intent: string; sketch?: string; error: string };
+const paperDrafts = new Map<string, PaperDraft>();
+export function PaperUpdate(props: Parameters<typeof PaperUpdateSession>[0]) {
+  return <PaperUpdateSession key={`${props.world.id}:${props.world.revision}`} {...props} />;
+}
+function PaperUpdateSession({
   world,
   configured,
   provider,
@@ -41,18 +46,28 @@ export function PaperUpdate({
   onManual: (image: string, mark?: InkMark, kind?: EntityKind) => void;
   onClose: () => void;
 }) {
-  const [image, setImage] = useState(initialImage ?? "");
-  const [mark, setMark] = useState<InkMark | undefined>(initialMark);
-  const [kind, setKind] = useState<EntityKind>(initialKind ?? "bridge");
-  const [intent, setIntent] = useState(initialIntent ?? "");
+  const cacheKey = `${world.id}:${world.revision}`;
+  const kept = paperDrafts.get(cacheKey);
+  const saved = useRef(kept && (kept.initialImage === initialImage || kept.image === initialImage) ? kept : undefined).current;
+  const [image, setImage] = useState(saved?.image ?? initialImage ?? "");
+  const [mark, setMark] = useState<InkMark | undefined>(saved ? saved.mark : initialMark);
+  const [kind, setKind] = useState<EntityKind>(saved?.kind ?? initialKind ?? "bridge");
+  const [intent, setIntent] = useState(saved?.intent ?? initialIntent ?? "");
+  const [sketchDraft, setSketchDraft] = useState<string | undefined>(saved?.sketch);
   const [drawing, setDrawing] = useState(false);
   const [phone, setPhone] = useState(false);
   const [aligning, setAligning] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(saved?.error ?? "");
+  const uploadVersion = useRef(0);
+  useEffect(() => {
+    if (!image && !intent && !sketchDraft && !error) { paperDrafts.delete(cacheKey); return; }
+    paperDrafts.set(cacheKey, { initialImage, image, mark, kind, intent, sketch: sketchDraft, error });
+    if (paperDrafts.size > 12) paperDrafts.delete(paperDrafts.keys().next().value!);
+  }, [cacheKey, initialImage, image, mark, kind, intent, sketchDraft, error]);
   const file = useRef<HTMLInputElement>(null);
   const request = useRef<AbortController | null>(null);
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => () => { request.current?.abort(); uploadVersion.current++; }, []);
   const available =
     configured && world.source === "meta" && world.inputKind !== "picture";
   function close() {
@@ -66,10 +81,12 @@ export function PaperUpdate({
     setBusy(true);
     setError("");
     try {
-      // Artwork already lives in this browser; comparison needs identity/geometry and the two pages only.
+      // Keep only moving-subject masks needed to reconstruct the revised scenery.
       const context = {
         ...world,
-        entities: world.entities.map(({ art, ...entity }) => entity),
+        entities: world.entities.map(({ art, ...entity }) =>
+          entity.kind === "player" || (entity.kind === "gate" && world.entities.some(other => other.kind === "lever" && other.targetId === entity.id))
+            ? { ...entity, art } : entity),
       };
       const response = await fetch("/api/amend", {
         method: "POST",
@@ -159,13 +176,15 @@ export function PaperUpdate({
           onChange={(e) => {
             const chosen = e.target.files?.[0];
             e.target.value = "";
+            const version = ++uploadVersion.current;
             if (chosen)
               void readDrawingFile(chosen)
                 .then((value) => {
+                  if (version !== uploadVersion.current) return;
                   setAligning(value);
                   setError("");
                 })
-                .catch((e) => setError(e.message));
+                .catch((e) => { if (version === uploadVersion.current) setError(e.message); });
           }}
         />
         <div className="paper-input-actions">
@@ -246,7 +265,7 @@ export function PaperUpdate({
           />
         </label>
         <p className="small-note">
-          Keep the original crop and orientation. Review additions before applying.
+          Draft kept when you close. Review additions before applying.
         </p>
         {!available && (
           <p className="paper-connection">
@@ -308,10 +327,13 @@ export function PaperUpdate({
       {drawing && (
         <SketchPad
           initialImage={world.sourceImage}
+          resumeImage={sketchDraft}
+          onPause={setSketchDraft}
           onClose={() => setDrawing(false)}
           onUse={(value, ink) => {
             setImage(value);
             setMark(ink);
+            setSketchDraft(undefined);
             setDrawing(false);
             setError("");
           }}

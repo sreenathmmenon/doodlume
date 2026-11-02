@@ -1,0 +1,4 @@
+.modal.sketch-modal .sketch-tools { flex-wrap: wrap; }
+.modal.sketch-modal .sketch-brush-size { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; margin-left: 4px; }
+.modal.sketch-modal .sketch-brush-size input { width: 88px; accent-color: var(--primary); }
+.modal.sketch-modal .sketch-brush-size output { min-width: 22px; font-variant-numeric: tabular-nums; color: var(--muted); }

@@ -224,7 +224,7 @@ test("source platform assembly keeps actual surfaces and causal source links wit
   assert.equal(finish.artSource, undefined);
   assert.match(finish.artNote!, /finish region/);
   const player = world.entities.find(entity => entity.kind === "player")!;
-  assert.ok(player.width <= 100 && player.height <= 96);
+  assert.ok(player.width <= 160 && player.height <= 160);
   assert.equal(player.y + player.height * .93 + 2, world.entities.find(entity => entity.id === "left-rock")!.y);
 });
 

@@ -133,5 +133,9 @@
 }
 
 .goal-clue-field{display:grid;gap:7px;font-size:12px;line-height:1.5;margin:12px 0;color:var(--ink)}
-.goal-clue-field input{min-height:42px;padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit;width:100%;box-sizing:border-box}
-.goal-clue-field input:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+.modal .goal-clue-field textarea{min-height:42px;padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit;width:100%;box-sizing:border-box}
+.modal .goal-clue-field textarea:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+
+.modal .goal-clue-field { font-size: 14px; overflow-wrap: anywhere; }
+.modal .goal-clue-field textarea { resize: vertical; line-height: 1.6; min-height: 92px; }
+.goal-rules-choice strong { overflow-wrap: anywhere; line-height: 1.5; }

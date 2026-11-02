@@ -237,3 +237,48 @@ test("manual existing-object edits retain identity, art and earned progress, und
   assert.throws(()=>applyWorldPatch(world,progress,{...patch,origin:"meta",additions:[],updates:[update]}),/world editor/);
   assert.deepEqual(world,before);
 });
+
+test("source scenery remains protected from manual object geometry edits", async () => {
+  const { isSourceBackdrop, SOURCE_SCENERY_NOTE } = await import("./source-scenery.js");
+  const world = freshExample(EXAMPLES[0].id);
+  const scenery = { id: "source-scenery", kind: "decoration" as const, x: 0, y: 0,
+    width: world.width, height: world.height, artNote: SOURCE_SCENERY_NOTE };
+  world.entities.push(scenery);
+  assert.equal(isSourceBackdrop(scenery), true);
+  assert.throws(() => applyWorldPatch(world, progress, { id: "move-scenery", worldId: world.id,
+    baseRevision: world.revision, origin: "manual", additions: [], updates: [{ id: scenery.id,
+      x: 40, y: 0, width: scenery.width, height: scenery.height }] }), /original image and object identities/);
+  assert.equal(scenery.x, 0);
+});
+
+test("image amendments require matching regenerated scenery and preserve it through apply and undo", async () => {
+  const { SOURCE_SCENERY_NOTE } = await import("./source-scenery.js");
+  const world = freshExample(EXAMPLES[0].id);
+  const oldArt = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+  const newArt = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZuoAAAAASUVORK5CYII=";
+  world.entities.push({ id: "source-scenery", kind: "decoration", x: 0, y: 0,
+    width: world.width, height: world.height, art: oldArt, artNote: SOURCE_SCENERY_NOTE });
+  const patch: WorldPatch = { id: "refresh-scenery", worldId: world.id, baseRevision: world.revision,
+    origin: "meta", additions: [{ id: "new-star", kind: "coin", x: 500, y: 300, width: 20, height: 20 }], sourceImage: newArt };
+  assert.throws(() => applyWorldPatch(world, progress, patch), /refreshed scenery/);
+  assert.throws(() => applyWorldPatch(world, progress, { ...patch, sourceScenery: { id: "other", art: newArt } }), /does not match/);
+  const manual = applyWorldPatch(world, progress, { ...patch, origin: "manual", sourceScenery: { id: "source-scenery", art: newArt } });
+  assert.equal(manual.world.entities.find(entity => entity.id === "source-scenery")!.art, newArt);
+  assert.throws(() => applyWorldPatch(world, progress, { ...patch, sourceScenery: { id: "source-scenery", art: "javascript:alert(1)" } }));
+  const result = applyWorldPatch(world, progress, { ...patch, sourceScenery: { id: "source-scenery", art: newArt } });
+  assert.equal(result.world.entities.find(entity => entity.id === "source-scenery")!.art, newArt);
+  assert.deepEqual(result.state.collected, progress.collected);
+  const restored = undoWorldPatch(result.world, result.state, result.checkpoint);
+  assert.equal(restored.world.entities.find(entity => entity.id === "source-scenery")!.art, oldArt);
+  assert.equal(world.entities.at(-1)!.art, oldArt);
+});
+
+test("unchanged terrain overlap in saved progress does not block a remote edit or its undo", () => {
+  const { world, patch } = setup();
+  world.entities.push({ id: "old-overlap", kind: "terrain", x: 170, y: 610, width: 90, height: 80 });
+  const result = applyWorldPatch(world, progress, patch);
+  assert.deepEqual(result.state.player, progress.player);
+  assert.deepEqual(undoWorldPatch(result.world, result.state, result.checkpoint).state.player, progress.player);
+  assert.throws(() => applyWorldPatch(world, progress, { ...patch,
+    additions: [{ id: "new-overlap", kind: "bridge", x: 175, y: 615, width: 80, height: 50 }] }), /cover your character/);
+});

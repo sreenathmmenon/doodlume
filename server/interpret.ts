@@ -1,3 +1,4 @@
+import { refinePlatformSelections } from "./platform-grounding.js";
 import { groundDrawingBoxes } from "./ink-grounding.js";
 import { normalizeDrawing, imageData, cropArtwork } from "./images.js";
 import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
@@ -27,14 +28,8 @@ import {
   type RecognitionIssue,
 } from "../shared/recognition-review.js";
 
-export class RecognitionReviewError extends InterpretationError {
-  constructor(public recovery: RecognitionReview) {
-    super(
-      "Some recognized objects need your correction. Your current world is unchanged.",
-      422,
-    );
-  }
-}
+import { RecognitionReviewError } from "./recognition-error.js";
+export { RecognitionReviewError } from "./recognition-error.js";
 
 interface DetectedObject {
   id: string;
@@ -268,6 +263,11 @@ export async function interpretDrawing(
     );
   if (gameplay && (gameplay.mode === "creative" || gameplay.movement !== "platform") && detected.clarification.trim())
     throw new InterpretationError(detected.clarification.trim().slice(0, 280));
+  if (gameplay?.movement === "platform" && objects.some(object => object.kind === "player") &&
+      objects.filter(object => ["terrain", "bridge"].includes(object.kind)).length >= 2 && connection.reserveRequest) {
+    objects = (await refinePlatformSelections(normalized, objects, connection, signal, transport, segmentation))
+      .map(object => ({ ...object, targetId: object.targetId ?? null }));
+  }
   // Creative inputs need source crops, not forced character/terrain detection.
   // Do not let a white-paper connected-component heuristic veto photographs,
   // abstract marks or a character attached to the rest of an illustration.

@@ -13,15 +13,23 @@ export async function modelJSON(
   signal: AbortSignal,
   transport: typeof fetch = fetch,
 ): Promise<unknown> {
-  const response = await transport(connection.endpoint, {
-    method: "POST",
-    signal,
-    headers: {
-      Authorization: `Bearer ${connection.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  signal.throwIfAborted();
+  connection.reserveRequest?.();
+  let response: Response;
+  try {
+  response = await transport(connection.endpoint, {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${connection.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    signal.throwIfAborted();
+    throw new InterpretationError(`${connection.label} could not be reached. Check the connection and try again; your image is unchanged.`, 502);
+  }
   if (!response.ok) {
     await response.body?.cancel();
     if ([401, 403].includes(response.status))
@@ -51,15 +59,19 @@ export async function modelJSON(
   }
   try {
     const result = (await response.json()) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: { finish_reason?: string; message?: { content?: string } }[];
     };
+    if (result.choices?.[0]?.finish_reason === "length")
+      throw new InterpretationError("Meta stopped before completing the game plan. Try again; your image and idea are unchanged.", 502);
     const content = result.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.length > 150_000)
       throw new Error();
     return JSON.parse(
       content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, "$1"),
     );
-  } catch {
+  } catch (error) {
+    signal.throwIfAborted();
+    if (error instanceof InterpretationError) throw error;
     throw new InterpretationError(
       "Meta returned an incomplete interpretation. Your drawing is still here.",
     );

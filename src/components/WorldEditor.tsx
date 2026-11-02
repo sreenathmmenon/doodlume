@@ -23,6 +23,9 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { Modal } from "./Modal";
+import { isSourceBackdrop, isSourceAlignedScenery } from "../../shared/source-scenery";
+import { WrappingTextarea } from "./WrappingTextarea";
+import { ZoomPercent } from "./ZoomPercent";
 import "./editor-viewport.css";
 import {
   editorFitScale,
@@ -94,7 +97,24 @@ const limit = (v: number, low: number, high: number) =>
 const title = (e: WorldEntity) =>
   e.label || `${e.kind} · ${Math.round(e.x)}, ${Math.round(e.y)}`;
 
-export function WorldEditor({
+type EditorDraft = {
+  bounds: { width: number; height: number };
+  additions: WorldEntity[];
+  modified: Record<string, WorldEntity>;
+  selected: string | null;
+  customArt: string | null;
+  sketchDraft: string | undefined;
+};
+// Session drafts never cross a world revision or a proposed image update.
+const editorDrafts = new Map<string, EditorDraft>();
+function draftKey(props: { world: WorldDefinition; proposal?: PaperProposal; initialAdditions?: WorldEntity[]; revisedImage?: string }) {
+  return JSON.stringify([props.world.id, props.world.revision, props.proposal?.patch.id ?? null,
+    props.initialAdditions?.map(item => item.id) ?? [], props.revisedImage ?? null]);
+}
+export function WorldEditor(props: Parameters<typeof WorldEditorSession>[0]) {
+  return <WorldEditorSession key={draftKey(props)} {...props} />;
+}
+function WorldEditorSession({
   world,
   state,
   onApply,
@@ -113,14 +133,13 @@ export function WorldEditor({
   revisedImage?: string;
   onBack?: () => void;
 }) {
+  const cacheKey = draftKey({ world, proposal, initialAdditions, revisedImage });
+  const savedDraft = useRef(editorDrafts.get(cacheKey)).current;
   const mode = movementMode(world);
   const hero = world.entities.find((entity) => entity.kind === "player");
-  const sourceBackdrop = world.entities.find(
-    (entity) =>
-      entity.kind === "decoration" &&
-      entity.artNote ===
-        "Full original image used as the world backdrop; generated gameplay is separate.",
-  );
+  const sourceBackdrop = world.entities.find(isSourceBackdrop);
+  const sourcePageSize = isSourceAlignedScenery(sourceBackdrop) && sourceBackdrop
+    ? sourceBackdrop : { width: 1440, height: 820 };
   const editorTools = tools
     .filter(
       (config) =>
@@ -150,22 +169,22 @@ export function WorldEditor({
               ? "An interaction, with an optional gate connection."
               : config.hint,
     }));
-  const [bounds, setBounds] = useState({
+  const [bounds, setBounds] = useState(savedDraft?.bounds ?? {
     width: world.width,
     height: world.height,
   });
   const expanded =
     bounds.width !== world.width || bounds.height !== world.height;
   const [additions, setAdditions] = useState<WorldEntity[]>(() =>
-    structuredClone(proposal?.patch.additions ?? initialAdditions ?? []),
+    structuredClone(savedDraft?.additions ?? proposal?.patch.additions ?? initialAdditions ?? []),
   );
-  const [modified, setModified] = useState<Record<string, WorldEntity>>({});
+  const [modified, setModified] = useState<Record<string, WorldEntity>>(savedDraft?.modified ?? {});
   const currentEntities = world.entities.map(entity => modified[entity.id] ?? entity);
   const editableEntities = [...currentEntities.filter(entity => entity.id !== sourceBackdrop?.id), ...additions];
   const changedCount = Object.keys(modified).length;
   const [tool, setTool] = useState<Tool>("move");
   const [selected, setSelected] = useState<string | null>(
-    proposal?.patch.additions[0]?.id ?? initialAdditions?.[0]?.id ?? null,
+    savedDraft ? savedDraft.selected : proposal?.patch.additions[0]?.id ?? initialAdditions?.[0]?.id ?? null,
   );
   const [reviewed, setReviewed] = useState(false);
   const [paperVisible, setPaperVisible] = useState(Boolean(revisedImage));
@@ -179,7 +198,16 @@ export function WorldEditor({
   } | null>(null);
   const [error, setError] = useState("");
   const [drawing, setDrawing] = useState(false);
-  const [customArt, setCustomArt] = useState<string | null>(null);
+  const [customArt, setCustomArt] = useState<string | null>(savedDraft?.customArt ?? null);
+  const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
+  useEffect(() => {
+    if (!additions.length && !Object.keys(modified).length && !expanded && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage) {
+      editorDrafts.delete(cacheKey);
+      return;
+    }
+    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, sketchDraft });
+    if (editorDrafts.size > 12) editorDrafts.delete(editorDrafts.keys().next().value!);
+  }, [cacheKey, bounds, additions, modified, selected, customArt, sketchDraft, expanded, proposal, initialAdditions, revisedImage]);
   const [preparingArtwork, setPreparingArtwork] = useState(false);
   const artworkRequest = useRef<AbortController | null>(null);
   const selectedNow = useRef(selected);
@@ -292,19 +320,19 @@ export function WorldEditor({
       snapshot.y < 0 ||
       snapshot.width <= 0 ||
       snapshot.height <= 0 ||
-      snapshot.x + snapshot.width > 1440 ||
-      snapshot.y + snapshot.height > 820
+      snapshot.x + snapshot.width > sourcePageSize.width ||
+      snapshot.y + snapshot.height > sourcePageSize.height
     ) {
       setError(
-        "This selection is outside the revised page's 1440 × 820 area. Move its box over the complete page mark before cropping. Artwork is unchanged.",
+        "This selection is outside the revised page. Move its box over the complete page mark before cropping. Artwork is unchanged.",
       );
       return;
     }
     const source = {
-      x: snapshot.x / 1.44,
-      y: snapshot.y / 0.82,
-      width: snapshot.width / 1.44,
-      height: snapshot.height / 0.82,
+      x: snapshot.x / sourcePageSize.width * 1000,
+      y: snapshot.y / sourcePageSize.height * 1000,
+      width: snapshot.width / sourcePageSize.width * 1000,
+      height: snapshot.height / sourcePageSize.height * 1000,
     };
     const controller = new AbortController();
     artworkRequest.current = controller;
@@ -400,6 +428,7 @@ export function WorldEditor({
       baseRevision: proposal?.patch.baseRevision ?? world.revision,
       origin: changedCount ? "manual" : proposal ? "meta" : "manual",
       ...(revisedImage ? { sourceImage: revisedImage } : {}),
+      ...(proposal?.patch.sourceScenery ? { sourceScenery: proposal.patch.sourceScenery } : {}),
       additions,
       ...(changedCount ? { updates: Object.values(modified).map(entity => ({id: entity.id, x: entity.x, y: entity.y, width: entity.width, height: entity.height, label: entity.label, targetId: entity.targetId ?? null})) } : {}),
       ...(expanded ? { bounds } : {}),
@@ -416,10 +445,17 @@ export function WorldEditor({
       expanded,
     ],
   );
+  const patchNow = useRef(patch);
+  patchNow.current = patch;
+  const derivedScenery = isSourceAlignedScenery(sourceBackdrop);
   let problem = "";
   if (additions.length || changedCount || expanded) {
     try {
-      applyWorldPatch(world, state, patch);
+      // Validate placement locally; the actual image update gets freshly
+      // reconstructed scenery before it can be committed below.
+      const validationPatch = revisedImage && derivedScenery && sourceBackdrop
+        ? { ...patch, sourceScenery: { id: sourceBackdrop.id, art: sourceBackdrop.art ?? world.sourceImage } } : patch;
+      applyWorldPatch(world, state, validationPatch);
     } catch (e) {
       problem =
         e instanceof Error ? e.message : "This change needs another look.";
@@ -688,21 +724,46 @@ export function WorldEditor({
     } else { setAdditions(items => items.filter(entity => entity.id !== selected)); selectObject(null); }
     setError("");
   }
-  function apply() {
+  async function apply() {
     if (preparingArtwork || artworkRequest.current) return;
+    const submitted = patch;
+    let controller: AbortController | undefined;
     try {
       if (revisedImage && !reviewed)
-        throw new Error(
-          "Check your additions and connections before applying.",
-        );
-      applyWorldPatch(world, state, patch);
-      onApply(patch);
+        throw new Error("Check your additions and connections before applying.");
+      let readyPatch = submitted;
+      if (revisedImage && derivedScenery) {
+        controller = new AbortController();
+        artworkRequest.current = controller;
+        setPreparingArtwork(true); setError("");
+        const linkedGates = new Set([...currentEntities, ...submitted.additions].filter(entity => entity.kind === "lever").map(entity => entity.targetId));
+        const context = { ...world, entities: currentEntities.map(entity => {
+          if (entity.kind === "player" || entity.kind === "gate" && linkedGates.has(entity.id)) return entity;
+          const { art, ...rest } = entity;
+          return rest;
+        }) };
+        const response = await fetch("/api/source-scenery", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ world: context, image: revisedImage, additions: submitted.additions }),
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (controller.signal.aborted || artworkRequest.current !== controller) return;
+        if (!response.ok) throw new Error(result.error || "The revised scenery could not be prepared. Your draft is kept.");
+        if (patchNow.current !== submitted)
+          throw new Error("Your draft changed while the image was being prepared. Apply again to include your latest changes.");
+        readyPatch = { ...submitted, sourceScenery: result.sourceScenery };
+      }
+      applyWorldPatch(world, state, readyPatch);
+      onApply(readyPatch);
+      editorDrafts.delete(cacheKey);
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Your current world is safe. Try adjusting the change.",
-      );
+      if (!controller?.signal.aborted) setError(e instanceof Error ? e.message : "Your current world is safe. Try adjusting the change.");
+    } finally {
+      if (controller && artworkRequest.current === controller) {
+        artworkRequest.current = null;
+        setPreparingArtwork(false);
+      }
     }
   }
   const colors =
@@ -728,7 +789,11 @@ export function WorldEditor({
           {isNew ? "New: " : ""}
           {title(e)}
         </title>
-        {mode === "discover" && ["coin", "lever", "goal"].includes(e.kind) ? (
+        {paperVisible && revisedImage ? (
+          <rect width={e.width} height={e.height} rx="2" fill="#2457e6" fillOpacity={isNew ? .1 : .025}
+            stroke="#2457e6" strokeWidth={isNew || e.id === selected ? 2 : 1} strokeDasharray={isNew ? "6 3" : undefined}
+            vectorEffect="non-scaling-stroke" />
+        ) : mode === "discover" && ["coin", "lever", "goal"].includes(e.kind) ? (
           <rect
             width={e.width}
             height={e.height}
@@ -809,6 +874,7 @@ export function WorldEditor({
                 <input
                   type="checkbox"
                   checked={reviewed}
+                  disabled={preparingArtwork}
                   onChange={(e) => setReviewed(e.target.checked)}
                 />
                 {mode === "discover"
@@ -816,6 +882,7 @@ export function WorldEditor({
                   : "I checked the new objects, their placement, and interactions."}
               </label>
             )}
+            {(additions.length > 0 || changedCount > 0 || expanded || sketchDraft) && <p className="editor-draft-note">Draft kept when you close. Apply to update your world.</p>}
             <div className="editor-apply-actions">
               <button
                 className="text-button"
@@ -827,8 +894,17 @@ export function WorldEditor({
                   setError("");
                 }}
               >
-                <Undo2 size={15} /> Remove last
+                <Undo2 size={15} /> Remove last addition
               </button>
+              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !customArt && !sketchDraft}
+                onClick={(event) => {
+                  cancelArtwork();
+                  setBounds({ width: world.width, height: world.height });
+                  setAdditions([]); setModified({}); setCustomArt(null); setSketchDraft(undefined);
+                  setReviewed(false); selectObject(null); setError("");
+                  editorDrafts.delete(cacheKey);
+                  event.currentTarget.closest("dialog")?.querySelector<HTMLSelectElement>('select[aria-label="Select an object"]')?.focus({ preventScroll: true });
+                }}>Discard draft</button>
               <button
                 className="primary-button"
                 disabled={
@@ -837,9 +913,9 @@ export function WorldEditor({
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
                 }
-                onClick={apply}
+                onClick={() => void apply()}
               >
-                Apply changes <ArrowUpRight size={17} />
+                {preparingArtwork ? <>Preparing artwork <LoaderCircle size={17} className="spin" /></> : <>Apply changes <ArrowUpRight size={17} /></>}
               </button>
             </div>
 </div>}>
@@ -964,7 +1040,7 @@ export function WorldEditor({
             >
               <ZoomOut size={16} />
             </button>
-            <label className="editor-zoom-control">
+            <div className="editor-zoom-control">
               <input
                 aria-label="World zoom"
                 type="range"
@@ -974,8 +1050,8 @@ export function WorldEditor({
                 value={Math.round(scale * 1000)}
                 onChange={(e) => zoomTo(Number(e.target.value) / 1000)}
               />
-              <output aria-live="off">{Math.round(scale * 100)}%</output>
-            </label>
+              <ZoomPercent value={scale * 100} min={fitScale * 100} max={200} onChange={value => zoomTo(value / 100)} />
+            </div>
             <button
               aria-label="Zoom in"
               disabled={scale >= 2}
@@ -1063,13 +1139,13 @@ export function WorldEditor({
               {paperVisible && revisedImage && (
                 <image
                   href={revisedImage}
-                  width="1440"
-                  height="820"
+                  width={sourcePageSize.width}
+                  height={sourcePageSize.height}
                   preserveAspectRatio="none"
                 />
               )}
-              <g opacity={paperVisible ? 0.25 : 1}>
-                {sourceBackdrop && mode !== "platform" && object(sourceBackdrop)}
+              <g>
+                {!paperVisible && sourceBackdrop && (mode !== "platform" || isSourceAlignedScenery(sourceBackdrop)) && object(sourceBackdrop)}
                 {currentEntities
                   .filter((entity) => entity.id !== sourceBackdrop?.id)
                   .map((e) => object(e))}
@@ -1172,7 +1248,8 @@ export function WorldEditor({
                 </label>}
                 <label>
                   Name
-                  <input
+                  <WrappingTextarea
+                    rows={3}
                     aria-label="Object name"
                     value={item.label ?? ""}
                     maxLength={60}
@@ -1327,6 +1404,8 @@ export function WorldEditor({
       </Modal>
       {drawing && (
         <SketchPad
+          resumeImage={sketchDraft}
+          onPause={setSketchDraft}
           onClose={() => setDrawing(false)}
           onUse={(image) => {
             void extractSketchInk(image)
@@ -1338,6 +1417,7 @@ export function WorldEditor({
                     artNote: undefined,
                   });
                 else setCustomArt(ink);
+                setSketchDraft(undefined);
                 setDrawing(false);
               })
               .catch((e) => {

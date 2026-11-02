@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { ArrowUpRight, Eraser, Pencil, RotateCcw, Undo2 } from "lucide-react";
+import { ArrowUpRight, Eraser, Pencil, RotateCcw, Undo2, Redo2 } from "lucide-react";
 import { extractInkLayer, type InkMark } from "../lib/ink";
 import { Modal } from "./Modal";
+import "./SketchPad.css";
 
+type StrokeSnapshot = { pixels: ImageData; hasInk: boolean };
+// Keep the last paused drawing's reversible stroke history for this session.
+let pausedDrawing: { image: string; source?: string; undo: StrokeSnapshot[]; redo: StrokeSnapshot[]; hasInk: boolean; color: string; eraser: boolean; brushSize: number } | undefined;
 const colors = ["#444b43", "#94ad7c", "#baa4cf", "#ddb46b", "#d99483"];
 const inkNames: Record<string, string> = { "#444b43": "Graphite", "#94ad7c": "Sage", "#baa4cf": "Lavender", "#ddb46b": "Gold", "#d99483": "Coral" };
 export function SketchPad({
@@ -23,66 +27,50 @@ export function SketchPad({
   const base = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(!initialImage && !resumeImage);
   const [loadError, setLoadError] = useState("");
-  const history = useRef<{ pixels: ImageData; hasInk: boolean }[]>([]);
-  const [color, setColor] = useState(colors[0]);
-  const [eraser, setEraser] = useState(false);
+  const resumed = useRef(resumeImage && pausedDrawing?.image === resumeImage && pausedDrawing.source === initialImage ? pausedDrawing : undefined).current;
+  const history = useRef<StrokeSnapshot[]>(resumed?.undo.slice() ?? []);
+  const future = useRef<StrokeSnapshot[]>(resumed?.redo.slice() ?? []);
+  const [redoCount, setRedoCount] = useState(future.current.length);
+  const [brushSize, setBrushSize] = useState(resumed?.brushSize ?? 5);
+  const [color, setColor] = useState(resumed?.color ?? colors[0]);
+  const [eraser, setEraser] = useState(resumed?.eraser ?? false);
   const [hasInk, setHasInk] = useState(false);
-  const [count, setCount] = useState(0);
+  const [count, setCount] = useState(history.current.length);
   useEffect(() => {
-    const c = canvas.current!,
-      ctx = c.getContext("2d")!;
-    if (resumeImage) {
-      let active = true;
-      const image = new Image();
-      image.onload = () => {
-        if (!active) return;
-        c.width = image.naturalWidth;
-        c.height = image.naturalHeight;
-        ctx.drawImage(image, 0, 0);
-        setHasInk(true);
-        setReady(true);
-      };
-      image.onerror = () => {
-        if (active)
-          setLoadError(
-            "Your paused drawing could not be reopened. Your source image is unchanged.",
-          );
-      };
-      image.src = resumeImage;
-      return () => {
-        active = false;
-      };
-    }
-    if (!initialImage) {
-      ctx.fillStyle = "#fffdf8";
-      ctx.fillRect(0, 0, c.width, c.height);
-      return;
-    }
     let active = true;
-    const image = new Image();
-    image.onload = () => {
+    const c = canvas.current!, ctx = c.getContext("2d")!;
+    const load = (url: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Your drawing could not be opened. Your source image is unchanged."));
+      image.src = url;
+    });
+    void (async () => {
+      const [source, draft] = await Promise.all([
+        initialImage ? load(initialImage) : Promise.resolve(null),
+        resumeImage ? load(resumeImage) : Promise.resolve(null),
+      ]);
       if (!active) return;
-      const scale = 1440 / Math.max(image.naturalWidth, image.naturalHeight);
-      c.width = Math.round(image.naturalWidth * scale);
-      c.height = Math.round(image.naturalHeight * scale);
-      const page = document.createElement("canvas");
-      page.width = c.width;
-      page.height = c.height;
-      page.getContext("2d")!.drawImage(image, 0, 0, c.width, c.height);
-      base.current = page;
+      if (draft) { c.width = draft.naturalWidth; c.height = draft.naturalHeight; }
+      else if (source) {
+        const scale = 1440 / Math.max(source.naturalWidth, source.naturalHeight);
+        c.width = Math.round(source.naturalWidth * scale);
+        c.height = Math.round(source.naturalHeight * scale);
+      }
+      if (source) {
+        const page = document.createElement("canvas");
+        page.width = c.width; page.height = c.height;
+        page.getContext("2d")!.drawImage(source, 0, 0, c.width, c.height);
+        base.current = page;
+      } else {
+        ctx.fillStyle = "#fffdf8"; ctx.fillRect(0, 0, c.width, c.height);
+      }
+      if (draft) ctx.drawImage(draft, 0, 0);
+      setHasInk(draft ? resumed?.hasInk ?? true : false);
       setReady(true);
-    };
-    image.onerror = () => {
-      if (active)
-        setLoadError(
-          "The current page could not be opened. Upload a revised page instead.",
-        );
-    };
-    image.src = initialImage;
-    return () => {
-      active = false;
-    };
-  }, [initialImage, resumeImage]);
+    })().catch(error => { if (active) setLoadError(error.message); });
+    return () => { active = false; };
+  }, [initialImage, resumeImage, resumed]);
   function useDrawing() {
     const c = canvas.current!;
     let mark: InkMark;
@@ -92,6 +80,7 @@ export function SketchPad({
       setLoadError(e instanceof Error ? e.message : "Draw a new mark first.");
       return;
     }
+    pausedDrawing = undefined;
     if (!base.current) return onUse(c.toDataURL("image/png"));
     const page = document.createElement("canvas");
     page.width = c.width;
@@ -111,7 +100,8 @@ export function SketchPad({
     ];
   }
   function start(e: PointerEvent<HTMLCanvasElement>) {
-    if (!ready) return;
+    if (!ready || drawing.current || e.button !== 0) return;
+    future.current = []; setRedoCount(0);
     const c = canvas.current!,
       ctx = c.getContext("2d")!;
     history.current.push({
@@ -125,7 +115,7 @@ export function SketchPad({
     const [x, y] = point(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineWidth = eraser ? 38 : 5;
+    ctx.lineWidth = eraser ? brushSize * 4 : brushSize;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.globalCompositeOperation =
@@ -145,12 +135,24 @@ export function SketchPad({
   function undo() {
     const image = history.current.pop();
     if (image) {
-      canvas.current!.getContext("2d")!.putImageData(image.pixels, 0, 0);
+      const c = canvas.current!, ctx = c.getContext("2d")!;
+      future.current.push({ pixels: ctx.getImageData(0, 0, c.width, c.height), hasInk });
+      setRedoCount(future.current.length);
+      ctx.putImageData(image.pixels, 0, 0);
       setHasInk(image.hasInk);
     }
     setCount(history.current.length);
   }
+  function redo() {
+    const image = future.current.pop();
+    if (!image) return;
+    const c = canvas.current!, ctx = c.getContext("2d")!;
+    history.current.push({ pixels: ctx.getImageData(0, 0, c.width, c.height), hasInk });
+    ctx.putImageData(image.pixels, 0, 0);
+    setHasInk(image.hasInk); setCount(history.current.length); setRedoCount(future.current.length);
+  }
   function clear() {
+    future.current = []; setRedoCount(0);
     const c = canvas.current!,
       ctx = c.getContext("2d")!;
     history.current.push({
@@ -178,12 +180,11 @@ export function SketchPad({
       }
       onClose={() => {
         if (onPause && ready) {
-          try {
-            extractInkLayer(canvas.current!);
-            onPause(canvas.current!.toDataURL("image/png"));
-          } catch {
-            onPause(undefined);
-          }
+          const image = canvas.current!.toDataURL("image/png");
+          if (hasInk || history.current.length || future.current.length) {
+            pausedDrawing = { image, source: initialImage, undo: history.current.slice(), redo: future.current.slice(), hasInk, color, eraser, brushSize };
+            onPause(image);
+          } else { pausedDrawing = undefined; onPause(undefined); }
         }
         onClose();
       }}
@@ -244,13 +245,21 @@ export function SketchPad({
         </button>
         <button
           className="icon-button"
-          disabled={!count}
+          disabled={!ready || !count}
           aria-label="Undo last stroke"
+          title="Undo last stroke"
           onClick={undo}
         >
           <Undo2 size={18} />
         </button>
-        <button className="text-button clear-sketch" onClick={clear}>
+        <button className="icon-button" disabled={!ready || !redoCount} aria-label="Redo last stroke" title="Redo last stroke" onClick={redo}>
+          <Redo2 size={18} />
+        </button>
+        <label className="sketch-brush-size">Size
+          <input type="range" min="2" max="24" value={brushSize} aria-valuetext={`${eraser ? brushSize * 4 : brushSize} pixels`} aria-label={eraser ? "Eraser size" : "Brush size"} onChange={event => setBrushSize(Number(event.target.value))} />
+          <output>{eraser ? brushSize * 4 : brushSize}</output>
+        </label>
+        <button className="text-button clear-sketch" disabled={!ready || !hasInk} onClick={clear}>
           <RotateCcw size={15} /> {initialImage ? "Clear new strokes" : "Clear page"}
         </button>
       </div>

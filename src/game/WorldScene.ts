@@ -1,3 +1,4 @@
+import { isSourceAlignedScenery, isSourceBackdrop } from "../../shared/source-scenery";
 import Phaser from "phaser";
 import { createAtmosphere } from "./atmosphere";
 import { Soundscape } from "./soundscape";
@@ -20,6 +21,7 @@ import {
 } from "./scene-visibility";
 import { terrainTiles } from "./terrain-tiles";
 import { roamSteering } from "./roam-motion";
+import { supportingDropPlatforms } from "./platform-drop";
 import { objectName } from "../lib/object-name";
 import {
   emptyPlayState,
@@ -92,6 +94,7 @@ const palettes = {
   },
 };
 
+
 export class WorldScene extends Phaser.Scene {
   private definition: WorldDefinition;
   private hooks: Hooks;
@@ -119,6 +122,8 @@ export class WorldScene extends Phaser.Scene {
   private hintWrapWidth = 250;
   private lastGrounded = -1000;
   private jumpQueued = -1000;
+  private dropThroughUntil = -1000;
+  private dropThroughIds = new Set<string>();
   private lastReport = 0;
   private lastGoalNotice = { message: "", at: -10000 };
   private previousTouchJump = false;
@@ -147,6 +152,7 @@ export class WorldScene extends Phaser.Scene {
   private heroVisualHeight = 1;
   private sourceHero = false;
   private creativeArtwork = false;
+  private sourceAlignedArtwork = false;
   private direction: ImageDirection = imageDirection([]);
   private sourceField: number[] = [];
   private actorIntro?: Phaser.GameObjects.Graphics;
@@ -269,9 +275,7 @@ export class WorldScene extends Phaser.Scene {
       this.definition.source !== "example" &&
       (this.definition.gameplay?.movement ?? "platform") === "platform" &&
       !this.definition.entities.some(
-        (entity) =>
-          entity.artNote ===
-          "Full original image used as the world backdrop; generated gameplay is separate.",
+        isSourceBackdrop,
       )
     ) {
       if (this.definition.sourceImage.endsWith(".svg"))
@@ -284,6 +288,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   create() {
+    this.dropThroughIds.clear();
+    this.dropThroughUntil = -1000;
     this.staticGraphics = [];
     this.generatedTerrainPixels = 0;
     this.generatedTerrainPieces = 0;
@@ -307,8 +313,7 @@ export class WorldScene extends Phaser.Scene {
       (entity) =>
         entity.kind === "decoration" &&
         entity.art &&
-        entity.artNote ===
-          "Full original image used as the world backdrop; generated gameplay is separate.",
+        isSourceBackdrop(entity),
     );
     const sourceStage =
       sourceBackdrop || this.textures.exists("source-stage-colors");
@@ -317,8 +322,10 @@ export class WorldScene extends Phaser.Scene {
       this.direction = this.sampleSourceDirection(sourceBackdrop);
     else if (sourceStage)
       this.direction = this.sampleSourceDirection("source-stage-colors");
+    const sourceAlignedScenery = isSourceAlignedScenery(sourceBackdrop);
+    this.sourceAlignedArtwork = sourceAlignedScenery;
     this.updateAtmosphere = sourceBackdrop
-      ? this.definition.gameplay?.movement === "roam" ||
+      ? sourceAlignedScenery || this.definition.gameplay?.movement === "roam" ||
         this.definition.gameplay?.movement === "discover"
         ? this.createSourceBackdrop(sourceBackdrop)
         : this.createSourceAtmosphere()
@@ -340,8 +347,9 @@ export class WorldScene extends Phaser.Scene {
         );
         this.physics.add.existing(zone, true);
         zone.setData("oneWay", e.height <= 40);
+        zone.setData("entityId", e.id);
         terrain.add(zone);
-        this.drawTerrain(e);
+        if (!sourceAlignedScenery || !e.artSource) this.drawTerrain(e);
       } else if (e.kind === "gate") this.createGate(e);
     }
     const hero = this.definition.entities.find((e) => e.kind === "player")!;
@@ -465,6 +473,7 @@ export class WorldScene extends Phaser.Scene {
       (_player, surface) => {
         const platform = surface as Phaser.GameObjects.Zone;
         if (!platform.getData("oneWay")) return true;
+        if (this.time.now < this.dropThroughUntil && this.dropThroughIds.has(platform.getData("entityId"))) return false;
         const body = this.player.body as Phaser.Physics.Arcade.Body;
         // Thin drawn platforms support feet from above; jumping underneath won't trap a head.
         return (
@@ -479,7 +488,7 @@ export class WorldScene extends Phaser.Scene {
       if (e.kind === "coin") this.createCoin(e);
       if (e.kind === "lever") this.createLever(e);
       if (e.kind === "goal") this.createGoal(e);
-      if (e.kind === "decoration" && e.art && e !== sourceBackdrop)
+      if (e.kind === "decoration" && e.art && e !== sourceBackdrop && !sourceAlignedScenery)
         this.add
           .image(e.x + e.width / 2, e.y + e.height / 2, `art-${e.id}`)
           .setDisplaySize(e.width, e.height)
@@ -529,7 +538,8 @@ export class WorldScene extends Phaser.Scene {
    */
   private createSourceBackdrop(entity: WorldEntity): () => void {
     const camera = this.cameras.main;
-    camera.setBackgroundColor(this.direction.background);
+    const imageNative = isSourceAlignedScenery(entity) || ["roam", "discover"].includes(this.definition.gameplay?.movement ?? "platform");
+    camera.setBackgroundColor(imageNative ? "#f1f1ee" : this.direction.background);
     const image = this.add
       .image(
         entity.x + entity.width / 2,
@@ -645,7 +655,7 @@ export class WorldScene extends Phaser.Scene {
     if (previous)
       this.drawDiscoveryRegion(previous, this.discoveryHover === previous);
     this.drawDiscoveryRegion(clue.entityId, true);
-    this.hooks.onMoment(clue.text);
+    this.hooks.onMoment("Look for the highlighted detail.");
     this.time.delayedCall(2200, () => {
       if (this.discoveryHintId === clue.entityId) this.discoveryHintId = "";
       this.drawDiscoveryRegion(
@@ -934,10 +944,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.time.now - this.lastDiscoveryNotice > 1000) {
       this.lastDiscoveryNotice = this.time.now;
       this.ring(point.x, point.y, this.direction.surface, 18);
-      this.hooks.onMoment(
-        this.nextDiscoveryClue()?.text ??
-          goalProgress(this.definition, this.state).hint,
-      );
+      this.hooks.onMoment("Try another detail.");
     }
     return false;
   }
@@ -952,13 +959,10 @@ export class WorldScene extends Phaser.Scene {
     const region = this.discoveryRegions.get(id);
     if (!region || this.discoveryResolved(region.entity)) return false;
     const e = region.entity;
-    const next = this.nextDiscoveryClue();
     if (!canDiscover(this.definition, this.state, id)) {
       if (this.time.now - this.lastDiscoveryNotice > 1000) {
         this.lastDiscoveryNotice = this.time.now;
-        this.hooks.onMoment(
-          next?.text ?? goalProgress(this.definition, this.state).hint,
-        );
+        this.hooks.onMoment("That detail comes later. Follow the current clue.");
       }
       return false;
     }
@@ -985,14 +989,10 @@ export class WorldScene extends Phaser.Scene {
       this.direction.accent,
       Math.min(48, Math.max(e.width, e.height) / 2),
     );
-    this.hooks.onMoment(
-      wasCompleted
-        ? "Detail found."
-        : this.state.completed
-        ? "World complete."
-        : (this.nextDiscoveryClue()?.text ??
-            goalProgress(this.definition, this.state).hint),
-    );
+    // The persistent mission already announces the next clue. Reserve the
+    // transient feedback area for a distinct result, not a duplicate sentence.
+    if (wasCompleted) this.hooks.onMoment("Detail found.");
+    else if (this.state.completed) this.hooks.onMoment("World complete.");
     this.report();
     return true;
   }
@@ -1182,7 +1182,7 @@ export class WorldScene extends Phaser.Scene {
     const art = this.add.container(e.x, e.y).setDepth(14);
     const g = this.add.graphics();
     const sourceGate =
-      this.definition.gameplay?.movement === "roam" && e.artSource && !e.art;
+      e.artSource && (this.sourceAlignedArtwork && !this.definition.entities.some(other => other.kind === "lever" && other.targetId === e.id) || this.definition.gameplay?.movement === "roam" && !e.art);
     if (this.creativeArtwork) {
       g.fillStyle(this.direction.matte, 0.92);
       g.fillRoundedRect(0, 0, e.width, e.height, 2);
@@ -1210,7 +1210,7 @@ export class WorldScene extends Phaser.Scene {
       g.setVisible(false);
       this.drawSourceCue(e, false);
     }
-    if (e.art) {
+    if (e.art && !sourceGate) {
       g.setVisible(false);
       art.add(
         this.add
@@ -1223,9 +1223,8 @@ export class WorldScene extends Phaser.Scene {
 
   private createCoin(e: WorldEntity) {
     if (
-      this.definition.gameplay?.movement === "roam" &&
-      e.artSource &&
-      !e.art
+      e.artSource && (this.sourceAlignedArtwork ||
+      this.definition.gameplay?.movement === "roam" && !e.art)
     ) {
       this.drawSourceCue(e, this.state.collected.includes(e.id));
       if (this.state.collected.includes(e.id)) return;
@@ -1239,7 +1238,7 @@ export class WorldScene extends Phaser.Scene {
       this.physics.add.overlap(this.player, region, () => {
         if (
           !this.isPlaying ||
-          !this.roamEngaged ||
+          (this.definition.gameplay?.movement === "roam" && !this.roamEngaged) ||
           this.state.collected.includes(e.id)
         )
           return;
@@ -1411,16 +1410,15 @@ export class WorldScene extends Phaser.Scene {
     });
     let originalArt: Phaser.GameObjects.Image | undefined;
     if (
-      this.definition.gameplay?.movement === "roam" &&
-      e.artSource &&
-      !e.art
+      e.artSource && (this.sourceAlignedArtwork ||
+      this.definition.gameplay?.movement === "roam" && !e.art)
     ) {
       g.setVisible(false);
       handle.setVisible(false);
       knob.setVisible(false);
       this.drawSourceCue(e, this.state.activated.includes(e.id));
     }
-    if (e.art) {
+    if (e.art && !this.sourceAlignedArtwork) {
       g.setVisible(false);
       handle.setVisible(false);
       knob.setVisible(false);
@@ -1434,9 +1432,9 @@ export class WorldScene extends Phaser.Scene {
 
   private createGoal(e: WorldEntity) {
     const sourceTarget =
-      this.definition.gameplay?.movement === "roam" && e.artSource && !e.art;
+      e.artSource && (this.sourceAlignedArtwork || this.definition.gameplay?.movement === "roam" && !e.art);
     if (sourceTarget) this.drawSourceCue(e, this.state.completed);
-    if (e.art)
+    if (e.art && !sourceTarget)
       this.add
         .image(e.x + e.width / 2, e.y + e.height / 2, `art-${e.id}`)
         .setDisplaySize(e.width, e.height)
@@ -1575,7 +1573,7 @@ export class WorldScene extends Phaser.Scene {
         this.drawSourceCue(gateEntity, true);
     }
     const e = lever.entity;
-    if (this.definition.gameplay?.movement === "roam" && e.artSource && !e.art)
+    if (e.artSource && (this.sourceAlignedArtwork || this.definition.gameplay?.movement === "roam" && !e.art))
       this.drawSourceCue(e, true);
     lever.handle.setTo(
       e.x + e.width / 2,
@@ -2141,13 +2139,22 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     if (left || right) this.player.setFlipX(left);
-    if (
-      Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
+    const jumpPressed = Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
       Phaser.Input.Keyboard.JustDown(this.keys.SPACE) ||
       Phaser.Input.Keyboard.JustDown(this.keys.W) ||
-      (this.controls.jump && !this.previousTouchJump)
-    )
-      this.jumpQueued = time;
+      (this.controls.jump && !this.previousTouchJump);
+    const downHeld = this.cursors.down.isDown || this.keys.S.isDown || this.controls.down;
+    const dropIds = jumpPressed && downHeld && grounded
+      ? supportingDropPlatforms(this.definition.entities, body) : [];
+    if (dropIds.length) {
+      this.dropThroughIds = new Set(dropIds);
+      this.dropThroughUntil = time + 650;
+      this.jumpQueued = -1000;
+      this.lastGrounded = -1000;
+      body.setVelocityY(140);
+      this.player.y += 3;
+      body.updateFromGameObject();
+    } else if (jumpPressed) this.jumpQueued = time;
     if (time - this.jumpQueued < 120 && time - this.lastGrounded < 100) {
       body.setVelocityY(-650);
       this.lastGrounded = -1000;

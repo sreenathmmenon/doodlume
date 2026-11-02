@@ -16,6 +16,7 @@ import { loadLocalProviderKeys } from "./credentials.js";
 import { segmentationConnection, segmentationConfigured } from "./segmentation.js";
 import { closeLocalSegmentationWorkers } from "./local-segmentation.js";
 import { installStudioFallback } from "./static-routing.js";
+import { installSourceScenery } from "./source-scenery-route.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
@@ -37,6 +38,7 @@ function reserveRequest() {
     );
   requests++;
 }
+connection.reserveRequest = reserveRequest;
 const segmentation = {
   ...segmentationConnection(process.env, connection),
   reserveRequest,
@@ -63,6 +65,7 @@ app.addHook("onRequest", async (request, reply) => {
   if (!host || !new RegExp(`^(127\\.0\\.0\\.1|localhost):${port}$`).test(host))
     return reply.code(403).send({ error: "Use the local studio address." });
 });
+installSourceScenery(app);
 app.get("/api/status", async () => ({
   configured: Boolean(connection.apiKey),
   provider: connection.provider,
@@ -114,13 +117,13 @@ for (const action of ["interpret", "amend"] as const)
         .code(400)
         .send({ error: "Choose drawing or picture input." });
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+    // Platform grounding plus local cutouts may require two sequential model calls.
+    const timeout = setTimeout(() => controller.abort(), 120_000);
     const onClose = () => {
       if (!reply.raw.writableFinished) controller.abort();
     };
     reply.raw.on("close", onClose);
     inFlight = true;
-    reserveRequest();
     try {
       if (action === "amend")
         return {

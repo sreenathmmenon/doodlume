@@ -1,0 +1,42 @@
+.modal.world-library-modal .saved-worlds .saved-world-row .saved-world-open > span {
+  padding: 16px;
+  gap: 6px;
+}
+.modal.world-library-modal .saved-worlds .saved-world-open .saved-world-open-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+.modal.world-library-modal .saved-worlds .saved-world-open .saved-world-date {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.modal.world-library-modal .saved-worlds .saved-world-row .saved-world-backup {
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 40px;
+  height: auto;
+  padding: 10px 14px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--field);
+  color: var(--muted);
+  font-size: 13px;
+}
+.modal.world-library-modal .saved-worlds .saved-world-row .saved-world-backup:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.modal.world-library-modal .saved-world-backup:focus-visible { outline-offset: -3px; }
+.modal.world-library-modal .empty-worlds .primary-button { margin-top: 14px; }

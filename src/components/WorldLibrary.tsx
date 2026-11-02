@@ -5,8 +5,10 @@ import {
   ChevronRight,
   ChevronDown,
   FolderHeart,
+  Plus,
 } from "lucide-react";
 import { Modal } from "./Modal";
+import "./WorldLibrary.css";
 import { validateImportArtwork } from "../lib/import-artwork";
 import {
   importWorlds,
@@ -41,10 +43,12 @@ export function WorldLibrary({
   onClose,
   loadError,
   onRetry,
+  onCreate,
 }: {
   entries: SavedWorld[];
   loadError: string;
   onRetry: () => void;
+  onCreate?: () => void;
   getCurrent: () => SavedWorld;
   onOpen: (entry: SavedWorld) => void;
   onImport: (entries: SavedWorld[]) => void;
@@ -293,6 +297,7 @@ export function WorldLibrary({
             <div className="saved-world-row" key={entry.world.id}>
               <button
                 className="saved-world-open"
+                aria-label={`Open ${entry.world.name}, version ${entry.world.revision}, saved ${new Date(entry.savedAt).toLocaleString()}`}
                 onClick={() => onOpen(entry)}
               >
                 <img src={entry.world.sourceImage} alt="" />
@@ -302,18 +307,25 @@ export function WorldLibrary({
                     {entry.state.completed
                       ? "Completed"
                       : `${entry.state.collected.length} ${entry.state.collected.length === 1 ? "item" : "items"} found`}
-                    {" · "}{new Date(entry.savedAt).toLocaleDateString()}
+                    {" · "}Version {entry.world.revision}
                   </small>
+                  <small className="saved-world-date">
+                    Saved {new Date(entry.savedAt).toLocaleString(undefined, {
+                      month: "short", day: "numeric", year: "numeric",
+                      hour: "numeric", minute: "2-digit", second: "2-digit",
+                    })}
+                  </small>
+                  <span className="saved-world-open-label">Open world <ChevronRight size={15} /></span>
                 </span>
                 <ChevronRight size={18} />
               </button>
               <button
                 className="saved-world-backup"
-                aria-label={`Back up ${entry.world.name}`}
-                title="Back up this world"
+                aria-label={`Back up world: ${entry.world.name}`}
+                title="Download this world with artwork, progress and undo history"
                 onClick={() => backup([entry], entry.world.name)}
               >
-                <ArrowDownToLine size={17} />
+                <ArrowDownToLine size={15} /> Back up world
               </button>
             </div>
           ))}
@@ -321,8 +333,9 @@ export function WorldLibrary({
       ) : (
         <div className="empty-worlds">
           <FolderHeart size={38} strokeWidth={1.2} />
-          <h3>Your creations belong here.</h3>
-          <p>Save your open world or import a backup to begin.</p>
+          <h3>Your worlds start here</h3>
+          <p>Turn an image into a game, then save it here.</p>
+          {onCreate && <button className="primary-button" onClick={onCreate}><Plus size={17} /> Create a world</button>}
         </div>
       )}
     </Modal>

@@ -1,0 +1,28 @@
+.modal.alignment-modal .alignment-layout { gap: 24px; grid-template-columns: minmax(0, 1fr) 260px; }
+.modal.alignment-modal .corner-tabs button {
+  min-height: 44px;
+  color: #374151;
+  background: #f7f8fa;
+  border-color: #d8dce4;
+  font: 600 12px/1.5 Manrope, sans-serif;
+}
+.modal.alignment-modal .corner-tabs button[aria-pressed="true"] {
+  color: #17398f;
+  background: #e8eeff;
+  border-color: #2457e6;
+}
+.modal.alignment-modal .corner-tabs button:focus-visible { outline: 3px solid #2457e6; outline-offset: 2px; }
+.modal.alignment-modal .alignment-coordinates label,
+.modal.alignment-modal .alignment-ratio,
+.modal.alignment-modal .alignment-settings > strong { color: var(--ink); font-size: 13px; }
+.modal.alignment-modal .alignment-settings > .primary-button { font-size: 13px; min-height: 44px; }
+.modal.alignment-modal .alignment-reference span { color: #525c6d; font-size: 12px; }
+.modal.alignment-modal .alignment-photo { background: var(--field); box-shadow: 0 0 0 1px var(--border); border-radius: 6px; }
+.modal.alignment-modal .alignment-result { border-color: var(--border); }
+.modal.alignment-modal .alignment-result:focus { outline: 2px solid var(--primary); outline-offset: 6px; border-radius: 4px; }
+.modal.alignment-modal .alignment-result > div > span,
+.modal.alignment-modal .alignment-result-pair figcaption { color: #525c6d; font-size: 13px; }
+.modal.alignment-modal .alignment-result-pair figure { background: var(--field); border-color: var(--border); }
+@media (max-width: 740px) {
+  .modal.alignment-modal .alignment-layout { grid-template-columns: 1fr; }
+}

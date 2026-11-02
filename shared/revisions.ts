@@ -1,4 +1,5 @@
 import { setupFeedback } from "./setup.js";
+import { isSourceBackdrop, isSourceAlignedScenery } from "./source-scenery.js";
 import {
   retainPlayState,
   movementMode,
@@ -29,6 +30,7 @@ export interface WorldPatch {
   additions: WorldEntity[];
   updates?: WorldEntityUpdate[];
   sourceImage?: string;
+  sourceScenery?: { id: string; art: string };
   bounds?: { width: number; height: number };
   goalRules?: GoalRules;
   gameplay?: WorldGameplay;
@@ -38,7 +40,7 @@ export interface RevisionCheckpoint {
   appliedRevision: number;
 }
 
-function safePlayerPosition(world: WorldDefinition, state: PlayState) {
+function safePlayerPosition(world: WorldDefinition, state: PlayState, before: WorldDefinition) {
   if (!state.player || movementMode(world) === "discover") return;
   if (state.player.x > world.width || state.player.y > world.height)
     throw new Error(
@@ -56,9 +58,15 @@ function safePlayerPosition(world: WorldDefinition, state: PlayState) {
       .filter((e) => e.kind === "lever" && state.activated.includes(e.id))
       .map((e) => e.targetId),
   );
+  const beforeHero = before.entities.find(entity => entity.kind === "player");
+  const sameBody = beforeHero?.width === hero.width && beforeHero?.height === hero.height;
+  const previouslyOpen = new Set(before.entities.filter(entity => entity.kind === "lever" && state.activated.includes(entity.id)).map(entity => entity.targetId));
   for (const e of world.entities) {
-    if (!["terrain", "bridge", "gate"].includes(e.kind) || openGates.has(e.id))
-      continue;
+    if (!["terrain", "bridge", "gate"].includes(e.kind) || openGates.has(e.id)) continue;
+    const old = before.entities.find(entity => entity.id === e.id);
+    // A saved run can touch or overlap an unchanged source ledge. Only this
+    // revision's new obstruction may block an edit; undo uses the same rule.
+    if (sameBody && old && old.kind === e.kind && old.x === e.x && old.y === e.y && old.width === e.width && old.height === e.height && !previouslyOpen.has(e.id)) continue;
     const overlapX =
       Math.min(p.x + p.width, e.x + e.width) - Math.max(p.x, e.x);
     const overlapY =
@@ -86,6 +94,12 @@ export function applyWorldPatch(
     (!patch.additions.length && !patch.updates?.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined)
   )
     throw new Error("Add something to your world before applying this change.");
+  const derivedBackdrops = world.entities.filter(isSourceAlignedScenery);
+  if (patch.sourceImage && derivedBackdrops.length && !patch.sourceScenery)
+    throw new Error("The revised image needs a refreshed scenery preview. Review the image update again before applying.");
+  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || !patch.sourceImage ||
+      derivedBackdrops.length !== 1 || patch.sourceScenery.id !== derivedBackdrops[0].id || typeof patch.sourceScenery.art !== "string"))
+    throw new Error("The scenery update does not match this image review. Review the image update again before applying.");
   const changes = new Map<string, WorldEntityUpdate>();
   if (patch.updates !== undefined) {
     if (patch.origin !== "manual" || !Array.isArray(patch.updates) || patch.updates.length > world.entities.length)
@@ -96,7 +110,7 @@ export function applyWorldPatch(
           typeof update.id !== "string" || changes.has(update.id))
         throw new Error("Each object needs one valid change. Reopen the editor.");
       const original = world.entities.find(entity => entity.id === update.id);
-      if (!original || original.artNote === "Full original image used as the world backdrop; generated gameplay is separate.")
+      if (!original || isSourceBackdrop(original))
         throw new Error("The original image and object identities stay with this world.");
       if (["x", "y", "width", "height"].some(key => !Number.isFinite(update[key as keyof WorldEntityUpdate])))
         throw new Error("Use valid object dimensions and placement.");
@@ -130,6 +144,7 @@ export function applyWorldPatch(
         const update = changes.get(entity.id);
         const changed = update ? { ...entity, ...structuredClone(update),
           ...(Object.hasOwn(update, "targetId") ? { targetId: update.targetId || undefined } : {}) } : entity;
+        if (patch.sourceScenery?.id === entity.id) return { ...changed, art: patch.sourceScenery.art };
         return patch.sourceImage && entity.artNote === "Full original image used as the world backdrop; generated gameplay is separate."
           ? { ...changed, art: patch.sourceImage } : changed;
       }),
@@ -141,7 +156,7 @@ export function applyWorldPatch(
     if (issue) throw new Error(issue);
   }
   const progress = retainPlayState(next, structuredClone(state));
-  safePlayerPosition(next, progress);
+  safePlayerPosition(next, progress, world);
   return {
     world: next,
     state: progress,
@@ -167,6 +182,6 @@ export function undoWorldPatch(
     revision: world.revision + 1,
   });
   const progress = retainPlayState(previous, structuredClone(state));
-  safePlayerPosition(previous, progress);
+  safePlayerPosition(previous, progress, world);
   return { world: previous, state: progress };
 }
