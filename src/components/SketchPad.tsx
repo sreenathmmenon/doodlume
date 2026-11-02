@@ -170,7 +170,7 @@ export function SketchPad({
     <Modal
       title={
         initialImage
-          ? "A new mark. The same world."
+          ? "Draw on your image"
           : resumeImage
             ? "Continue your drawing"
             : "Draw your world"
@@ -207,7 +207,7 @@ export function SketchPad({
     >
       <p className="modal-copy">
         {initialImage
-          ? "Add to your current page. Your existing drawing is protected; the eraser and undo affect only your new strokes."
+          ? "Eraser and undo affect only your new strokes."
           : "Draw whatever comes to mind. Your shapes, characters and colors can become a world to play in."}
       </p>
       <div className="sketch-tools">
@@ -249,7 +249,7 @@ export function SketchPad({
           <Undo2 size={18} />
         </button>
         <button className="text-button clear-sketch" onClick={clear}>
-          <RotateCcw size={15} /> Clear page
+          <RotateCcw size={15} /> {initialImage ? "Clear new strokes" : "Clear page"}
         </button>
       </div>
       {loadError && (

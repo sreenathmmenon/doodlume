@@ -59,6 +59,7 @@ export function GoalRules({
   }
   function choices(kind: "coin" | "lever", key: keyof Rules) {
     const entities = world.entities.filter((e) => e.kind === kind);
+    if (!entities.length) return null;
     return (
       <fieldset className="goal-rules-group" disabled={!hasGoal}>
         <legend>
@@ -109,7 +110,26 @@ export function GoalRules({
     }
   }
   return (
-    <Modal title="Destination rules" onClose={onCancel}>
+    <Modal title="Destination rules" onClose={onCancel} footer={
+        <div className="goal-rules-actions">
+          <button
+            className="text-button"
+            disabled={!count}
+            onClick={() =>
+              setRules({ requiredCollectedIds: [], requiredActivatedIds: [] })
+            }
+          >
+            Make all optional
+          </button>
+          <button
+            className="primary-button"
+            disabled={!hasGoal || !changed}
+            onClick={apply}
+          >
+            Apply rules
+          </button>
+        </div>
+}>
       <div className="goal-rules">
         <p className="goal-rules-intro">
           Choose the required actions. Everything else stays optional.
@@ -173,24 +193,7 @@ export function GoalRules({
             {error}
           </p>
         )}
-        <div className="goal-rules-actions">
-          <button
-            className="text-button"
-            disabled={!count}
-            onClick={() =>
-              setRules({ requiredCollectedIds: [], requiredActivatedIds: [] })
-            }
-          >
-            Make all optional
-          </button>
-          <button
-            className="primary-button"
-            disabled={!hasGoal || !changed}
-            onClick={apply}
-          >
-            Apply rules
-          </button>
-        </div>
+
       </div>
     </Modal>
   );

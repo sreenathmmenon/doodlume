@@ -98,10 +98,40 @@ export function PaperUpdate({
   }
   return (
     <>
-      <Modal title="More on the page. More in your world." onClose={close} wide>
+      <Modal title="Update image" onClose={close} wide className="paper-update-modal" footer={
+<div className="paper-footer">
+          <button
+            className="text-button"
+            disabled={!image || busy}
+            onClick={() => onManual(image, mark, kind)}
+          >
+            {mark ? "Review my drawn object" : "Place additions myself"}{" "}
+            <ArrowUpRight size={16} />
+          </button>
+          {busy ? (
+            <button
+              className="secondary-button"
+              onClick={() => {
+                request.current?.abort();
+                setBusy(false);
+              }}
+            >
+              <X size={16} />
+              Cancel comparison
+            </button>
+          ) : (
+            <button
+              className="primary-button"
+              disabled={!image || !available}
+              onClick={() => void compare()}
+            >
+              Review changes <ArrowUpRight size={16} />
+            </button>
+          )}
+        </div>
+      }>
         <p className="modal-copy">
-          Draw something new on the same page, or upload its revised photo. Your
-          character, collected items, and activated levers stay in this world.
+          Add to your original image. Your world and progress stay intact.
         </p>
         <div className="paper-pair">
           <figure>
@@ -115,7 +145,7 @@ export function PaperUpdate({
             ) : (
               <div className="paper-empty">
                 <Pencil size={25} />
-                <span>A new path starts with a new mark.</span>
+                <span>Draw or upload your changes</span>
               </div>
             )}
           </figure>
@@ -203,7 +233,7 @@ export function PaperUpdate({
           </label>
         )}
         <label className="paper-intent">
-          What did you add?
+          What did you add? (optional)
           <textarea
             maxLength={500}
             value={intent}
@@ -216,14 +246,12 @@ export function PaperUpdate({
           />
         </label>
         <p className="small-note">
-          Keep the same crop, orientation, and framing. This update adds
-          objects; it protects the objects already in play. You will review
-          placement and gate connections before applying.
+          Keep the original crop and orientation. Review additions before applying.
         </p>
         {!available && (
           <p className="paper-connection">
             {world.source === "example"
-              ? "This authored example supports manual placement. Automatic comparison begins with a world interpreted from your own drawing."
+              ? "Use manual placement for this example."
               : `${provider} needs a working key for automatic comparison. You can place your new additions manually now.`}
           </p>
         )}
@@ -232,36 +260,6 @@ export function PaperUpdate({
             {error}
           </p>
         )}
-        <div className="paper-footer">
-          <button
-            className="text-button"
-            disabled={!image || busy}
-            onClick={() => onManual(image, mark, kind)}
-          >
-            {mark ? "Review my drawn object" : "Place additions myself"}{" "}
-            <ArrowUpRight size={16} />
-          </button>
-          {busy ? (
-            <button
-              className="secondary-button"
-              onClick={() => {
-                request.current?.abort();
-                setBusy(false);
-              }}
-            >
-              <X size={16} />
-              Cancel comparison
-            </button>
-          ) : (
-            <button
-              className="primary-button"
-              disabled={!image || !available}
-              onClick={() => void compare()}
-            >
-              Compare with {provider} <ArrowUpRight size={16} />
-            </button>
-          )}
-        </div>
         {busy && (
           <div className="paper-progress" role="status">
             <LoaderCircle size={19} className="spin" />

@@ -43,19 +43,14 @@ export function WorldRulesSummary({
           <dt>Required</dt>
           <dd>
             {required.size
-              ? [...required].map(describe).join(" · ")
+              ? <ul className="required-object-list">{[...required].map((id) => <li key={id}>{describe(id)}</li>)}</ul>
               : "No collectible or switch is required."}
           </dd>
         </div>
-        <div>
+        {objectives.some((entity) => !required.has(entity.id)) && <div>
           <dt>Optional</dt>
-          <dd>
-            {objectives
-              .filter((entity) => !required.has(entity.id))
-              .map((entity) => objectiveObjectLabel(world, entity.id))
-              .join(" · ") || "No optional collectibles or switches."}
-          </dd>
-        </div>
+          <dd>{objectives.filter((entity) => !required.has(entity.id)).map((entity) => objectiveObjectLabel(world, entity.id)).join(" · ")}</dd>
+        </div>}
       </dl>
     </section>
   );

@@ -9,6 +9,7 @@ import {
 import {
   ArrowUpRight,
   Check,
+  ChevronDown,
   ImagePlus,
   Hand,
   Focus,
@@ -786,7 +787,7 @@ export function WorldEditor({
             height={e.height + 10}
             rx="6"
             fill="none"
-            stroke={e.id === selected ? "#596d49" : "#93a57e"}
+            stroke={e.id === selected ? "var(--selection)" : "var(--selection-muted)"}
             strokeWidth={e.id === selected ? 2 : 1}
             vectorEffect="non-scaling-stroke"
             strokeDasharray={e.id === selected ? undefined : "8 5"}
@@ -797,19 +798,51 @@ export function WorldEditor({
   }
   return (
     <>
-      <Modal title="Edit your world" onClose={onClose} wide>
-        <div className="editor-intro">
-          <p>
-            {mode === "discover"
-              ? "Select and arrange the interactive regions in your image."
-              : mode === "roam"
-                ? "Shape paths, obstacles and interactions."
-                : "Arrange the world and connect new possibilities."}
-          </p>
-          {proposal && (
-            <span className="editor-origin">Proposed additions</span>
-          )}
-        </div>
+      <Modal title="Edit world" onClose={onClose} wide className="world-editor-modal" footer={<div className="editor-footer">
+            {(problem || error) && (
+              <p className="editor-error" role="alert">
+                {error || problem}
+              </p>
+            )}
+            {revisedImage && (
+              <label className="paper-review-confirm">
+                <input
+                  type="checkbox"
+                  checked={reviewed}
+                  onChange={(e) => setReviewed(e.target.checked)}
+                />
+                {mode === "discover"
+                  ? "I checked the regions and their placement in the image."
+                  : "I checked the new objects, their placement, and interactions."}
+              </label>
+            )}
+            <div className="editor-apply-actions">
+              <button
+                className="text-button"
+                disabled={!additions.length}
+                onClick={() => {
+                  setReviewed(false);
+                  setAdditions((items) => items.slice(0, -1));
+                  selectObject(null);
+                  setError("");
+                }}
+              >
+                <Undo2 size={15} /> Remove last
+              </button>
+              <button
+                className="primary-button"
+                disabled={
+                  (!additions.length && !changedCount && !expanded) ||
+                  preparingArtwork ||
+                  Boolean(problem) ||
+                  (Boolean(revisedImage) && !reviewed)
+                }
+                onClick={apply}
+              >
+                Apply changes <ArrowUpRight size={17} />
+              </button>
+            </div>
+</div>}>
         {revisedImage && (
           <div className="paper-review-header">
             <div>
@@ -852,44 +885,44 @@ export function WorldEditor({
               <Plus size={13} /> Add space
             </button>
           )}
-          {editorTools.map((t) => (
-            <button
-              key={t.kind}
-              aria-pressed={tool === t.kind}
-              onClick={() => {
-                setTool(t.kind);
-                setPanMode(false);
-                selectObject(null);
-              }}
-            >
-              <Plus size={13} />
-              {t.label}
-            </button>
-          ))}
-          <button
-            aria-label="Select and move objects"
-            aria-pressed={tool === "move"}
-            onClick={() => {
-              setTool("move");
+          <label className="editor-tool-picker">
+            Tool
+            <select aria-label="Placement tool" value={tool} onChange={(event) => {
+              setTool(event.target.value as typeof tool);
               setPanMode(false);
-            }}
-          >
-            <Move size={15} />
-          </button>
+              if (event.target.value !== "move") selectObject(null);
+            }}>
+              <option value="move">Select & move</option>
+              {editorTools.map((entry) => <option key={entry.kind} value={entry.kind}>Add {entry.label.toLowerCase()}</option>)}
+            </select>
+          </label>            {mode !== "discover" && (
+              <div className="editor-art-action">
+                <button
+                  className="secondary-button"
+                  onClick={() => { selectObject(null); setDrawing(true); }}
+                >
+                  <ImagePlus size={15} /> Draw your own object
+                </button>
+                {customArt && (
+                  <span>
+                    Your drawing is ready for the next object you place.
+                  </span>
+                )}
+              </div>
+            )}
+
         </div>
         <div className="editor-keyboard-controls">
-          <button
+          {tool !== "move" && <button
             className="secondary-button"
-            disabled={
-              tool === "move" || world.entities.length + additions.length >= 160
-            }
+            disabled={world.entities.length + additions.length >= 160}
             onClick={insertAtCenter}
           >
             Add{" "}
             {editorTools.find((t) => t.kind === tool)?.label.toLowerCase() ??
               "object"}{" "}
             at center
-          </button>
+          </button>}
           {editableEntities.length > 0 && (
             <label>
               Object{" "}
@@ -917,6 +950,7 @@ export function WorldEditor({
             This world has reached its 160-object limit.
           </p>
         )}
+        <div className="editor-workbench">
         <div className="editor-canvas-wrap">
           <div
             className="editor-viewport-toolbar"
@@ -952,24 +986,7 @@ export function WorldEditor({
             <button aria-pressed={detailScale === null} onClick={fitWorld}>
               Fit world
             </button>
-            <button onClick={() => zoomTo(1)}>100%</button>
-            {hero && (
-              <button
-                onClick={() => {
-                  focusObject({
-                    ...hero,
-                    ...(state.player
-                      ? {
-                          x: state.player.x - hero.width / 2,
-                          y: state.player.y - hero.height / 2,
-                        }
-                      : {}),
-                  });
-                }}
-              >
-                <Focus size={16} /> Character
-              </button>
-            )}
+
             <button
               aria-pressed={panMode}
               onClick={() => {
@@ -979,9 +996,15 @@ export function WorldEditor({
             >
               <Hand size={16} /> Pan
             </button>
-            <button disabled={!item} onClick={() => item && focusObject(item)}>
-              <Focus size={16} /> Selection
-            </button>
+
+            <details className="editor-view-options">
+              <summary>View <ChevronDown size={14} aria-hidden="true" /></summary>
+              <div>
+                <button onClick={() => zoomTo(1)}>Actual size · 100%</button>
+                {hero && <button onClick={() => focusObject({ ...hero, ...(state.player ? { x: state.player.x - hero.width / 2, y: state.player.y - hero.height / 2 } : {}) })}><Focus size={16} /> Character</button>}
+                <button disabled={!item} onClick={() => item && focusObject(item)}><Focus size={16} /> Selection</button>
+              </div>
+            </details>
           </div>
           <div
             ref={viewport}
@@ -1075,7 +1098,7 @@ export function WorldEditor({
             {panMode
               ? "Drag to explore the world, or focus the canvas and use arrow keys. Fit world restores the overview."
               : item
-                ? "Arrows move 10 units; Shift + arrows move 1. F focuses selection. Hold Space to pan; + / − zoom; 0 fits the world."
+                ? "Arrows move · Shift for precision · Space to pan · F to focus"
                 : tool === "move"
                   ? "Select an object to move it, or add a new one."
                   : `${editorTools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
@@ -1090,8 +1113,7 @@ export function WorldEditor({
               <>
                 <div className="editor-selection-heading">
                   <strong>
-                    {editorTools.find((t) => t.kind === item.kind)?.label ??
-                      item.kind}
+                    {item.kind === "player" ? "Character" : editorTools.find((t) => t.kind === item.kind)?.label ?? item.kind}
                   </strong>
                   <button
                     className="icon-button"
@@ -1116,7 +1138,7 @@ export function WorldEditor({
                     </span>
                   </div>
                 )}
-                <label>
+                {!existingSelected && <label>
                   Object role
                   <select
                     aria-label="Selected object role"
@@ -1147,9 +1169,9 @@ export function WorldEditor({
                       </option>
                     ))}
                   </select>
-                </label>
+                </label>}
                 <label>
-                  Give it a name
+                  Name
                   <input
                     aria-label="Object name"
                     value={item.label ?? ""}
@@ -1157,7 +1179,7 @@ export function WorldEditor({
                     onChange={(e) => update({ label: e.target.value })}
                   />
                 </label>
-                {item.kind === "player" && <p className="editor-scope">Start position. Your current run stays where it is.</p>}
+                {item.kind === "player" && <p className="editor-scope">Starting position · current run unchanged</p>}
                 <div className="editor-dimensions">
                   {(["x", "y", "width", "height"] as const).map((key) => (
                     <label key={key}>
@@ -1263,7 +1285,7 @@ export function WorldEditor({
               </div>
             )}
           </section>
-          <section className="editor-summary">
+          {(proposal || additions.length > 0 || expanded || changedCount > 0) && <section className="editor-summary">
             {mode !== "discover" && <ArtworkReview entities={additions} />}
             {proposal && (
               <div className="paper-evidence">
@@ -1285,22 +1307,7 @@ export function WorldEditor({
                 ))}
               </div>
             )}
-            <p className="editor-progress-note">Earned progress is kept.</p>
-            {mode !== "discover" && (
-              <div className="editor-art-action">
-                <button
-                  className="secondary-button"
-                  onClick={() => { selectObject(null); setDrawing(true); }}
-                >
-                  <ImagePlus size={15} /> Draw your own object
-                </button>
-                {customArt && (
-                  <span>
-                    Your drawing is ready for the next object you place.
-                  </span>
-                )}
-              </div>
-            )}
+
             <p className="editor-scope">
               {expanded
                 ? `World extends to ${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()}. `
@@ -1310,50 +1317,9 @@ export function WorldEditor({
                 : ""}
               {changedCount > 0 ? `${changedCount} changed ${changedCount === 1 ? "object" : "objects"}.` : ""}
             </p>
-            {(problem || error) && (
-              <p className="editor-error" role="alert">
-                {error || problem}
-              </p>
-            )}
-            {revisedImage && (
-              <label className="paper-review-confirm">
-                <input
-                  type="checkbox"
-                  checked={reviewed}
-                  onChange={(e) => setReviewed(e.target.checked)}
-                />
-                {mode === "discover"
-                  ? "I checked the regions and their placement in the image."
-                  : "I checked the new objects, their placement, and interactions."}
-              </label>
-            )}
-            <div className="editor-apply-actions">
-              <button
-                className="text-button"
-                disabled={!additions.length}
-                onClick={() => {
-                  setReviewed(false);
-                  setAdditions((items) => items.slice(0, -1));
-                  selectObject(null);
-                  setError("");
-                }}
-              >
-                <Undo2 size={15} /> Remove last
-              </button>
-              <button
-                className="primary-button"
-                disabled={
-                  (!additions.length && !changedCount && !expanded) ||
-                  preparingArtwork ||
-                  Boolean(problem) ||
-                  (Boolean(revisedImage) && !reviewed)
-                }
-                onClick={apply}
-              >
-                Apply changes <ArrowUpRight size={17} />
-              </button>
-            </div>
-          </section>
+
+          </section>}
+        </div>
         </div>
       </Modal>
       {drawing && (

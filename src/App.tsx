@@ -204,6 +204,7 @@ export default function App() {
   const [saved, setSaved] = useState(boot.entries);
   const [saving, setSaving] = useState(false);
   const [libraryError, setLibraryError] = useState("");
+  const [libraryLoading, setLibraryLoading] = useState(true);
   const [connection, setConnection] = useState<Connection | null>(null);
   const [connectionError, setConnectionError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -347,7 +348,8 @@ export default function App() {
           setLibraryError(
             "Saved worlds could not be loaded. Stored data has not been removed.",
           );
-      });
+      })
+      .finally(() => { if (active) setLibraryLoading(false); });
     return () => {
       active = false;
       request.current?.abort();
@@ -850,30 +852,13 @@ export default function App() {
             world.gameplay?.objectiveTitle ||
             "Explore the image"
           : objective.total > objective.done
-            ? objective.hint ||
-              world.gameplay?.objectiveTitle ||
-              "Complete the required actions"
+            ? world.gameplay?.objectiveTitle || "Complete the required actions"
             : destination
               ? `Reach ${objectName(world, destination.id, 70)}`
               : world.gameplay?.objectiveTitle || "Explore your world";
 
-  const draftRequiredCount =
-    (draft?.goalRules?.requiredCollectedIds.length ?? 0) +
-    (draft?.goalRules?.requiredActivatedIds.length ?? 0);
-  const draftOptionalCount =
-    (draft?.entities.filter(
-      (entity) => entity.kind === "coin" || entity.kind === "lever",
-    ).length ?? 0) - draftRequiredCount;
   const reviewActions = draft ? (
     <div className="review-footer">
-      <p
-        className="review-rule-count"
-        aria-label="Completion requirements summary"
-      >
-        {draft.entities.some((entity) => entity.kind === "goal")
-          ? `${draftRequiredCount} required · ${draftOptionalCount} optional · then reach a destination`
-          : "Free exploration · no destination"}
-      </p>
       <div className="review-actions">
         <button className="text-button" onClick={() => setDialog("create")}>
           Back
@@ -941,8 +926,7 @@ export default function App() {
             <span className="creation-image-symbol">
               <ImagePlus size={29} />
             </span>
-            <strong>A drawing or a photograph.</strong>
-            <p>Your image becomes the material for play.</p>
+            <strong>Your drawing or photo</strong>
           </div>
         )}
         <div className="source-actions">
@@ -1101,6 +1085,7 @@ export default function App() {
     </aside>
   );
 
+  if (libraryLoading) return <main className="studio-loading" role="status">Opening your studio…</main>;
   return (
     <div className={`app-shell studio-v2 ${focusedPlay ? "play-focused" : ""}`}>
       <input
@@ -1399,15 +1384,19 @@ export default function App() {
                 </div>
                 <div className="world-progress-counts">
                   {objective.total > 0 && (
-                    <span
+                    <button
                       className="required-progress"
-                      aria-label={`${objective.done} of ${objective.total} required actions complete`}
+                      aria-label={`View requirements: ${objective.done} of ${objective.total} complete`}
+                      onClick={() => {
+                        setEditorState(canvas.current?.snapshot() ?? latestState.current);
+                        setDialog("rules");
+                      }}
                     >
                       <b>
                         {objective.done}/{objective.total}
                       </b>{" "}
-                      required
-                    </span>
+                      required · View
+                    </button>
                   )}
                   {optionalObjects.length > 0 && (
                     <span className="optional-progress">
@@ -1460,15 +1449,12 @@ export default function App() {
                               : `Play ${modeLabel.toLowerCase()}`
                         }
                       >
-                        <Play size={27} fill="currentColor" />
+                        <Play size={20} fill="currentColor" />
+                        {metrics.exploring ? "Continue exploring" : started ? "Resume" : "Play world"}
                       </button>
-
-                      <span className="play-caption">
-                        {started ? `${modeLabel} paused.` : world.name}
-                      </span>
                       <span className="play-subcaption">
                         {metrics.exploring
-                          ? "Achievement kept. Keep exploring or build something new."
+                          ? "Achievement kept."
                           : started
                             ? "Your progress is kept."
                             : world.gameplay?.instructions || world.description}
@@ -1784,11 +1770,7 @@ export default function App() {
       </div>
       {dialog === "create" && (
         <Modal
-          title={
-            hasCreationDraft
-              ? "Continue your creation"
-              : "Create a playable world"
-          }
+          title="Create a world"
           className="creation-modal"
           wide
           footer={
@@ -1939,23 +1921,12 @@ export default function App() {
       )}
       {dialog === "review" && draft && (
         <Modal
-          title="Ready to play"
+          title={draft.name}
           wide
           footer={reviewActions}
           className="world-review-modal"
           onClose={() => setDialog("create")}
         >
-          <div className="world-review-heading">
-            <div>
-              <h3>{draft.name}</h3>
-              <p>{draft.description}</p>
-            </div>
-            <span>
-              {isCreativeAdaptation(draft)
-                ? "Creative adaptation"
-                : `${draft.entities.length} objects`}
-            </span>
-          </div>
           <div className="world-review-pair">
             <button
               ref={reviewSourceInspect}
@@ -2001,10 +1972,7 @@ export default function App() {
               <Sparkles size={18} />
               <div>
                 <strong>Original image · generated gameplay</strong>
-                <p>
-                  Your image is the setting. Gameplay is generated around it,
-                  ready for you to reshape.
-                </p>
+
               </div>
             </section>
           )}
@@ -2230,7 +2198,7 @@ export default function App() {
                   className={`status-dot ${connection?.configured ? "connected" : ""}`}
                 />
                 {connection?.configured
-                  ? `${connection.label} · key configured`
+                  ? "API key configured"
                   : connectionError
                     ? "Local API is unavailable"
                     : "API key not configured"}
