@@ -216,3 +216,24 @@ test("changing destination rules is a reversible revision that keeps earned achi
   );
   assert.deepEqual(world.goalRules, originalRules);
 });
+
+
+test("manual existing-object edits retain identity, art and earned progress, undo, and reject invalid updates atomically", () => {
+  const {world,patch} = setup();
+  const before = structuredClone(world);
+  const coin = world.entities.find(entity => entity.id === "sunseed-one")!;
+  const update = {id: coin.id, x: coin.x + 20, y: coin.y, width: coin.width, height: coin.height, label: "My trail seed"};
+  const changed = applyWorldPatch(world, {...progress,completed:true}, {...patch,additions:[],updates:[update]});
+  const moved = changed.world.entities.find(entity => entity.id === coin.id)!;
+  assert.equal(moved.x,coin.x+20);
+  assert.equal(moved.label,"My trail seed");
+  assert.equal(moved.art,coin.art);
+  assert.equal(moved.kind,coin.kind);
+  assert.deepEqual(changed.state.collected,progress.collected);
+  assert.equal(changed.state.completed,true);
+  assert.deepEqual(undoWorldPatch(changed.world,changed.state,changed.checkpoint).world.entities,world.entities);
+  for(const updates of [[{...update,id:"missing"}],[update,update],[{...update,width:-1}],[{...update,kind:"goal"}]])
+    assert.throws(()=>applyWorldPatch(world,progress,{...patch,additions:[],updates:updates as typeof update[]}));
+  assert.throws(()=>applyWorldPatch(world,progress,{...patch,origin:"meta",additions:[],updates:[update]}),/world editor/);
+  assert.deepEqual(world,before);
+});

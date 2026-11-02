@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useId,
   useState,
 } from "react";
 import Phaser from "phaser";
@@ -18,6 +19,7 @@ import {
   movementMode,
 } from "../../shared/world";
 import "./world-canvas-controls.css";
+import { objectName } from "../lib/object-name";
 import {
   diagnosticsEnabled,
   recordGameCreated,
@@ -51,7 +53,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const host = useRef<HTMLDivElement>(null);
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
-    const [discoveryProgress, setDiscoveryProgress] = useState(props.initial ?? emptyPlayState());
+    const [openingSlow, setOpeningSlow] = useState(false);
+    const canvasInstructions = useId();
+    const [discoveryProgress, setDiscoveryProgress] = useState(
+      props.initial ?? emptyPlayState(),
+    );
     const [selectedDiscovery, setSelectedDiscovery] = useState("");
     const mode = movementMode(props.world);
     const scene = useRef<WorldScene | undefined>(undefined);
@@ -71,8 +77,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     useImperativeHandle(
       ref,
       () => ({
-        selectDiscovery: entityId => scene.current?.selectDiscovery(entityId) ?? false,
-        interactAt: point => scene.current?.interactAt(point) ?? false,
+        selectDiscovery: (entityId) =>
+          scene.current?.selectDiscovery(entityId) ?? false,
+        interactAt: (point) => scene.current?.interactAt(point) ?? false,
         snapshot: () =>
           startupFailed.current
             ? structuredClone(
@@ -101,6 +108,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       let width = 0,
         height = 0;
       let readyTimeout: ReturnType<typeof setTimeout> | undefined;
+      let openingFeedback: ReturnType<typeof setTimeout> | undefined;
       startupFailed.current = false;
       rendered.current = false;
       // Retry retains the failed run. A new world or an explicit Replay supplies
@@ -117,6 +125,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       setSelectedDiscovery("");
       function clearStartupWait() {
         clearTimeout(readyTimeout);
+        clearTimeout(openingFeedback);
         window.removeEventListener("error", startupException);
       }
       function disposeGame() {
@@ -166,12 +175,14 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       }
       setReady(false);
       setFailed(false);
+      setOpeningSlow(false);
       const startedAt = performance.now();
       const current = new WorldScene(props.world, initial, {
         onUpdate: (s, m) => {
           if (active && !startupFailed.current) {
             lastState = s;
-            if (movementMode(callbacks.current.world) === "discover") setDiscoveryProgress(s);
+            if (movementMode(callbacks.current.world) === "discover")
+              setDiscoveryProgress(s);
             callbacks.current.onUpdate(s, m);
           }
         },
@@ -206,6 +217,10 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         // Wait for a real layout before allocating the renderer framebuffer.
         if (!game) {
           window.addEventListener("error", startupException);
+          openingFeedback = setTimeout(() => {
+            if (active && !rendered.current && !startupFailed.current)
+              setOpeningSlow(true);
+          }, 3_000);
           readyTimeout = setTimeout(
             () =>
               failStartup(
@@ -313,7 +328,8 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         }
         try {
           game.scale.resize(width, height);
-          if (sceneReady) current.setViewportWidth(width, callbacks.current.overview);
+          if (sceneReady)
+            current.setViewportWidth(width, callbacks.current.overview);
         } catch {
           failStartup(
             "The game display could not resize. Your source, world and progress are kept. Retry artwork to reopen it.",
@@ -346,55 +362,171 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     }, [props.muted]);
     return (
       <div className="world-canvas-shell">
-      <div
-        ref={host}
-        className="world-canvas"
-        data-ready={ready}
-        aria-busy={!ready && !failed}
-        aria-label={mode === "discover"
-          ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
-          : mode === "roam"
-            ? "Exploration game. Use arrow keys or W A S D to move in any direction. E interacts with nearby objects."
-            : "Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."}
-        role="application"
-        tabIndex={0}
-        onPointerDown={(event) =>
-          event.currentTarget.focus({ preventScroll: true })
-        }
-      >
-        {!ready && !failed && (
-          <span className="world-loading" role="status">
-            Loading your artwork…
-          </span>
-        )}
-      </div>
+        <div
+          ref={host}
+          className="world-canvas"
+          data-ready={ready}
+          aria-busy={!ready && !failed}
+          aria-label={
+            mode === "discover"
+              ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
+              : mode === "roam"
+                ? "Exploration game. Start play, then click or tap to move, or use arrow keys or W A S D. E interacts with nearby objects."
+                : "Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."
+          }
+          role="application"
+          aria-describedby={
+            mode === "discover" ? canvasInstructions : undefined
+          }
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (
+              mode !== "discover" ||
+              event.target !== event.currentTarget ||
+              !ready ||
+              failed
+            )
+              return;
+            const directions: Record<string, [number, number]> = {
+              ArrowLeft: [-60, 0],
+              ArrowRight: [60, 0],
+              ArrowUp: [0, -60],
+              ArrowDown: [0, 60],
+            };
+            const direction = directions[event.key];
+            if (direction) scene.current?.panDiscovery(...direction);
+            else if (event.key === "+" || event.key === "=")
+              scene.current?.zoomDiscovery(1.4);
+            else if (event.key === "-") scene.current?.zoomDiscovery(1 / 1.4);
+            else if (event.key === "0") scene.current?.resetDiscoveryView();
+            else return;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) =>
+            event.currentTarget.focus({ preventScroll: true })
+          }
+        >
+          {mode === "discover" && (
+            <span id={canvasInstructions} className="sr-only">
+              Plus and minus zoom the image, arrow keys pan, and zero fits the
+              image. Keyboard play offers an object selector.
+            </span>
+          )}
+          {failed && (
+            <div className="world-display-paused">
+              <span>Display paused.</span>
+              <small>Your source and world are kept.</small>
+            </div>
+          )}
+          {!ready && !failed && (
+            <span className="world-loading" role="status">
+              <span className="world-loading-copy">
+                <span>Opening your artwork…</span>
+                {openingSlow && (
+                  <small>
+                    Still opening. Your world and progress are kept.
+                  </small>
+                )}
+              </span>
+            </span>
+          )}
+        </div>
         {mode === "discover" && ready && !failed && (
-          <div className="discovery-access" onPointerDown={event => event.stopPropagation()}>
+          <div
+            className="discovery-access"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             <div className="discovery-zoom" aria-label="Image magnification">
-              <button type="button" aria-label="Zoom out" onClick={() => scene.current?.zoomDiscovery(1 / 1.4)}>−</button>
-              <button type="button" onClick={() => scene.current?.resetDiscoveryView()}>Fit image</button>
-              <button type="button" aria-label="Zoom in" onClick={() => scene.current?.zoomDiscovery(1.4)}>+</button>
+              <button
+                type="button"
+                aria-label="Zoom out"
+                onClick={() => scene.current?.zoomDiscovery(1 / 1.4)}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                onClick={() => scene.current?.resetDiscoveryView()}
+              >
+                Fit image
+              </button>
+              <button
+                type="button"
+                aria-label="Zoom in"
+                onClick={() => scene.current?.zoomDiscovery(1.4)}
+              >
+                +
+              </button>
             </div>
             <button
               className="discovery-hint"
-              disabled={!props.playing || (discoveryProgress.completed && !discoveryProgress.exploring)}
+              disabled={
+                !props.playing ||
+                (discoveryProgress.completed && !discoveryProgress.exploring)
+              }
               onClick={() => scene.current?.revealDiscoveryHint()}
-            >Show hint</button>
-            <details className="discovery-keyboard">
+            >
+              Show hint
+            </button>
+            <details
+              className="discovery-keyboard"
+              onToggle={(event) => {
+                if (!event.currentTarget.open) scene.current?.focusDiscovery();
+              }}
+            >
               <summary>Keyboard play</summary>
               <label>
                 Choose an object in the image
-                <select value={selectedDiscovery} onChange={event => setSelectedDiscovery(event.target.value)}>
+                <select
+                  value={selectedDiscovery}
+                  onChange={(event) => {
+                    setSelectedDiscovery(event.target.value);
+                    scene.current?.focusDiscovery(
+                      event.target.value || undefined,
+                    );
+                  }}
+                  onFocus={() =>
+                    scene.current?.focusDiscovery(
+                      selectedDiscovery || undefined,
+                    )
+                  }
+                  onBlur={() => scene.current?.focusDiscovery()}
+                >
                   <option value="">Choose an object…</option>
-                  {props.world.entities.filter(entity => ["coin", "lever", "goal"].includes(entity.kind)).map(entity => (
-                    <option key={entity.id} value={entity.id} disabled={
-                      discoveryProgress.collected.includes(entity.id) || discoveryProgress.activated.includes(entity.id)
-                    }>{entity.label || entity.kind}</option>
-                  ))}
+                  {props.world.entities
+                    .filter((entity) =>
+                      ["coin", "lever", "goal"].includes(entity.kind),
+                    )
+                    .map((entity) => (
+                      <option
+                        key={entity.id}
+                        value={entity.id}
+                        disabled={
+                          discoveryProgress.collected.includes(entity.id) ||
+                          discoveryProgress.activated.includes(entity.id)
+                        }
+                      >
+                        {objectName(props.world, entity.id, 70)}
+                      </option>
+                    ))}
                 </select>
               </label>
-              <button disabled={!props.playing || !selectedDiscovery || (discoveryProgress.completed && !discoveryProgress.exploring)}
-                onClick={() => scene.current?.selectDiscovery(selectedDiscovery)}>Inspect object</button>
+              <button
+                disabled={
+                  !props.playing ||
+                  !selectedDiscovery ||
+                  (discoveryProgress.completed && !discoveryProgress.exploring)
+                }
+                onClick={() => {
+                  if (scene.current?.selectDiscovery(selectedDiscovery)) {
+                    setSelectedDiscovery("");
+                    scene.current?.focusDiscovery();
+                  }
+                }}
+              >
+                Inspect object
+              </button>
             </details>
           </div>
         )}

@@ -82,11 +82,9 @@ export function GoalRules({
             {entity.art && <img src={entity.art} alt="" />}
             <span>
               <strong>{objectiveObjectLabel(world, entity.id)}</strong>
-              <small>
-                {Math.round(entity.x)}, {Math.round(entity.y)}
-                {kind === "lever" && entity.targetId &&
-                  ` → ${objectName(world, entity.targetId, 60)}`}
-              </small>
+              {kind === "lever" && entity.targetId && (
+                <small>Opens {objectName(world, entity.targetId, 60)}</small>
+              )}
             </span>
             {(
               (kind === "coin" ? state?.collected : state?.activated) ?? []
@@ -114,8 +112,7 @@ export function GoalRules({
     <Modal title="Destination rules" onClose={onCancel}>
       <div className="goal-rules">
         <p className="goal-rules-intro">
-          Choose what must happen before a destination completes your game.
-          Unchecked objects stay optional.
+          Choose the required actions. Everything else stays optional.
         </p>
         {!hasGoal && (
           <p className="goal-rules-error" role="status">

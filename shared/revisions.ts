@@ -1,3 +1,4 @@
+import { setupFeedback } from "./setup.js";
 import {
   retainPlayState,
   movementMode,
@@ -9,12 +10,24 @@ import {
   type WorldGameplay,
 } from "./world.js";
 
+/** Manual changes retain identity, roles and original artwork. */
+export interface WorldEntityUpdate {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+  targetId?: string | null;
+}
+
 export interface WorldPatch {
   id: string;
   worldId: string;
   baseRevision: number;
   origin: "manual" | "meta";
   additions: WorldEntity[];
+  updates?: WorldEntityUpdate[];
   sourceImage?: string;
   bounds?: { width: number; height: number };
   goalRules?: GoalRules;
@@ -70,9 +83,28 @@ export function applyWorldPatch(
     !patch.id ||
     !["manual", "meta"].includes(patch.origin) ||
     !Array.isArray(patch.additions) ||
-    (!patch.additions.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined)
+    (!patch.additions.length && !patch.updates?.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined)
   )
     throw new Error("Add something to your world before applying this change.");
+  const changes = new Map<string, WorldEntityUpdate>();
+  if (patch.updates !== undefined) {
+    if (patch.origin !== "manual" || !Array.isArray(patch.updates) || patch.updates.length > world.entities.length)
+      throw new Error("Existing objects can only be changed in the world editor.");
+    const allowed = new Set(["id", "x", "y", "width", "height", "label", "targetId"]);
+    for (const update of patch.updates) {
+      if (!update || typeof update !== "object" || Object.keys(update).some(key => !allowed.has(key)) ||
+          typeof update.id !== "string" || changes.has(update.id))
+        throw new Error("Each object needs one valid change. Reopen the editor.");
+      const original = world.entities.find(entity => entity.id === update.id);
+      if (!original || original.artNote === "Full original image used as the world backdrop; generated gameplay is separate.")
+        throw new Error("The original image and object identities stay with this world.");
+      if (["x", "y", "width", "height"].some(key => !Number.isFinite(update[key as keyof WorldEntityUpdate])))
+        throw new Error("Use valid object dimensions and placement.");
+      if (update.targetId !== undefined && update.targetId !== null && typeof update.targetId !== "string")
+        throw new Error("Choose a valid gate connection.");
+      changes.set(update.id, update);
+    }
+  }
   if (patch.additions.some((e) => e.kind === "player"))
     throw new Error(
       "Your character stays with this world. Add a path or another possibility instead.",
@@ -94,13 +126,20 @@ export function applyWorldPatch(
       : {}),
     ...(patch.gameplay !== undefined ? {gameplay: structuredClone(patch.gameplay)} : {}),
     entities: [
-      ...structuredClone(world.entities).map(entity =>
-        patch.sourceImage && entity.artNote === "Full original image used as the world backdrop; generated gameplay is separate."
-          ? {...entity, art: patch.sourceImage}
-          : entity),
+      ...structuredClone(world.entities).map(entity => {
+        const update = changes.get(entity.id);
+        const changed = update ? { ...entity, ...structuredClone(update),
+          ...(Object.hasOwn(update, "targetId") ? { targetId: update.targetId || undefined } : {}) } : entity;
+        return patch.sourceImage && entity.artNote === "Full original image used as the world backdrop; generated gameplay is separate."
+          ? { ...changed, art: patch.sourceImage } : changed;
+      }),
       ...structuredClone(patch.additions),
     ],
   });
+  if (changes.size) {
+    const issue = setupFeedback(next).errors[0];
+    if (issue) throw new Error(issue);
+  }
   const progress = retainPlayState(next, structuredClone(state));
   safePlayerPosition(next, progress);
   return {

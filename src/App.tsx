@@ -12,7 +12,6 @@ import {
   FolderHeart,
   Flag,
   ImagePlus,
-  Layers3,
   LoaderCircle,
   Maximize2,
   Map,
@@ -24,7 +23,6 @@ import {
   RotateCcw,
   Settings2,
   Sparkles,
-  Sprout,
   Smartphone,
   Crop,
   Undo2,
@@ -70,6 +68,12 @@ import {
   type RevisionCheckpoint,
 } from "../shared/revisions";
 import { EXAMPLES, freshExample } from "./lib/examples";
+import {
+  rememberedWorldId,
+  rememberWorld,
+  returningWorld,
+} from "./lib/session-world";
+import { objectName } from "./lib/object-name";
 import {
   emptyPlayState,
   goalProgress,
@@ -152,13 +156,24 @@ const initialMetrics: WorldTelemetry = {
 };
 
 export default function App() {
-  const [world, setWorld] = useState(() => freshExample(EXAMPLES[0].id));
-  const [initial, setInitial] = useState<PlayState>(emptyPlayState);
+  const [boot] = useState(() => {
+    const entries = savedWorlds();
+    return { entries, returning: returningWorld(entries, rememberedWorldId()) };
+  });
+  const [world, setWorld] = useState(
+    () => boot.returning?.world ?? freshExample(EXAMPLES[0].id),
+  );
+  const [initial, setInitial] = useState<PlayState>(
+    () => boot.returning?.state ?? emptyPlayState(),
+  );
   const [source, setSource] = useState("");
   const [sourceName, setSourceName] = useState("Your drawing");
   const [customSource, setCustomSource] = useState(false);
   const [inputKind, setInputKind] = useState<InputKind>("drawing");
   const [intent, setIntent] = useState("");
+  const [creationStyle, setCreationStyle] = useState<
+    "auto" | "platform" | "roam" | "discover"
+  >("auto");
   const [draftIntent, setDraftIntent] = useState("");
   const [sketchDraft, setSketchDraft] = useState<string | undefined>();
   const [sourceContext, setSourceContext] = useState<
@@ -168,12 +183,25 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [focusedPlay, setFocusedPlay] = useState(false);
   const [mapView, setMapView] = useState(false);
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(Boolean(boot.returning));
   const [muted, setMuted] = useState(true);
   const [run, setRun] = useState(0);
-  const [metrics, setMetrics] = useState(initialMetrics);
+  const [metrics, setMetrics] = useState(() =>
+    boot.returning
+      ? {
+          ...initialMetrics,
+          collected: boot.returning.state.collected.length,
+          total: boot.returning.world.entities.filter(
+            (entity) => entity.kind === "coin",
+          ).length,
+          completed: boot.returning.state.completed,
+          exploring: Boolean(boot.returning.state.exploring),
+          ...objectiveTelemetry(boot.returning.world, boot.returning.state),
+        }
+      : initialMetrics,
+  );
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [saved, setSaved] = useState(savedWorlds);
+  const [saved, setSaved] = useState(boot.entries);
   const [saving, setSaving] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -195,7 +223,10 @@ export default function App() {
   const [paperIntent, setPaperIntent] = useState("");
   const [pendingPhoto, setPendingPhoto] = useState<string | undefined>();
   const [pendingPhotoName, setPendingPhotoName] = useState("Your drawing");
-  const [history, setHistory] = useState<RevisionCheckpoint[]>([]);
+  const [history, setHistory] = useState<RevisionCheckpoint[]>(
+    boot.returning?.history ?? [],
+  );
+  const allowStartupRestore = useRef(true);
   const worldNow = useRef(world);
   worldNow.current = world;
   const canvas = useRef<WorldCanvasHandle>(null);
@@ -205,7 +236,20 @@ export default function App() {
   const reviewSourceInspect = useRef<HTMLButtonElement>(null);
   const draftRulesAnchor = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
-  const latestState = useRef<PlayState>(emptyPlayState());
+  const recoveryAction = useRef<HTMLButtonElement>(null);
+  const directionPresses = useRef(
+    new globalThis.Map<
+      string,
+      {
+        started: number;
+        released: boolean;
+        timer?: ReturnType<typeof setTimeout>;
+      }
+    >(),
+  );
+  const latestState = useRef<PlayState>(
+    boot.returning?.state ?? emptyPlayState(),
+  );
   const request = useRef<AbortController | null>(null);
   const sourceVersion = useRef(0);
   const previousPlaying = useRef(false);
@@ -226,6 +270,7 @@ export default function App() {
       sketchDraft,
   );
   function openCreation(entry: "create" | "sketch" | "upload" = "create") {
+    allowStartupRestore.current = false;
     setFocusedPlay(false);
     setDialog(entry === "sketch" ? "sketch" : "create");
     if (entry === "upload") file.current?.click();
@@ -254,6 +299,7 @@ export default function App() {
     setSourceName("Your drawing");
     setInputKind("drawing");
     setIntent("");
+    setCreationStyle("auto");
     setDraftIntent("");
     setCustomSource(false);
     setSketchDraft(undefined);
@@ -284,7 +330,17 @@ export default function App() {
     let active = true;
     void updateLibrary(savedWorlds())
       .then((entries) => {
-        if (active) setSaved(entries);
+        if (!active) return;
+        setSaved(entries);
+        if (allowStartupRestore.current) {
+          allowStartupRestore.current = false;
+          const returning = returningWorld(entries, rememberedWorldId());
+          if (returning) {
+            loadWorld(returning.world, returning.state, returning.history);
+            setStarted(true);
+            rememberWorld(returning.world);
+          }
+        }
       })
       .catch(() => {
         if (active)
@@ -352,6 +408,8 @@ export default function App() {
     state = emptyPlayState(),
     checkpoints: RevisionCheckpoint[] = [],
   ) {
+    allowStartupRestore.current = false;
+    if (saved.some((entry) => entry.world.id === next.id)) rememberWorld(next);
     sourceVersion.current++;
     if (request.current) recordRecognitionReturned("cancelled");
     request.current?.abort();
@@ -395,6 +453,7 @@ export default function App() {
     else start();
   }
   function openEditor() {
+    allowStartupRestore.current = false;
     setPaperIntent("");
     setPaperProposal(undefined);
     setRevisedPage(undefined);
@@ -403,6 +462,7 @@ export default function App() {
     setDialog("editor");
   }
   function openPaper() {
+    allowStartupRestore.current = false;
     setPaperIntent("");
     setEditorState(editableState());
     setPaperProposal(undefined);
@@ -443,16 +503,14 @@ export default function App() {
     setHistory((items) => [...items, result.checkpoint].slice(-12));
     keepRevision(result.world, result.state);
     if (patch.goalRules) {
-      tell("Destination rules updated. Your progress is kept.");
+      tell("Destination rules updated.");
       return;
     }
     if (patch.bounds) {
-      tell("World expanded. Your progress is kept.");
+      tell("World expanded.");
       return;
     }
-    tell(
-      `${patch.additions.length === 1 ? "A new possibility" : `${patch.additions.length} new possibilities`}. Same world. Your progress stayed with you.`,
-    );
+    tell("World updated.");
   }
   function undoEdit() {
     const checkpoint = history.at(-1);
@@ -493,14 +551,17 @@ export default function App() {
   }
   function start() {
     if (worldError) return;
+    allowStartupRestore.current = false;
     setStarted(true);
     setPlaying(true);
-    framePlaySurface(focusedPlay);
+    setFocusedPlay(true);
+    requestAnimationFrame(() => framePlaySurface(true));
     stage.current
       ?.querySelector<HTMLElement>(".world-canvas")
       ?.focus({ preventScroll: true });
   }
   function restart() {
+    allowStartupRestore.current = false;
     setWorldError("");
     setInitial(emptyPlayState());
     latestState.current = emptyPlayState();
@@ -511,10 +572,11 @@ export default function App() {
     setRun((n) => n + 1);
     setStarted(true);
     setPlaying(true);
-    tell("A fresh start. Same world.");
+    tell("Replay started.");
   }
   async function save() {
     if (saving) return;
+    allowStartupRestore.current = false;
     const entry: SavedWorld = {
       world,
       state: canvas.current?.snapshot() ?? latestState.current,
@@ -526,7 +588,8 @@ export default function App() {
     try {
       const next = await updateLibrary(saved, entry);
       setSaved(next);
-      tell("World saved on this device. Your progress is coming too.");
+      rememberWorld(world);
+      tell("World saved.");
     } catch {
       setError(
         "This browser could not save the world. Your open world and earlier saves are unchanged.",
@@ -574,9 +637,7 @@ export default function App() {
     setError("");
     setDialog("create");
     previousPlaying.current = false;
-    tell(
-      "Your image is ready. Tell us what should happen in it, or choose the objects yourself.",
-    );
+    tell("Image ready.");
   }
   async function bringAlive() {
     setError("");
@@ -590,7 +651,11 @@ export default function App() {
       return;
     }
     const controller = new AbortController();
-    const requestedIntent = intent;
+    const requestedIntent = creationIntent();
+    if (requestedIntent.length > 500) {
+      setError("Shorten your idea to leave room for the selected game style.");
+      return;
+    }
     setSetupEdits(null);
     request.current = controller;
     setBusy(true);
@@ -676,6 +741,122 @@ export default function App() {
     value: boolean,
   ) => canvas.current?.touch(key, value);
 
+  function cancelDirectionPresses() {
+    for (const [key, press] of directionPresses.current) {
+      clearTimeout(press.timer);
+      canvas.current?.touch(key as "left" | "right" | "up" | "down", false);
+    }
+    directionPresses.current.clear();
+  }
+  function beginControl(
+    key: "left" | "right" | "up" | "down" | "jump" | "interact",
+  ) {
+    if (mode !== "roam" || !["left", "right", "up", "down"].includes(key)) {
+      touch(key, true);
+      return;
+    }
+    const previous = directionPresses.current.get(key);
+    // Native key repeat must not keep moving the minimum-release deadline.
+    if (previous && !previous.released) return;
+    clearTimeout(previous?.timer);
+    directionPresses.current.set(key, {
+      started: performance.now(),
+      released: false,
+    });
+    touch(key, true);
+  }
+  function endControl(
+    key: "left" | "right" | "up" | "down" | "jump" | "interact",
+    cancel = false,
+    captureLost = false,
+  ) {
+    const press = directionPresses.current.get(key);
+    if (!press) {
+      touch(key, false);
+      return;
+    }
+    // Pointerup normally releases capture as well. It must not erase the pulse.
+    if (captureLost && press.released) return;
+    clearTimeout(press.timer);
+    const remaining = cancel
+      ? 0
+      : Math.max(0, 90 - (performance.now() - press.started));
+    press.released = true;
+    if (remaining > 0) {
+      press.timer = setTimeout(() => {
+        if (directionPresses.current.get(key) !== press) return;
+        touch(key, false);
+        directionPresses.current.delete(key);
+      }, remaining);
+    } else {
+      touch(key, false);
+      directionPresses.current.delete(key);
+    }
+  }
+  useEffect(() => () => cancelDirectionPresses(), []);
+  useEffect(() => {
+    cancelDirectionPresses();
+  }, [world.id, run]);
+  useEffect(() => {
+    if (
+      !playing ||
+      dialog ||
+      busy ||
+      worldError ||
+      (metrics.completed && !metrics.exploring)
+    )
+      cancelDirectionPresses();
+  }, [playing, dialog, busy, worldError, metrics.completed, metrics.exploring]);
+  useEffect(() => {
+    const cancel = () => cancelDirectionPresses();
+    window.addEventListener("blur", cancel);
+    return () => window.removeEventListener("blur", cancel);
+  }, []);
+
+  function creationIntent() {
+    const prefix =
+      creationStyle === "platform"
+        ? "Make an Adventure: a platform game with a character, jumping and meaningful paths. "
+        : creationStyle === "roam"
+          ? "Make an Explore game: a character moves freely in all directions through this scene. "
+          : creationStyle === "discover"
+            ? "Make a Discover game: interactive clues in the original image, without a separate avatar. "
+            : "";
+    return prefix + intent.trim();
+  }
+  const objective = goalProgress(world, latestState.current);
+  const optionalObjects = world.entities.filter((entity) =>
+    entity.kind === "coin"
+      ? !world.goalRules?.requiredCollectedIds.includes(entity.id)
+      : entity.kind === "lever"
+        ? !world.goalRules?.requiredActivatedIds.includes(entity.id)
+        : false,
+  );
+  const optionalDone = optionalObjects.filter((entity) =>
+    (entity.kind === "coin"
+      ? latestState.current.collected
+      : latestState.current.activated
+    ).includes(entity.id),
+  ).length;
+  const destination = world.entities.find((entity) => entity.kind === "goal");
+  const missionText =
+    metrics.completed && !metrics.exploring
+      ? "Achievement earned"
+      : metrics.exploring
+        ? "Explore freely or keep creating"
+        : mode === "discover" && started
+          ? metrics.interactionHint ||
+            metrics.goalHint ||
+            world.gameplay?.objectiveTitle ||
+            "Explore the image"
+          : objective.total > objective.done
+            ? objective.hint ||
+              world.gameplay?.objectiveTitle ||
+              "Complete the required actions"
+            : destination
+              ? `Reach ${objectName(world, destination.id, 70)}`
+              : world.gameplay?.objectiveTitle || "Explore your world";
+
   const draftRequiredCount =
     (draft?.goalRules?.requiredCollectedIds.length ?? 0) +
     (draft?.goalRules?.requiredActivatedIds.length ?? 0);
@@ -729,41 +910,7 @@ export default function App() {
     <aside className="paper-panel" aria-label="Your image and game idea">
       <div className="creation-source-column">
         <div className="panel-heading">
-          <h2>
-            <span className="creation-step-number">01</span> Start with an image
-          </h2>
-        </div>
-        <div
-          className="source-kind"
-          role="group"
-          aria-label="Source image type"
-        >
-          <button
-            aria-pressed={inputKind === "drawing"}
-            disabled={busy}
-            onClick={() => {
-              if (inputKind === "drawing") return;
-              setInputKind("drawing");
-              setDraft(null);
-              setRecognitionReview(null);
-              setSetupEdits(null);
-            }}
-          >
-            Drawing
-          </button>
-          <button
-            aria-pressed={inputKind === "picture"}
-            disabled={busy}
-            onClick={() => {
-              if (inputKind === "picture") return;
-              setInputKind("picture");
-              setDraft(null);
-              setRecognitionReview(null);
-              setSetupEdits(null);
-            }}
-          >
-            Photo or image
-          </button>
+          <h2>Start with an image</h2>
         </div>
         {source ? (
           <button
@@ -794,8 +941,8 @@ export default function App() {
             <span className="creation-image-symbol">
               <ImagePlus size={29} />
             </span>
-            <strong>Your image starts it.</strong>
-            <p>A sketch, a photograph, an illustration. Make it yours.</p>
+            <strong>A drawing or a photograph.</strong>
+            <p>Your image becomes the material for play.</p>
           </div>
         )}
         <div className="source-actions">
@@ -839,27 +986,65 @@ export default function App() {
             </button>
           )}
         </div>
+        <label className="source-kind source-kind-field">
+          <span>Image type</span>
+          <select
+            aria-label="Source image type"
+            value={inputKind}
+            disabled={busy}
+            onChange={(event) => {
+              const next = event.target.value as InputKind;
+              if (next === inputKind) return;
+              setInputKind(next);
+              setDraft(null);
+              setRecognitionReview(null);
+              setSetupEdits(null);
+            }}
+          >
+            <option value="drawing">Drawing</option>
+            <option value="picture">Photo or image</option>
+          </select>
+        </label>
       </div>
       <div className="creation-intent-column">
         <div className="panel-heading">
-          <h2>
-            <span className="creation-step-number">02</span> Shape the
-            experience
-          </h2>
+          <h2>Shape the game</h2>
         </div>
+        <fieldset className="creation-modes" disabled={busy}>
+          <legend>AI game style</legend>
+          <div>
+            {(
+              [
+                ["auto", "Auto"],
+                ["platform", "Adventure"],
+                ["roam", "Explore"],
+                ["discover", "Discover"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={creationStyle === value}
+                onClick={() => setCreationStyle(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         <label className="intent-label" htmlFor="world-intent">
-          What do you imagine?
+          Your idea
         </label>
         <p className="creation-intent-caption">
-          Optional · Give it a mood, a goal or a challenge.
+          Optional · A goal, a mood, a moment to discover.
         </p>
         <div className="intent-box">
           <textarea
             id="world-intent"
             value={intent}
-            maxLength={500}
+            maxLength={400}
             onChange={(e) => setIntent(e.target.value)}
-            placeholder="Explore this scene, discover hidden lights, or take a character on a new journey…"
+            placeholder="What would make this image interesting to play?"
             disabled={busy}
           />
           <Sparkles size={15} aria-hidden="true" />
@@ -884,23 +1069,18 @@ export default function App() {
             Review current result
           </button>
         )}
-        <button
-          className="connection-note"
-          onClick={() => {
-            setSettingsReturn("create");
-            setDialog("settings");
-          }}
-        >
-          <span
-            className={`status-dot ${connection?.configured ? "connected" : ""}`}
-          />
-          {connection?.configured
-            ? `${connection.label} · key configured`
-            : connectionError
-              ? "Connection unavailable"
-              : "Configure model access"}
-          <ChevronRight size={13} />
-        </button>
+        {!connection?.configured && (
+          <button
+            className="text-button creation-connection-action"
+            onClick={() => {
+              setSettingsReturn("create");
+              setDialog("settings");
+            }}
+          >
+            {connectionError ? "Check AI connection" : "Set up AI connection"}
+            <ChevronRight size={13} />
+          </button>
+        )}
         {customSource && (
           <button
             className="secondary-button setup-source-button"
@@ -1047,7 +1227,7 @@ export default function App() {
                 <ImagePlus size={16} /> Update image
               </button>
               <button
-                className="primary-button"
+                className="secondary-button"
                 onClick={openEditor}
                 disabled={busy}
               >
@@ -1084,9 +1264,10 @@ export default function App() {
                     aria-label="World name"
                     value={world.name}
                     maxLength={80}
-                    onChange={(e) =>
-                      setWorld((w) => ({ ...w, name: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      allowStartupRestore.current = false;
+                      setWorld((w) => ({ ...w, name: e.target.value }));
+                    }}
                     onBlur={() => {
                       if (!world.name.trim())
                         setWorld((w) => ({
@@ -1164,10 +1345,9 @@ export default function App() {
                 </button>
               </div>
             </div>
-            {world.revision > 1 && (
+            {world.revision > 1 && history.length > 0 && (
               <div className="revision-strip" role="status">
-                <Check size={12} /> Version {world.revision} · Same world,
-                progress kept{" "}
+                <Check size={12} /> Version {world.revision}{" "}
                 <span>
                   {history.length} {history.length === 1 ? "edit" : "edits"} you
                   can undo
@@ -1178,6 +1358,7 @@ export default function App() {
               <div className="world-error" role="alert">
                 <p>{worldError}</p>
                 <button
+                  ref={recoveryAction}
                   className="secondary-button"
                   onClick={() => {
                     setWorldError("");
@@ -1196,54 +1377,58 @@ export default function App() {
               </div>
             )}
             <div
-              className={`game-stage ${mode === "discover" ? "discovery-stage" : ""}`}
+              className={`game-stage ${mode === "discover" ? "discovery-stage" : mode === "roam" ? "roam-stage" : ""}`}
               ref={stage}
             >
-              {mode === "discover" && (
-                <div className="discovery-clue-row">
-                  <div>
-                    <span>
-                      {metrics.completed && !metrics.exploring
-                        ? "DISCOVERY COMPLETE"
-                        : metrics.exploring
-                          ? "EXPLORING"
-                          : started
-                            ? "CURRENT CLUE"
-                            : "DISCOVERY"}
-                    </span>
-                    <strong aria-live="polite">
-                      {metrics.completed && !metrics.exploring
-                        ? "Every required discovery complete."
-                        : metrics.exploring
-                          ? "Explore freely · achievement kept"
-                          : started
-                            ? metrics.interactionHint ||
-                              metrics.goalHint ||
-                              world.gameplay?.objectiveTitle ||
-                              "Explore the image"
-                            : world.gameplay?.objectiveTitle ||
-                              "Explore the image"}
-                    </strong>
-                  </div>
-                  {metrics.total > 0 && (
+              <div className="world-progress-row">
+                <div className="world-mission">
+                  <span>
+                    {metrics.completed && !metrics.exploring
+                      ? "COMPLETE"
+                      : metrics.exploring
+                        ? "EXPLORING"
+                        : mode === "discover" && started
+                          ? "CURRENT CLUE"
+                          : objective.total
+                            ? "REQUIRED"
+                            : destination
+                              ? "DESTINATION"
+                              : "EXPLORE"}
+                  </span>
+                  <strong aria-live="polite">{missionText}</strong>
+                </div>
+                <div className="world-progress-counts">
+                  {objective.total > 0 && (
                     <span
-                      className="discovery-found-count"
-                      aria-label={`${metrics.collected} of ${metrics.total} discoveries found`}
+                      className="required-progress"
+                      aria-label={`${objective.done} of ${objective.total} required actions complete`}
                     >
                       <b>
-                        {metrics.collected}/{metrics.total}
+                        {objective.done}/{objective.total}
                       </b>{" "}
-                      found
+                      required
+                    </span>
+                  )}
+                  {optionalObjects.length > 0 && (
+                    <span className="optional-progress">
+                      {optionalDone}/{optionalObjects.length} optional
                     </span>
                   )}
                 </div>
-              )}
+              </div>
               <div className="game-surface">
                 <WorldCanvas
                   ref={canvas}
                   onError={(message) => {
+                    const hadGameFocus = stage.current?.contains(
+                      document.activeElement,
+                    );
                     setWorldError(message);
                     setPlaying(false);
+                    if (hadGameFocus)
+                      requestAnimationFrame(() =>
+                        recoveryAction.current?.focus({ preventScroll: true }),
+                      );
                   }}
                   world={world}
                   overview={mapView}
@@ -1257,24 +1442,6 @@ export default function App() {
                   }}
                   onMoment={tell}
                 />
-                {mode !== "discover" && metrics.total > 0 && (
-                  <div className="game-top">
-                    <span
-                      className="seed-counter"
-                      aria-label={`${metrics.collected} of ${metrics.total} collectibles found`}
-                    >
-                      <img
-                        src={
-                          world.entities.find((e) => e.kind === "coin")?.art ??
-                          "/art/seed.svg"
-                        }
-                        alt=""
-                      />
-                      <b>{metrics.collected}</b>
-                      <span>/ {metrics.total}</span>
-                    </span>
-                  </div>
-                )}
                 {!playing &&
                   !worldError &&
                   (!metrics.completed || metrics.exploring) &&
@@ -1316,20 +1483,18 @@ export default function App() {
                     <span className="eyebrow">
                       {modeLabel.toUpperCase()} COMPLETE
                     </span>
-                    <h2>{world.name}</h2>
+                    <h2>World complete</h2>
                     <p>
-                      {metrics.requiredTotal > 0
-                        ? `${metrics.requiredTotal} required ${metrics.requiredTotal === 1 ? "action" : "actions"} complete`
-                        : metrics.total > 0
-                          ? `${metrics.collected} / ${metrics.total} optional discoveries found`
-                          : "A world made yours."}
+                      {objective.ready
+                        ? "Required actions complete."
+                        : "Achievement from an earlier version retained."}
                     </p>
                     <div>
                       <button
                         className="primary-button"
                         onClick={() => continueWorld(true)}
                       >
-                        Continue building <Pencil size={16} />
+                        Continue creating <Pencil size={16} />
                       </button>
                       <button
                         className="secondary-button"
@@ -1340,14 +1505,6 @@ export default function App() {
                       <button className="text-button" onClick={restart}>
                         Replay from start <RotateCcw size={16} />
                       </button>
-                      <button
-                        className="text-button"
-                        onClick={() => void save()}
-                        disabled={saving}
-                        aria-busy={saving}
-                      >
-                        <FolderHeart size={17} /> Save world
-                      </button>
                     </div>
                   </div>
                 )}
@@ -1355,7 +1512,7 @@ export default function App() {
                   <div className="reading-overlay">
                     <LoaderCircle size={30} className="spin" />
                     <h3>Creating your world.</h3>
-                    <p>Your current adventure is kept.</p>
+                    <p>Your current world stays open.</p>
                     <button
                       className="text-button"
                       onClick={cancelInterpretation}
@@ -1364,66 +1521,32 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {mode !== "discover" &&
-                  playing &&
-                  (!metrics.completed || metrics.exploring) && (
-                    <div className="quest-hud">
-                      <span>
-                        {metrics.exploring
-                          ? "EXPLORING"
-                          : metrics.requiredTotal > 0
-                            ? "REQUIRED"
-                            : "SUGGESTED"}
-                      </span>
-                      <strong>
-                        {metrics.exploring
-                          ? "Explore · achievement kept"
-                          : world.gameplay
-                            ? `${metrics.requiredTotal > 0 ? `${metrics.requiredDone}/${metrics.requiredTotal} · ` : ""}${world.gameplay.objectiveTitle}`
-                            : metrics.requiredTotal > 0
-                              ? `${metrics.requiredDone}/${metrics.requiredTotal} required · ${metrics.goalHint}`
-                              : metrics.collected < metrics.total
-                                ? `Optional items · ${metrics.total - metrics.collected} left`
-                                : world.entities.some(
-                                      (e) =>
-                                        e.kind === "lever" &&
-                                        !latestState.current.activated.includes(
-                                          e.id,
-                                        ),
-                                    )
-                                  ? "Use the switch · E"
-                                  : world.entities.find(
-                                        (e) => e.kind === "goal",
-                                      )?.label
-                                    ? `Reach ${world.entities.find((e) => e.kind === "goal")!.label}`
-                                    : "Explore your world"}
-                      </strong>
-                    </div>
-                  )}
               </div>
             </div>
             <div className="game-toolbar">
               <div className="play-controls">
-                <button
-                  className="icon-button play-control"
-                  aria-label={
-                    playing
-                      ? `Pause ${modeLabel.toLowerCase()}`
-                      : `Resume ${modeLabel.toLowerCase()}`
-                  }
-                  disabled={
-                    (metrics.completed && !metrics.exploring) ||
-                    busy ||
-                    Boolean(worldError)
-                  }
-                  onClick={() => (playing ? setPlaying(false) : start())}
-                >
-                  {playing ? (
-                    <Pause size={17} fill="currentColor" />
-                  ) : (
-                    <Play size={17} fill="currentColor" />
-                  )}
-                </button>
+                {playing && (
+                  <button
+                    className="icon-button play-control"
+                    aria-label={
+                      playing
+                        ? `Pause ${modeLabel.toLowerCase()}`
+                        : `Resume ${modeLabel.toLowerCase()}`
+                    }
+                    disabled={
+                      (metrics.completed && !metrics.exploring) ||
+                      busy ||
+                      Boolean(worldError)
+                    }
+                    onClick={() => (playing ? setPlaying(false) : start())}
+                  >
+                    {playing ? (
+                      <Pause size={17} fill="currentColor" />
+                    ) : (
+                      <Play size={17} fill="currentColor" />
+                    )}
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   aria-label={`Restart ${modeLabel.toLowerCase()}`}
@@ -1442,33 +1565,6 @@ export default function App() {
                   {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
               </div>
-              <div className="keyboard-guide">
-                {mode === "discover" ? (
-                  <span>
-                    <kbd>Tab</kbd> select <kbd>Enter</kbd> discover
-                  </span>
-                ) : mode === "roam" ? (
-                  <span>
-                    <kbd>W A S D</kbd> or arrows · move
-                  </span>
-                ) : (
-                  <>
-                    <span>
-                      <kbd>←</kbd>
-                      <kbd>→</kbd> move
-                    </span>
-                    <span>
-                      <kbd>space</kbd> jump
-                    </span>
-                  </>
-                )}
-                {mode !== "discover" &&
-                  world.entities.some((entity) => entity.kind === "lever") && (
-                    <span>
-                      <kbd>E</kbd> interact
-                    </span>
-                  )}
-              </div>
               {mode !== "discover" && (
                 <button
                   className="focus-play-button map-view-button"
@@ -1482,6 +1578,7 @@ export default function App() {
               )}
               <button
                 className="focus-play-button"
+                aria-label={focusedPlay ? "Back to studio" : "Focus on play"}
                 aria-pressed={focusedPlay}
                 onClick={() => {
                   setFocusedPlay(!focusedPlay);
@@ -1498,7 +1595,15 @@ export default function App() {
                 ) : (
                   <Maximize2 size={15} />
                 )}
-                {focusedPlay ? "Back to studio" : "Focus on play"}
+                <span>{focusedPlay ? "Back to studio" : "Focus on play"}</span>
+              </button>
+              <button
+                className="icon-button play-help-button"
+                aria-label="Controls and help"
+                title="Controls and help"
+                onClick={() => setDialog("help")}
+              >
+                <CircleHelp size={18} />
               </button>
               <button
                 className="icon-button"
@@ -1511,8 +1616,20 @@ export default function App() {
             {mode !== "discover" && (
               <div
                 className={`touch-controls ${mode === "roam" ? "roam-touch-controls" : ""}`}
-                aria-label="Touch game controls"
+                aria-label={
+                  mode === "roam"
+                    ? "Exploration movement controls"
+                    : "Game movement controls"
+                }
               >
+                {mode === "roam" && (
+                  <span className="roam-pointer-guide" id="roam-pointer-guide">
+                    {playing
+                      ? "Click or tap to move."
+                      : "Play, then click or tap to move."}
+                    <small>Or hold a direction.</small>
+                  </span>
+                )}
                 {(mode === "roam"
                   ? ([
                       ["left", ArrowLeft, "Move left"],
@@ -1537,6 +1654,14 @@ export default function App() {
                     <button
                       key={key}
                       data-control={key}
+                      disabled={
+                        busy ||
+                        Boolean(worldError) ||
+                        (metrics.completed && !metrics.exploring)
+                      }
+                      aria-describedby={
+                        mode === "roam" ? "roam-pointer-guide" : undefined
+                      }
                       aria-label={
                         key === "interact"
                           ? metrics.interactionHint || "Use nearby switch"
@@ -1549,12 +1674,29 @@ export default function App() {
                       }
                       onPointerDown={(e) => {
                         e.currentTarget.setPointerCapture(e.pointerId);
-                        if (!started) start();
-                        touch(key, true);
+                        if (!playing) start();
+                        beginControl(key);
                       }}
-                      onPointerUp={() => touch(key, false)}
-                      onPointerCancel={() => touch(key, false)}
-                      onLostPointerCapture={() => touch(key, false)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!playing) {
+                          setStarted(true);
+                          setPlaying(true);
+                        }
+                        beginControl(key);
+                      }}
+                      onKeyUp={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        endControl(key);
+                      }}
+                      onBlur={() => endControl(key, true)}
+                      onPointerUp={() => endControl(key)}
+                      onPointerCancel={() => endControl(key, true)}
+                      onLostPointerCapture={() => endControl(key, true, true)}
                     >
                       <Icon size={20} />
                       {key === "interact" && <span>Use</span>}
@@ -1652,7 +1794,6 @@ export default function App() {
           footer={
             <div className="creation-footer">
               <div>
-                <span>Current game stays open.</span>
                 {hasCreationDraft && !busy && (
                   <button
                     className="text-button"
@@ -1673,11 +1814,12 @@ export default function App() {
               ) : (
                 <button
                   className="primary-button"
-                  disabled={!customSource || !source}
+                  disabled={
+                    !customSource || !source || creationIntent().length > 500
+                  }
                   onClick={bringAlive}
                 >
-                  <WandSparkles size={18} /> Create world{" "}
-                  <ArrowUpRight size={17} />
+                  <WandSparkles size={18} /> Create world
                 </button>
               )}
             </div>
@@ -1797,7 +1939,7 @@ export default function App() {
       )}
       {dialog === "review" && draft && (
         <Modal
-          title="Review your world"
+          title="Ready to play"
           wide
           footer={reviewActions}
           className="world-review-modal"
@@ -1858,7 +2000,7 @@ export default function App() {
             >
               <Sparkles size={18} />
               <div>
-                <strong>Your image, reimagined for play.</strong>
+                <strong>Original image · generated gameplay</strong>
                 <p>
                   Your image is the setting. Gameplay is generated around it,
                   ready for you to reshape.
@@ -1881,7 +2023,7 @@ export default function App() {
           ))}
           {draftIntent && (
             <p className="review-intent">
-              <strong>Your play idea</strong> {draftIntent}
+              <strong>Your idea</strong> {draftIntent}
             </p>
           )}
           <div ref={draftRulesAnchor}>
@@ -2127,64 +2269,95 @@ export default function App() {
         </Modal>
       )}
       {dialog === "help" && (
-        <Modal title="How to play" onClose={() => setDialog(null)}>
-          <div className="help-lead">
-            <Sprout size={30} />
-            <p>
-              Doodlume turns a page into a place you can explore. The studio
-              gives you a canvas, playable examples, and a way to keep adding to
-              the same world.
+        <Modal title={`${modeLabel} controls`} onClose={() => setDialog(null)}>
+          {world.gameplay?.objectiveTitle && (
+            <p className="mode-help-objective">
+              {world.gameplay.objectiveTitle}
             </p>
-          </div>
-          <div className="help-steps">
+          )}
+          <dl className="mode-control-guide">
+            {mode === "discover" ? (
+              <>
+                <div>
+                  <dt>Find</dt>
+                  <dd>
+                    Read the current clue, then click or tap the detail in your
+                    image.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Inspect</dt>
+                  <dd>
+                    Zoom in and drag to pan. With the image focused, + / − zoom,
+                    arrow keys pan, and 0 fits the image.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Keyboard</dt>
+                  <dd>
+                    Open Keyboard play, choose an object, then Inspect object.
+                    Show hint highlights the current clue.
+                  </dd>
+                </div>
+              </>
+            ) : mode === "roam" ? (
+              <>
+                <div>
+                  <dt>Move</dt>
+                  <dd>
+                    Click or tap an open area. Or hold WASD, arrow keys, or a
+                    direction button.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Take control</dt>
+                  <dd>
+                    A direction key or button takes over from the pointer
+                    destination.
+                  </dd>
+                </div>
+                {world.entities.some((entity) => entity.kind === "lever") && (
+                  <div>
+                    <dt>Interact</dt>
+                    <dd>Press E or Use near an interactive object.</dd>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div>
+                  <dt>Move</dt>
+                  <dd>← → or A / D. On phones, hold a direction button.</dd>
+                </div>
+                <div>
+                  <dt>Jump</dt>
+                  <dd>Space, ↑ or W. On phones, use the jump button.</dd>
+                </div>
+                {world.entities.some((entity) => entity.kind === "lever") && (
+                  <div>
+                    <dt>Interact</dt>
+                    <dd>Press E or Use near a switch.</dd>
+                  </div>
+                )}
+              </>
+            )}
             <div>
-              <span>01</span>
-              <section>
-                <h3>Start with a page</h3>
-                <p>
-                  Upload a drawing or photo, or use the pencil to draw here.
-                  Inspect the original image, describe how it should play, then
-                  review its objects before playing.
-                </p>
-              </section>
+              <dt>Finish</dt>
+              <dd>
+                {world.entities.some((entity) => entity.kind === "goal")
+                  ? "Complete the required actions, then reach the destination. Other discoveries are optional."
+                  : "This world is free exploration. There is no destination to reach."}
+              </dd>
             </div>
-            <div>
-              <span>02</span>
-              <section>
-                <h3>Play your world</h3>
-                <p>
-                  Move with ← → or A / D. Jump with Space, ↑, or W. Collect the
-                  objects in your world. Press E near a lever to open its gate.
-                  Reach a destination to complete the adventure. Destination
-                  rules show which items and switches are required; other
-                  collectibles are optional. On phones, use the on-screen
-                  controls.
-                </p>
-              </section>
-            </div>
-            <div>
-              <span>03</span>
-              <section>
-                <h3>Keep your progress</h3>
-                <p>
-                  Save your world to this device. Its character position,
-                  collected items and open gates come with it. Continue building
-                  after completion, or back up your worlds from My worlds.
-                </p>
-              </section>
-            </div>
-          </div>
-          <div className="help-next">
-            <Layers3 size={21} />
-            <div>
-              <strong>Your page can keep growing.</strong>
-              <p>
-                Use Update page to draw on your original or upload a revised
-                photo. Review and place the new objects before applying.
-                Automatic Meta comparison requires a working key and a world
-                created from your own drawing.
-              </p>
-            </div>
+          </dl>
+          <p className="mode-help-save">
+            Save keeps this world and your progress on this device. My worlds
+            holds your saves and downloadable backups.
+          </p>
+          <div className="review-actions">
+            <button className="primary-button" onClick={() => setDialog(null)}>
+              Back to {started ? "play" : "world"}
+            </button>
           </div>
         </Modal>
       )}

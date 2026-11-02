@@ -5,6 +5,7 @@ import { artworkRasterSize } from "./artwork-raster";
 import {
   containArtwork,
   imageDirection,
+  sourceColorField,
   type ImageDirection,
 } from "./image-direction";
 import {
@@ -18,6 +19,7 @@ import {
   type SceneRect,
 } from "./scene-visibility";
 import { terrainTiles } from "./terrain-tiles";
+import { roamSteering } from "./roam-motion";
 import { objectName } from "../lib/object-name";
 import {
   emptyPlayState,
@@ -146,6 +148,9 @@ export class WorldScene extends Phaser.Scene {
   private sourceHero = false;
   private creativeArtwork = false;
   private direction: ImageDirection = imageDirection([]);
+  private sourceField: number[] = [];
+  private actorIntro?: Phaser.GameObjects.Graphics;
+  private actorIntroStarted = false;
   private heroFocus?: Phaser.GameObjects.Graphics;
   private heroFrame?: Phaser.GameObjects.Graphics;
   private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -163,6 +168,8 @@ export class WorldScene extends Phaser.Scene {
     { entity: WorldEntity; graphic: Phaser.GameObjects.Graphics }
   >();
   private discoveryHover = "";
+  private discoveryHintId = "";
+  private discoveryFocusId = "";
   private lastDiscoveryNotice = -10000;
   private sourceCues = new Map<string, Phaser.GameObjects.Graphics>();
   private discoveryZoom = 1;
@@ -175,6 +182,13 @@ export class WorldScene extends Phaser.Scene {
     centerY: number;
     moved: boolean;
   };
+  private roamTarget?: { x: number; y: number };
+  private roamMarker?: Phaser.GameObjects.Graphics;
+  private roamFocus?: Phaser.GameObjects.Graphics;
+  private roamTap?: { id: number; x: number; y: number };
+  private roamTrack = { x: 0, y: 0, stalledMs: 0 };
+  private lastRoamAction = -10000;
+  private roamEngaged = false;
   controls: WorldControls = {
     left: false,
     right: false,
@@ -251,6 +265,22 @@ export class WorldScene extends Phaser.Scene {
           );
         else this.load.image(`art-${e.id}`, e.art);
       }
+    if (
+      this.definition.source !== "example" &&
+      (this.definition.gameplay?.movement ?? "platform") === "platform" &&
+      !this.definition.entities.some(
+        (entity) =>
+          entity.artNote ===
+          "Full original image used as the world backdrop; generated gameplay is separate.",
+      )
+    ) {
+      if (this.definition.sourceImage.endsWith(".svg"))
+        this.load.svg("source-stage-colors", this.definition.sourceImage, {
+          width: 192,
+          height: 128,
+        });
+      else this.load.image("source-stage-colors", this.definition.sourceImage);
+    }
   }
 
   create() {
@@ -280,12 +310,21 @@ export class WorldScene extends Phaser.Scene {
         entity.artNote ===
           "Full original image used as the world backdrop; generated gameplay is separate.",
     );
-    this.creativeArtwork = Boolean(sourceBackdrop);
+    const sourceStage =
+      sourceBackdrop || this.textures.exists("source-stage-colors");
+    this.creativeArtwork = Boolean(sourceStage);
     if (sourceBackdrop)
       this.direction = this.sampleSourceDirection(sourceBackdrop);
+    else if (sourceStage)
+      this.direction = this.sampleSourceDirection("source-stage-colors");
     this.updateAtmosphere = sourceBackdrop
-      ? this.createSourceBackdrop(sourceBackdrop)
-      : createAtmosphere(this, this.definition.theme, this.reducedMotion);
+      ? this.definition.gameplay?.movement === "roam" ||
+        this.definition.gameplay?.movement === "discover"
+        ? this.createSourceBackdrop(sourceBackdrop)
+        : this.createSourceAtmosphere()
+      : sourceStage
+        ? this.createSourceAtmosphere()
+        : createAtmosphere(this, this.definition.theme, this.reducedMotion);
     if (this.definition.gameplay?.movement === "discover") {
       this.createDiscovery();
       return;
@@ -364,11 +403,18 @@ export class WorldScene extends Phaser.Scene {
         this.player.x,
         this.player.y + hero.height / 2 + 2,
       );
-      if (
-        hero.art &&
-        hero.artMethod === "crop" &&
-        this.definition.inputKind === "picture"
-      ) {
+      if (this.definition.gameplay?.movement !== "roam") {
+        this.heroFocus.setVisible(false);
+        this.actorIntro = this.add.graphics().setDepth(25);
+        this.actorIntro.lineStyle(4, this.direction.ink, 0.75);
+        this.actorIntro.lineBetween(-6, -4, 0, 2);
+        this.actorIntro.lineBetween(0, 2, 6, -4);
+        this.actorIntro.lineStyle(1.5, this.direction.surface, 1);
+        this.actorIntro.lineBetween(-6, -4, 0, 2);
+        this.actorIntro.lineBetween(0, 2, 6, -4);
+        this.updateActorIntro();
+      }
+      if (hero.art && hero.artMethod === "crop") {
         // A retained rectangular photo crop is presented honestly as a source
         // fragment, rather than disguised as a clean subject segmentation.
         this.heroFrame = this.add.graphics().setDepth(21);
@@ -410,6 +456,7 @@ export class WorldScene extends Phaser.Scene {
       body.setCollideWorldBounds(true);
       this.shadow.setVisible(false);
       this.heroFocus?.setVisible(false);
+      this.createRoamNavigation();
     }
     this.physics.add.collider(
       this.player,
@@ -503,6 +550,79 @@ export class WorldScene extends Phaser.Scene {
     return () => {};
   }
 
+  private createSourceAtmosphere(): () => void {
+    const camera = this.cameras.main;
+    camera.setBackgroundColor(this.direction.background);
+    const texture = this.textures.createCanvas(
+      "source-color-atmosphere",
+      384,
+      256,
+    );
+    if (!texture) return () => {};
+    const context = texture.context;
+    const tiny = document.createElement("canvas");
+    tiny.width = 3;
+    tiny.height = 2;
+    const painter = tiny.getContext("2d");
+    if (!painter) return () => {};
+    const colors =
+      this.sourceField.length === 6
+        ? this.sourceField
+        : Array(6).fill(this.direction.matte);
+    for (let i = 0; i < 6; i++) {
+      painter.fillStyle = `#${colors[i].toString(16).padStart(6, "0")}`;
+      painter.fillRect(i % 3, Math.floor(i / 3), 1, 1);
+    }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(tiny, 0, 0, 384, 256);
+    // Six source-color washes are deliberately nonfigurative. No second actor,
+    // page or invented landscape competes with actual playable source cutouts.
+    context.fillStyle = this.direction.lightSource
+      ? "rgba(246,244,235,.26)"
+      : "rgba(19,30,34,.24)";
+    context.fillRect(0, 0, 384, 256);
+    const shade = context.createLinearGradient(0, 0, 0, 256);
+    shade.addColorStop(0, "rgba(255,255,255,.10)");
+    shade.addColorStop(1, "rgba(22,31,34,.15)");
+    context.fillStyle = shade;
+    context.fillRect(0, 0, 384, 256);
+    texture.refresh();
+    const image = this.add
+      .image(0, 0, texture.key)
+      .setDepth(-10)
+      .setScrollFactor(0);
+    let width = 0,
+      height = 0,
+      zoom = 0;
+    const fit = () => {
+      if (
+        camera.width === width &&
+        camera.height === height &&
+        camera.zoom === zoom
+      )
+        return;
+      width = camera.width;
+      height = camera.height;
+      zoom = Math.max(0.001, camera.zoom);
+      image
+        .setPosition(width / 2, height / 2)
+        .setDisplaySize(width / zoom, height / zoom);
+    };
+    fit();
+    return fit;
+  }
+
+  private updateActorIntro() {
+    const zoom = Math.max(0.001, this.cameras.main.zoom);
+    this.actorIntro
+      ?.setPosition(
+        this.heroArt.x,
+        this.heroArt.y - this.heroVisualHeight - 12 / zoom,
+      )
+      .setScale(1 / zoom);
+  }
+
   private discoveryResolved(entity: WorldEntity): boolean {
     return discoveryResolved(entity, this.state);
   }
@@ -520,14 +640,33 @@ export class WorldScene extends Phaser.Scene {
       return;
     const clue = this.nextDiscoveryClue();
     if (!clue) return;
+    const previous = this.discoveryHintId;
+    this.discoveryHintId = clue.entityId;
+    if (previous)
+      this.drawDiscoveryRegion(previous, this.discoveryHover === previous);
     this.drawDiscoveryRegion(clue.entityId, true);
     this.hooks.onMoment(clue.text);
-    this.time.delayedCall(2200, () =>
+    this.time.delayedCall(2200, () => {
+      if (this.discoveryHintId === clue.entityId) this.discoveryHintId = "";
       this.drawDiscoveryRegion(
         clue.entityId,
         this.discoveryHover === clue.entityId,
-      ),
-    );
+      );
+    });
+  }
+
+  focusDiscovery(entityId?: string): void {
+    if (
+      this.definition.gameplay?.movement !== "discover" ||
+      this.resourcesReleased
+    )
+      return;
+    const previous = this.discoveryFocusId;
+    this.discoveryFocusId =
+      entityId && this.discoveryRegions.has(entityId) ? entityId : "";
+    if (previous)
+      this.drawDiscoveryRegion(previous, this.discoveryHover === previous);
+    if (this.discoveryFocusId) this.drawDiscoveryRegion(this.discoveryFocusId);
   }
 
   private drawDiscoveryRegion(id: string, hover = false) {
@@ -535,40 +674,50 @@ export class WorldScene extends Phaser.Scene {
     if (!region) return;
     const { entity: e, graphic } = region;
     const found = this.discoveryResolved(e);
-    graphic.clear().setVisible(found || hover);
-    if (!found && !hover) return;
-    const inset = Math.min(3, e.width / 8, e.height / 8);
-    graphic.lineStyle(5, this.direction.ink, found ? 0.75 : 0.5);
-    graphic.strokeRoundedRect(
-      e.x + inset,
-      e.y + inset,
-      e.width - inset * 2,
-      e.height - inset * 2,
-      Math.min(8, e.width / 5, e.height / 5),
-    );
-    graphic.lineStyle(
-      1.5,
-      found ? this.direction.accent : this.direction.surface,
-      1,
-    );
-    graphic.strokeRoundedRect(
-      e.x + inset,
-      e.y + inset,
-      e.width - inset * 2,
-      e.height - inset * 2,
-      Math.min(8, e.width / 5, e.height / 5),
-    );
-    if (found) {
-      graphic.fillStyle(this.direction.ink, 0.9);
-      graphic.fillCircle(e.x + e.width - 4, e.y + 4, 9);
-      graphic.lineStyle(2, this.direction.accent);
-      graphic.lineBetween(
-        e.x + e.width - 8,
-        e.y + 4,
-        e.x + e.width - 5,
-        e.y + 7,
+    const active =
+      hover || this.discoveryHintId === id || this.discoveryFocusId === id;
+    graphic.clear().setVisible(found || active);
+    if (!found && !active) return;
+    const unit = 1 / Math.max(0.001, this.cameras.main.zoom);
+    const inset = Math.min(3 * unit, e.width / 8, e.height / 8);
+    if (active) {
+      graphic.lineStyle(3 * unit, this.direction.ink, 0.55);
+      graphic.strokeRoundedRect(
+        e.x + inset,
+        e.y + inset,
+        e.width - inset * 2,
+        e.height - inset * 2,
+        Math.min(8, e.width / 5, e.height / 5),
       );
-      graphic.lineBetween(e.x + e.width - 5, e.y + 7, e.x + e.width + 1, e.y);
+      graphic.lineStyle(
+        1.1 * unit,
+        found ? this.direction.accent : this.direction.surface,
+        1,
+      );
+      graphic.strokeRoundedRect(
+        e.x + inset,
+        e.y + inset,
+        e.width - inset * 2,
+        e.height - inset * 2,
+        Math.min(8, e.width / 5, e.height / 5),
+      );
+    }
+    if (found) {
+      const x = Phaser.Math.Clamp(
+        e.x + e.width - 3 * unit,
+        7 * unit,
+        this.definition.width - 7 * unit,
+      );
+      const y = Phaser.Math.Clamp(
+        e.y + 3 * unit,
+        7 * unit,
+        this.definition.height - 7 * unit,
+      );
+      graphic.fillStyle(this.direction.ink, 0.82);
+      graphic.fillCircle(x, y, 6 * unit);
+      graphic.lineStyle(1.3 * unit, this.direction.surface, 1);
+      graphic.lineBetween(x - 3 * unit, y, x - unit, y + 2 * unit);
+      graphic.lineBetween(x - unit, y + 2 * unit, x + 3 * unit, y - 2 * unit);
     }
   }
 
@@ -711,6 +860,29 @@ export class WorldScene extends Phaser.Scene {
     this.applyDiscoveryView();
   }
 
+  /** Keyboard view navigation uses CSS-screen distances and never selects a
+   * region or changes discoveries. Positive deltas move the view right/down. */
+  panDiscovery(dx: number, dy: number): void {
+    if (
+      this.definition.gameplay?.movement !== "discover" ||
+      this.resourcesReleased ||
+      !Number.isFinite(dx) ||
+      !Number.isFinite(dy)
+    )
+      return;
+    const camera = this.cameras?.main;
+    if (!camera) return;
+    const center = this.discoveryCenter ?? {
+      x: this.definition.width / 2,
+      y: this.definition.height / 2,
+    };
+    this.discoveryCenter = {
+      x: center.x + dx / Math.max(0.001, camera.zoom),
+      y: center.y + dy / Math.max(0.001, camera.zoom),
+    };
+    this.applyDiscoveryView();
+  }
+
   private applyDiscoveryView() {
     const camera = this.cameras?.main;
     if (!camera || this.resourcesReleased) return;
@@ -744,6 +916,9 @@ export class WorldScene extends Phaser.Scene {
             ),
     };
     camera.centerOn(this.discoveryCenter.x, this.discoveryCenter.y);
+    for (const [id, region] of this.discoveryRegions)
+      if (region.graphic.visible || this.discoveryResolved(region.entity))
+        this.drawDiscoveryRegion(id, this.discoveryHover === id);
   }
 
   interactAt(point: { x: number; y: number }): boolean {
@@ -802,7 +977,7 @@ export class WorldScene extends Phaser.Scene {
       this.state.collected.push(id);
       this.soundtrack.cue("collect", this.state.collected.length);
     }
-    this.drawDiscoveryRegion(id);
+    this.drawDiscoveryRegion(id, this.discoveryHover === id);
     this.ring(
       e.x + e.width / 2,
       e.y + e.height / 2,
@@ -819,7 +994,7 @@ export class WorldScene extends Phaser.Scene {
     return true;
   }
 
-  private sampleSourceDirection(entity: WorldEntity): ImageDirection {
+  private sampleSourceDirection(entity: WorldEntity | string): ImageDirection {
     try {
       const canvas = document.createElement("canvas");
       canvas.width = 32;
@@ -828,14 +1003,16 @@ export class WorldScene extends Phaser.Scene {
       if (!context) return imageDirection([]);
       context.drawImage(
         this.textures
-          .get(`art-${entity.id}`)
+          .get(typeof entity === "string" ? entity : `art-${entity.id}`)
           .getSourceImage() as CanvasImageSource,
         0,
         0,
         32,
         24,
       );
-      return imageDirection(context.getImageData(0, 0, 32, 24).data);
+      const pixels = context.getImageData(0, 0, 32, 24).data;
+      this.sourceField = sourceColorField(pixels, 32, 24);
+      return imageDirection(pixels);
     } catch {
       // Restricted image readback keeps the original texture visible and uses
       // neutral dual-contrast cues; it never replaces or rewrites source pixels.
@@ -847,14 +1024,14 @@ export class WorldScene extends Phaser.Scene {
     const g = this.add.graphics();
     if (this.creativeArtwork) {
       g.fillStyle(this.direction.ink, 0.92);
-      g.fillCircle(41, 45, 24);
+      g.fillCircle(32, 32, 25);
       g.lineStyle(2.5, this.direction.surface, 1);
-      g.strokeCircle(41, 45, 24);
+      g.strokeCircle(32, 32, 25);
       g.lineStyle(2, this.direction.accent, 1);
-      g.strokeCircle(41, 45, 15);
+      g.strokeCircle(32, 32, 15);
       g.fillStyle(this.direction.surface);
-      g.fillCircle(41, 45, 4);
-      g.generateTexture("fallback-hero", 82, 90);
+      g.fillCircle(32, 32, 4);
+      g.generateTexture("fallback-hero", 64, 64);
       g.destroy();
       return "fallback-hero";
     }
@@ -881,20 +1058,15 @@ export class WorldScene extends Phaser.Scene {
     const p = palettes[this.definition.theme];
     const g = this.add.graphics().setDepth(10);
     if (this.creativeArtwork) {
-      // Generated surfaces have a consistent, quiet visual language across
-      // photos, line drawings and dense artwork. The source is the scenery.
-      const height = Math.min(e.height, e.kind === "bridge" ? 10 : 18);
-      g.fillStyle(this.direction.ink, this.direction.lightSource ? 0.83 : 0.62);
-      g.fillRoundedRect(e.x, e.y, e.width, height, 4);
-      g.lineStyle(1, this.direction.surface, 0.7);
-      g.strokeRoundedRect(e.x, e.y, e.width, height, 4);
-      g.lineStyle(3, this.direction.ink, 0.95);
-      g.lineBetween(e.x + 5, e.y, e.x + e.width - 5, e.y);
-      g.lineStyle(1.5, this.direction.accent, 1);
-      g.lineBetween(e.x + 5, e.y, e.x + e.width - 5, e.y);
-      g.fillStyle(this.direction.accent, 0.85);
-      g.fillCircle(e.x + 7, e.y + height / 2, 1.5);
-      g.fillCircle(e.x + e.width - 7, e.y + height / 2, 1.5);
+      // Added connections are matte source-palette material. Actual source
+      // supports retain their own art; no capsules or rivets compete with it.
+      const height = e.kind === "bridge" ? Math.min(e.height, 12) : e.height;
+      g.fillStyle(this.direction.matte, 0.9);
+      g.fillRoundedRect(e.x, e.y, e.width, height, 1.5);
+      g.lineStyle(1.25, this.direction.accent, 0.9);
+      g.lineBetween(e.x + 1, e.y, e.x + e.width - 1, e.y);
+      g.lineStyle(1, this.direction.ink, 0.18);
+      g.lineBetween(e.x + 1, e.y + height, e.x + e.width - 1, e.y + height);
     } else if (e.kind === "bridge") {
       g.lineStyle(7, Phaser.Display.Color.HexStringToColor(p.ink).color, 0.9);
       g.lineBetween(e.x, e.y + 8, e.x + e.width, e.y + 8);
@@ -1009,11 +1181,11 @@ export class WorldScene extends Phaser.Scene {
     const sourceGate =
       this.definition.gameplay?.movement === "roam" && e.artSource && !e.art;
     if (this.creativeArtwork) {
-      g.fillStyle(this.direction.ink, 0.7);
-      g.fillRoundedRect(0, 0, e.width, e.height, 4);
-      g.lineStyle(2, this.direction.surface, 0.9);
-      g.strokeRoundedRect(0, 0, e.width, e.height, 4);
-      g.lineStyle(2, this.direction.accent, 1);
+      g.fillStyle(this.direction.matte, 0.92);
+      g.fillRoundedRect(0, 0, e.width, e.height, 2);
+      g.lineStyle(1.25, this.direction.accent, 0.9);
+      g.strokeRoundedRect(0, 0, e.width, e.height, 2);
+      g.lineStyle(1, this.direction.surface, 0.6);
       g.lineBetween(e.width / 2, 9, e.width / 2, e.height - 9);
       for (let y = 18; y < e.height - 12; y += 22) {
         g.lineStyle(1, this.direction.surface, 0.65);
@@ -1062,7 +1234,12 @@ export class WorldScene extends Phaser.Scene {
       );
       this.physics.add.existing(region, true);
       this.physics.add.overlap(this.player, region, () => {
-        if (!this.isPlaying || this.state.collected.includes(e.id)) return;
+        if (
+          !this.isPlaying ||
+          !this.roamEngaged ||
+          this.state.collected.includes(e.id)
+        )
+          return;
         this.state.collected.push(e.id);
         this.physics.world.disable(region);
         this.drawSourceCue(e, true);
@@ -1129,6 +1306,8 @@ export class WorldScene extends Phaser.Scene {
       });
     this.physics.add.overlap(this.player, coin, () => {
       if (this.state.collected.includes(e.id)) return;
+      if (this.definition.gameplay?.movement === "roam" && !this.roamEngaged)
+        return;
       this.state.collected.push(e.id);
       halo.destroy();
       this.physics.world.disable(coin);
@@ -1222,8 +1401,10 @@ export class WorldScene extends Phaser.Scene {
           this.player.x - e.x - e.width / 2,
           this.player.y - e.y - e.height / 2,
         ) < 145
-      )
+      ) {
+        this.lastRoamAction = this.time.now;
         this.openLever(e.id);
+      }
     });
     let originalArt: Phaser.GameObjects.Image | undefined;
     if (
@@ -1284,20 +1465,19 @@ export class WorldScene extends Phaser.Scene {
       if (this.creativeArtwork) {
         const x = e.x + e.width * 0.15,
           width = e.width * 0.7;
-        arch.fillStyle(this.direction.ink, 0.45);
-        arch.fillRoundedRect(x, e.y, width, e.height, 8);
-        arch.lineStyle(5, this.direction.ink, 0.9);
-        arch.strokeRoundedRect(x, e.y, width, e.height, 8);
-        arch.lineStyle(1.5, this.direction.surface, 0.95);
-        arch.strokeRoundedRect(x, e.y, width, e.height, 8);
-        arch.lineStyle(3, this.direction.accent);
+        arch.fillStyle(this.direction.matte, 0.9);
+        arch.fillRect(x, e.y, 4, e.height);
+        arch.fillRect(x + width - 4, e.y, 4, e.height);
+        arch.lineStyle(2, this.direction.accent, 0.95);
+        arch.lineBetween(x + 1, e.y, x + width - 1, e.y);
+        arch.lineStyle(2, this.direction.matte);
         arch.lineBetween(
           x + 8,
           e.y + e.height - 3,
           x + width - 8,
           e.y + e.height - 3,
         );
-        arch.lineStyle(2, this.direction.surface);
+        arch.lineStyle(2, this.direction.matte);
         const cx = e.x + e.width / 2,
           cy = e.y + e.height * 0.45;
         arch.lineBetween(cx - 8, cy, cx + 8, cy);
@@ -1331,6 +1511,8 @@ export class WorldScene extends Phaser.Scene {
     this.physics.add.existing(zone, true);
     this.physics.add.overlap(this.player, zone, () => {
       if (!this.isPlaying || this.state.completed) return;
+      if (this.definition.gameplay?.movement === "roam" && !this.roamEngaged)
+        return;
       const objective = goalProgress(this.definition, this.state);
       if (!objective.ready) {
         if (
@@ -1452,6 +1634,11 @@ export class WorldScene extends Phaser.Scene {
 
   private burst(x: number, y: number, color: number, count: number) {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (
+      this.creativeArtwork &&
+      (this.definition.gameplay?.movement ?? "platform") === "platform"
+    )
+      return;
     for (let i = 0; i < count; i++) {
       const dot = this.add.circle(x, y, 2 + (i % 3), color).setDepth(40);
       const angle = i * 2.399;
@@ -1484,6 +1671,30 @@ export class WorldScene extends Phaser.Scene {
 
   private footfall(x: number, y: number, strong = false) {
     if (this.reducedMotion) return;
+    if (
+      this.creativeArtwork &&
+      (this.definition.gameplay?.movement ?? "platform") === "platform"
+    ) {
+      if (!strong) return;
+      const contact = this.add
+        .ellipse(
+          x,
+          y,
+          Math.min(32, this.heroVisualWidth * 0.7),
+          3,
+          this.direction.matte,
+          0.28,
+        )
+        .setDepth(19);
+      this.tweens.add({
+        targets: contact,
+        scaleX: 1.5,
+        alpha: 0,
+        duration: 220,
+        onComplete: () => contact.destroy(),
+      });
+      return;
+    }
     for (
       let i = 0;
       i < (this.creativeArtwork ? (strong ? 3 : 1) : strong ? 7 : 2);
@@ -1532,6 +1743,8 @@ export class WorldScene extends Phaser.Scene {
           ),
         );
       camera.centerOn(this.definition.width / 2, this.definition.height / 2);
+      if (this.definition.gameplay?.movement === "roam" && this.player)
+        this.updateRoamVisuals(0);
       return;
     }
     if (!this.player) return;
@@ -1549,6 +1762,8 @@ export class WorldScene extends Phaser.Scene {
         : this.player.y + this.heroHeight / 2 + 100 - camera.displayHeight / 2,
     );
     camera.setScroll(target.x, target.y);
+    if (this.definition.gameplay?.movement === "roam")
+      this.updateRoamVisuals(0);
   }
 
   setPlaying(playing: boolean) {
@@ -1560,6 +1775,19 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     this.isPlaying = playing;
+    if (playing && this.actorIntro && !this.actorIntroStarted) {
+      this.actorIntroStarted = true;
+      this.time.delayedCall(2400, () => {
+        if (this.reducedMotion) this.actorIntro?.setVisible(false);
+        else if (this.actorIntro)
+          this.tweens.add({
+            targets: this.actorIntro,
+            alpha: 0,
+            duration: 220,
+          });
+      });
+    }
+    if (!playing) this.clearRoamTarget();
     this.soundtrack.setState(
       playing || (this.state.completed && !this.state.exploring),
       this.muted,
@@ -1667,11 +1895,112 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  private clearRoamTarget() {
+    this.roamTarget = undefined;
+    this.roamTrack.stalledMs = 0;
+    this.roamMarker?.setVisible(false);
+  }
+
+  private createRoamNavigation() {
+    this.roamFocus = this.add.graphics().setDepth(22);
+    this.roamFocus.lineStyle(5, this.direction.ink, 0.95);
+    this.roamFocus.strokeCircle(0, 0, 20);
+    this.roamFocus.lineStyle(1.5, this.direction.surface, 1);
+    this.roamFocus.strokeCircle(0, 0, 20);
+    this.roamFocus.fillStyle(this.direction.ink, 0.95);
+    this.roamFocus.fillTriangle(21, -5, 29, 0, 21, 5);
+    this.roamFocus.lineStyle(1.5, this.direction.surface, 1);
+    this.roamFocus.lineBetween(22, -4, 28, 0);
+    this.roamFocus.lineBetween(28, 0, 22, 4);
+    this.roamMarker = this.add.graphics().setDepth(23).setVisible(false);
+    this.roamMarker.lineStyle(4, this.direction.ink, 0.95);
+    this.roamMarker.strokeCircle(0, 0, 8);
+    this.roamMarker.lineStyle(1.5, this.direction.surface, 1);
+    this.roamMarker.strokeCircle(0, 0, 8);
+    this.roamMarker.fillStyle(this.direction.accent, 1);
+    this.roamMarker.fillCircle(0, 0, 2);
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (this.isPlaying)
+        this.roamTap = { id: pointer.id, x: pointer.x, y: pointer.y };
+    });
+    this.input.on("pointerupoutside", () => {
+      this.roamTap = undefined;
+    });
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      const tap = this.roamTap;
+      this.roamTap = undefined;
+      if (
+        !tap ||
+        tap.id !== pointer.id ||
+        Math.hypot(pointer.x - tap.x, pointer.y - tap.y) > 8 ||
+        !this.isPlaying ||
+        (this.state.completed && !this.state.exploring) ||
+        this.time.now - this.lastRoamAction < 40
+      )
+        return;
+      const point = pointer.positionToCamera(
+        this.cameras.main,
+      ) as Phaser.Math.Vector2;
+      if (
+        point.x < 0 ||
+        point.y < 0 ||
+        point.x > this.definition.width ||
+        point.y > this.definition.height
+      )
+        return;
+      this.roamTarget = { x: point.x, y: point.y };
+      this.roamEngaged = true;
+      this.roamTrack = { x: this.player.x, y: this.player.y, stalledMs: 0 };
+      this.roamMarker?.setPosition(point.x, point.y).setVisible(true);
+    });
+    this.updateRoamVisuals(0);
+  }
+
+  private updateRoamVisuals(time: number) {
+    const zoom = Math.max(0.001, this.cameras.main.zoom);
+    // Only an openly generated explorer receives a minimum display footprint.
+    // Actual source subject pixels retain their chosen dimensions and aspect.
+    const visualScale = this.sourceHero
+      ? 1
+      : Math.max(
+          1,
+          36 / zoom / Math.max(this.heroVisualWidth, this.heroVisualHeight),
+        );
+    const width = this.heroVisualWidth * visualScale,
+      height = this.heroVisualHeight * visualScale;
+    this.heroArt
+      .setPosition(this.player.x, this.player.y + height / 2)
+      .setDisplaySize(width, height)
+      .setAngle(0)
+      .setFlipX(false);
+    this.heroFrame?.setPosition(this.heroArt.x, this.heroArt.y);
+    this.updateActorIntro();
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    const moving = Math.hypot(body.velocity.x, body.velocity.y) > 15;
+    const angle = moving
+      ? Math.atan2(body.velocity.y, body.velocity.x)
+      : (this.roamFocus?.rotation ?? 0);
+    this.roamFocus
+      ?.setPosition(this.player.x, this.player.y)
+      .setScale(1 / zoom)
+      .setRotation(angle)
+      .setAlpha(
+        this.reducedMotion || !moving ? 0.9 : 0.88 + Math.sin(time / 180) * 0.1,
+      );
+    this.roamMarker?.setScale(1 / zoom);
+  }
+
   private updateRoam(
     time: number,
     delta: number,
     body: Phaser.Physics.Arcade.Body,
   ) {
+    if (this.state.completed && !this.state.exploring) {
+      this.clearRoamTarget();
+      body.setVelocity(0, 0);
+      this.updateRoamVisuals(time);
+      return;
+    }
     const horizontal =
       Number(
         this.cursors.right.isDown || this.keys.D.isDown || this.controls.right,
@@ -1684,18 +2013,45 @@ export class WorldScene extends Phaser.Scene {
         this.cursors.down.isDown || this.keys.S.isDown || this.controls.down,
       ) -
       Number(this.cursors.up.isDown || this.keys.W.isDown || this.controls.up);
+    if (horizontal || vertical) {
+      this.roamEngaged = true;
+      this.clearRoamTarget();
+    }
     const length = Math.max(1, Math.hypot(horizontal, vertical));
     const blend = 1 - Math.exp(-delta / 85);
+    let desired = {
+      x: (horizontal / length) * 260,
+      y: (vertical / length) * 260,
+    };
+    if (this.roamTarget) {
+      const steering = roamSteering(this.player, this.roamTarget);
+      desired = steering;
+      const moved = Math.hypot(
+        this.player.x - this.roamTrack.x,
+        this.player.y - this.roamTrack.y,
+      );
+      this.roamTrack.stalledMs =
+        moved < 0.15 && !steering.arrived
+          ? this.roamTrack.stalledMs + Math.min(100, delta)
+          : 0;
+      this.roamTrack.x = this.player.x;
+      this.roamTrack.y = this.player.y;
+      if (steering.arrived || this.roamTrack.stalledMs > 400) {
+        const blocked = !steering.arrived;
+        this.clearRoamTarget();
+        body.setVelocity(0, 0);
+        desired = { x: 0, y: 0 };
+        if (blocked)
+          this.hooks.onMoment(
+            "That path is blocked. Choose another point or steer around it.",
+          );
+      }
+    }
     body.setVelocity(
-      Phaser.Math.Linear(body.velocity.x, (horizontal / length) * 260, blend),
-      Phaser.Math.Linear(body.velocity.y, (vertical / length) * 260, blend),
+      Phaser.Math.Linear(body.velocity.x, desired.x, blend),
+      Phaser.Math.Linear(body.velocity.y, desired.y, blend),
     );
-    this.heroArt
-      .setPosition(this.player.x, this.player.y + this.heroVisualHeight / 2)
-      .setDisplaySize(this.heroVisualWidth, this.heroVisualHeight)
-      .setAngle(0)
-      .setFlipX(false);
-    this.heroFrame?.setPosition(this.heroArt.x, this.heroArt.y);
+    this.updateRoamVisuals(time);
     if (
       Phaser.Input.Keyboard.JustDown(this.keys.E) ||
       (this.controls.interact && !this.previousTouchInteract)
@@ -1871,6 +2227,7 @@ export class WorldScene extends Phaser.Scene {
       ?.setPosition(this.player.x, body.bottom + 2)
       .setAlpha(grounded ? 0.8 : 0.45);
     this.heroFrame?.setPosition(this.heroArt.x, this.heroArt.y);
+    this.updateActorIntro();
     this.heroHalo
       .setPosition(this.player.x, this.player.y)
       .setAlpha(0.045 + (grounded ? 0 : 0.025));

@@ -123,7 +123,9 @@ test("image-native discovery and exploration preserve source geometry, aspect an
           gameplay: { mode: "creative", movement, objectiveTitle: "Color investigation", instructions: "Find the warm color, activate the button, then go home.",
             reason: "Synthetic source geometry fixture, not a live model result.", avatarId: null,
             objective: "collect", objectiveLabel: "Color details", destinationLabel: "Home", obstacleIds: [],
-            path: [{ x: 0, y: 900, label: "Start" }, { x: 500, y: 500, label: "Middle" }, { x: 900, y: 900, label: "Home" }],
+            // Deliberately propose a start inside the required red target.
+            // Roam must move its introduced guide, never the original target.
+            path: [{ x: 150, y: 250, label: "Start by red" }, { x: 500, y: 500, label: "Middle" }, { x: 900, y: 900, label: "Home" }],
             clues: [{ entityId: "home", text: "Finish at the green rectangle near the bottom." },
               { entityId: "red", text: "Find the warm-colored rectangle near the upper left." },
               { entityId: "button", text: "Activate the golden rectangle below the middle." }],
@@ -140,6 +142,13 @@ test("image-native discovery and exploration preserve source geometry, aspect an
     assert.equal(target.x, world.width * .1);
     assert.equal(target.y, world.height * .2);
     assert.equal(world.entities.filter(entity => entity.kind === "player").length, movement === "discover" ? 0 : 1);
+    if (movement === "roam") {
+      const guide = world.entities.find(entity => entity.kind === "player")!;
+      for (const target of world.entities.filter(entity => ["coin", "lever", "goal"].includes(entity.kind)))
+        assert.ok(guide.x + guide.width < target.x || guide.x > target.x + target.width ||
+          guide.y + guide.height < target.y || guide.y > target.y + target.height,
+        "Starting a world must not automatically overlap or earn an image target");
+    }
     assert.equal(world.entities.some(entity => ["terrain", "bridge"].includes(entity.kind)), false);
     const clueIds = world.gameplay!.clues!.map(clue => clue.entityId);
     assert.ok(clueIds.indexOf("red") < clueIds.indexOf("home"));
@@ -147,6 +156,76 @@ test("image-native discovery and exploration preserve source geometry, aspect an
     assert.equal(clueIds[clueIds.length - 1], "home");
     if (movement === "discover") assert.equal(clueIds.includes("blue"), false, "An explicitly optional object cannot become a hidden ordered-clue prerequisite");
   }
+});
+
+test("an adapted source mission retains its real destination and optional items without padding it with generated duplicates", async () => {
+  const image = imageData(await sharp(Buffer.from(
+    '<svg width="1000" height="1000" xmlns="http://www.w3.org/2000/svg"><rect width="1000" height="1000" fill="white"/><rect x="100" y="500" width="60" height="100" fill="#7243b1"/><circle cx="320" cy="470" r="20" fill="red"/><circle cx="620" cy="470" r="20" fill="blue"/><path d="M850 450V350h50v40h-45" stroke="green" stroke-width="8" fill="#80b498"/></svg>',
+  )).png().toBuffer());
+  const model = {
+    name: "Actual colors and destination", description: "Synthetic compiler fixture, not live recognition.", theme: "grove", clarification: "",
+    objects: [object("subject", "player", 100, 500, 60, 100), object("red", "coin", 300, 450, 40, 40),
+      object("blue", "coin", 600, 450, 40, 40), object("finish", "goal", 845, 345, 60, 110)],
+    goalRules: { requiredCollectedIds: ["red"], requiredActivatedIds: [] },
+    gameplay: { mode: "creative", movement: "platform", objectiveTitle: "Color journey", instructions: "Collect red, then reach the pictured finish. Blue is optional.",
+      reason: "The source does not already contain ground.", avatarId: "subject", objective: "collect", objectiveLabel: "Color", destinationLabel: "Pictured finish",
+      clues: [{ entityId: "red", text: "Find the warm-colored circle." }, { entityId: "finish", text: "Finish at the green pennant." }], obstacleIds: [],
+      path: [0, 200, 400, 600, 800, 1000].map(x => ({ x, y: 650 - x / 4, label: `Source landmark ${x}` })),
+    },
+  };
+  const run = (value: unknown) => interpretDrawing(image, "Collect red and reach the finish. Blue is optional.", connection,
+    new AbortController().signal, { enabled: false, apiKey: "" }, async () => response(value));
+  const world = await run(model);
+  assert.deepEqual(world.entities.filter(entity => entity.kind === "coin").map(entity => entity.id).sort(), ["blue", "red"]);
+  assert.deepEqual(world.goalRules, { requiredCollectedIds: ["red"], requiredActivatedIds: [] });
+  assert.equal(world.entities.find(entity => entity.kind === "goal")!.id, "finish");
+  assert.match(world.entities.find(entity => entity.id === "finish")!.art!, /^data:image\/png;base64,/);
+  assert.deepEqual(world.entities.find(entity => entity.id === "finish")!.artSource, { x: 845, y: 345, width: 60, height: 110 });
+  assert.ok(world.entities.find(entity => entity.id === "blue")!.art, "Optional actual source artwork stays available to play");
+  assert.deepEqual(setupFeedback(world).errors, []);
+  await assert.rejects(() => run({ ...model, gameplay: { ...model.gameplay, avatarId: "unlocated-subject" } }), /did not match a source selection/);
+  await assert.rejects(() => run({ ...model, gameplay: { ...model.gameplay, clues: [{ entityId: "unlocated-detail", text: "A detail not actually located." }] } }), /was not located/);
+});
+
+test("source platform assembly keeps actual surfaces and causal source links without duplicating a shared collectible destination", async () => {
+  const objects = [
+    object("hero", "player", 180, 480, 60, 100),
+    object("left-rock", "terrain", 100, 600, 300, 150),
+    object("right-rock", "terrain", 450, 550, 400, 200),
+    object("star", "coin", 760, 450, 35, 35),
+    object("star-finish", "goal", 760, 450, 35, 35),
+    object("switch", "lever", 280, 540, 35, 55, "gate"),
+    object("gate", "gate", 700, 450, 30, 100),
+  ];
+  const world = await interpretDrawing(await source(), "Collect the star, activate the switch, then finish.", connection,
+    new AbortController().signal, { enabled: false, apiKey: "" }, async () => response({
+      ...interpretation(objects), goalRules: { requiredCollectedIds: ["star"], requiredActivatedIds: ["switch"] },
+      gameplay: { mode: "source-layout", movement: "platform", avatarId: "hero", objective: "collect",
+        reason: "Two actual rock surfaces and an actual switch controlling a gate.", objectiveLabel: "Collect the star",
+        objectiveTitle: "Open the Star Path", instructions: "Collect the star and open the gate to finish.", destinationLabel: "Star finish",
+        clues: [], obstacleIds: [], path: [{ x: 200, y: 600, label: "left rock" }, { x: 500, y: 550, label: "right rock" }, { x: 780, y: 550, label: "star" }] },
+    }));
+  validateWorld(world);
+  assert.deepEqual(setupFeedback(world).errors, []);
+  for (const id of ["left-rock", "right-rock"]) {
+    const actual = world.entities.find(entity => entity.id === id)!;
+    const detected = objects.find(entity => entity.id === id)!;
+    assert.equal(actual.x, detected.x * world.width / 1000);
+    assert.equal(actual.y, detected.y * world.height / 1000);
+    assert.equal(actual.width, detected.width * world.width / 1000);
+    assert.ok(actual.art && actual.artSource);
+  }
+  assert.equal(world.entities.filter(entity => entity.kind === "player").length, 1);
+  assert.equal(world.entities.find(entity => entity.id === "switch")!.targetId, "gate");
+  assert.deepEqual(world.goalRules, { requiredCollectedIds: ["star"], requiredActivatedIds: ["switch"] });
+  assert.ok(world.entities.find(entity => entity.id === "star")!.art);
+  const finish = world.entities.find(entity => entity.id === "star-finish")!;
+  assert.equal(finish.art, undefined);
+  assert.equal(finish.artSource, undefined);
+  assert.match(finish.artNote!, /finish region/);
+  const player = world.entities.find(entity => entity.kind === "player")!;
+  assert.ok(player.width <= 100 && player.height <= 96);
+  assert.equal(player.y + player.height * .93 + 2, world.entities.find(entity => entity.id === "left-rock")!.y);
 });
 
 test("a failed crop keeps valid original artwork in review, makes no segmentation request, and cannot be returned as success", async () => {

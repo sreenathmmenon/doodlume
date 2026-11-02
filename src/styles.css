@@ -2451,9 +2451,9 @@ kbd {
   max-width: 490px;
 }
 .editor-origin {
-  border: 1px solid #dfddce;
-  color: #a19a80;
-  background: #f6f3e9;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--field);
   border-radius: 5px;
   font-size: 9px;
   padding: 6px 8px;
@@ -2485,10 +2485,10 @@ kbd {
   background: #e8eedc;
 }
 .editor-canvas-wrap {
-  border: 1px solid #dce2ce;
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   overflow: hidden;
-  background: #eff2e4;
+  background: var(--stage);
 }
 .editor-canvas {
   display: block;
@@ -2500,12 +2500,12 @@ kbd {
 }
 .editor-canvas-caption {
   display: block;
-  font-size: 10px;
-  color: #8b9879;
+  font-size: 12px;
+  color: var(--muted);
   padding: 10px 14px;
-  background: #f6f8ed;
+  background: var(--paper);
   line-height: 1.7;
-  border-top: 1px solid #e0e5d3;
+  border-top: 1px solid var(--border);
 }
 .editor-bottom {
   display: grid;
@@ -3026,9 +3026,9 @@ kbd {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  color: #718061;
-  background: #f8f7f1;
-  font-size: 14px;
+  color: var(--muted, #aaa99e);
+  background: #101112;
+  font: 500 14px/20px Manrope, sans-serif;
 }
 .capture-source-actions {
   display: flex;

@@ -5,6 +5,7 @@ export interface ImageDirection {
   ink: number;
   surface: number;
   background: number;
+  matte: number;
   lightSource: boolean;
 }
 
@@ -60,8 +61,57 @@ export function imageDirection(pixels: ArrayLike<number>): ImageDirection {
     background: count
       ? rgb((red / count) * 0.13, (green / count) * 0.13, (blue / count) * 0.13)
       : 0x17242b,
+    matte: dominant
+      ? rgb(
+          (dominant.r / dominant.weight) * 0.68 + 16 * 0.32,
+          (dominant.g / dominant.weight) * 0.68 + 36 * 0.32,
+          (dominant.b / dominant.weight) * 0.68 + 44 * 0.32,
+        )
+      : 0x617e79,
     lightSource: count > 0 && luminance / count > 0.6,
   };
+}
+
+/** Six mean-color samples discard recognizable source detail. The renderer
+ * uses only these washes for platform atmosphere, never a second crisp actor. */
+export function sourceColorField(
+  pixels: ArrayLike<number>,
+  width: number,
+  height: number,
+): number[] {
+  const field: number[] = [];
+  for (let row = 0; row < 2; row++)
+    for (let column = 0; column < 3; column++) {
+      let r = 0,
+        g = 0,
+        b = 0,
+        count = 0;
+      for (
+        let y = Math.floor((row * height) / 2);
+        y < Math.floor(((row + 1) * height) / 2);
+        y++
+      )
+        for (
+          let x = Math.floor((column * width) / 3);
+          x < Math.floor(((column + 1) * width) / 3);
+          x++
+        ) {
+          const i = (y * width + x) * 4;
+          if (pixels[i + 3] < 128) continue;
+          r += pixels[i];
+          g += pixels[i + 1];
+          b += pixels[i + 2];
+          count++;
+        }
+      field.push(
+        count
+          ? (Math.round(r / count) << 16) |
+              (Math.round(g / count) << 8) |
+              Math.round(b / count)
+          : 0xe8ece6,
+      );
+    }
+  return field;
 }
 
 /** Preserve source proportions inside the authored gameplay footprint. */

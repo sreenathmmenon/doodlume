@@ -158,9 +158,11 @@ export function WorldEditor({
   const [additions, setAdditions] = useState<WorldEntity[]>(() =>
     structuredClone(proposal?.patch.additions ?? initialAdditions ?? []),
   );
-  const [tool, setTool] = useState<Tool>(
-    mode === "platform" ? "bridge" : "move",
-  );
+  const [modified, setModified] = useState<Record<string, WorldEntity>>({});
+  const currentEntities = world.entities.map(entity => modified[entity.id] ?? entity);
+  const editableEntities = [...currentEntities.filter(entity => entity.id !== sourceBackdrop?.id), ...additions];
+  const changedCount = Object.keys(modified).length;
+  const [tool, setTool] = useState<Tool>("move");
   const [selected, setSelected] = useState<string | null>(
     proposal?.patch.additions[0]?.id ?? initialAdditions?.[0]?.id ?? null,
   );
@@ -259,7 +261,14 @@ export function WorldEditor({
     setPanning(false);
     setDrag(null);
   }
-  const item = additions.find((e) => e.id === selected);
+  const item = editableEntities.find((e) => e.id === selected);
+  const existingSelected = Boolean(item && world.entities.some(entity => entity.id === item.id));
+  function changeEntity(id: string, change: Partial<WorldEntity>) {
+    const original = world.entities.find(entity => entity.id === id);
+    if (original) {
+      setModified(items => ({...items, [id]: {...(items[id] ?? original), ...change, id: original.id, kind: original.kind}}));
+    } else setAdditions(items => items.map(entity => entity.id === id ? {...entity, ...change} : entity));
+  }
   function cancelArtwork() {
     artworkRequest.current?.abort();
     artworkRequest.current = null;
@@ -375,7 +384,7 @@ export function WorldEditor({
       }
     }
   }
-  const gates = [...world.entities, ...additions].filter(
+  const gates = [...currentEntities, ...additions].filter(
     (e) => e.kind === "gate",
   );
   const openGates = new Set(
@@ -388,15 +397,18 @@ export function WorldEditor({
       id: crypto.randomUUID(),
       worldId: proposal?.patch.worldId ?? world.id,
       baseRevision: proposal?.patch.baseRevision ?? world.revision,
-      origin: proposal ? "meta" : "manual",
+      origin: changedCount ? "manual" : proposal ? "meta" : "manual",
       ...(revisedImage ? { sourceImage: revisedImage } : {}),
       additions,
+      ...(changedCount ? { updates: Object.values(modified).map(entity => ({id: entity.id, x: entity.x, y: entity.y, width: entity.width, height: entity.height, label: entity.label, targetId: entity.targetId ?? null})) } : {}),
       ...(expanded ? { bounds } : {}),
     }),
     [
       world.id,
       world.revision,
       additions,
+      modified,
+      changedCount,
       proposal,
       revisedImage,
       bounds,
@@ -404,7 +416,7 @@ export function WorldEditor({
     ],
   );
   let problem = "";
-  if (additions.length || expanded) {
+  if (additions.length || changedCount || expanded) {
     try {
       applyWorldPatch(world, state, patch);
     } catch (e) {
@@ -441,7 +453,7 @@ export function WorldEditor({
     if (!p.inside) return;
     setError("");
     setReviewed(false);
-    const hit = [...additions]
+    const hit = [...editableEntities]
       .reverse()
       .find(
         (a) =>
@@ -487,21 +499,10 @@ export function WorldEditor({
     if (drag.id && drag.original) {
       cancelArtwork();
       const original = drag.original;
-      setAdditions((items) =>
-        items.map((a) =>
-          a.id === drag.id
-            ? {
-                ...a,
-                x: limit(original.x + p.x - drag.x, 0, bounds.width - a.width),
-                y: limit(
-                  original.y + p.y - drag.y,
-                  0,
-                  bounds.height - a.height,
-                ),
-              }
-            : a,
-        ),
-      );
+      changeEntity(drag.id, {
+        x: limit(original.x + p.x - drag.x, 0, bounds.width - original.width),
+        y: limit(original.y + p.y - drag.y, 0, bounds.height - original.height),
+      });
     }
     setDrag({ ...drag, currentX: p.x, currentY: p.y });
   }
@@ -558,9 +559,7 @@ export function WorldEditor({
   function update(change: Partial<WorldEntity>) {
     cancelArtwork();
     setReviewed(false);
-    setAdditions((items) =>
-      items.map((e) => (e.id === selected ? { ...e, ...change } : e)),
-    );
+    if (selected) changeEntity(selected, change);
     setError("");
   }
   function insertAtCenter() {
@@ -683,8 +682,9 @@ export function WorldEditor({
   }
   function removeSelected() {
     setReviewed(false);
-    setAdditions((items) => items.filter((e) => e.id !== selected));
-    selectObject(null);
+    if (existingSelected && selected) {
+      setModified(items => { const next = {...items}; delete next[selected]; return next; });
+    } else { setAdditions(items => items.filter(entity => entity.id !== selected)); selectObject(null); }
     setError("");
   }
   function apply() {
@@ -712,9 +712,7 @@ export function WorldEditor({
         : ["#f0f1e3", "#c4d0b1", "#8f9f7a"];
 
   function object(e: WorldEntity, isNew = false) {
-    const hero = e.kind === "player",
-      x = hero && state.player ? state.player.x - e.width / 2 : e.x,
-      y = hero && state.player ? state.player.y - e.height / 2 : e.y;
+    const x = e.x, y = e.y;
     const hidden =
       (e.kind === "coin" && state.collected.includes(e.id)) ||
       (e.kind === "gate" && openGates.has(e.id));
@@ -726,7 +724,7 @@ export function WorldEditor({
         className={isNew ? "editor-new-object" : ""}
       >
         <title>
-          {isNew ? "New: " : "Kept: "}
+          {isNew ? "New: " : ""}
           {title(e)}
         </title>
         {mode === "discover" && ["coin", "lever", "goal"].includes(e.kind) ? (
@@ -780,7 +778,7 @@ export function WorldEditor({
             strokeWidth="3"
           />
         )}
-        {isNew && (
+        {(isNew || e.id === selected) && (
           <rect
             x="-5"
             y="-5"
@@ -803,16 +801,14 @@ export function WorldEditor({
         <div className="editor-intro">
           <p>
             {mode === "discover"
-              ? "Arrange interactive regions over your image. Your progress is kept."
+              ? "Select and arrange the interactive regions in your image."
               : mode === "roam"
-                ? "Add objects and interactions to explore. Your progress is kept."
-                : "Add objects and connect new paths. Your progress is kept."}
+                ? "Shape paths, obstacles and interactions."
+                : "Arrange the world and connect new possibilities."}
           </p>
-          <span className="editor-origin">
-            {proposal
-              ? `${proposal.provider} · proposed additions`
-              : "Manual world edit · preview"}
-          </span>
+          {proposal && (
+            <span className="editor-origin">Proposed additions</span>
+          )}
         </div>
         {revisedImage && (
           <div className="paper-review-header">
@@ -871,7 +867,7 @@ export function WorldEditor({
             </button>
           ))}
           <button
-            aria-label="Select and move new objects"
+            aria-label="Select and move objects"
             aria-pressed={tool === "move"}
             onClick={() => {
               setTool("move");
@@ -894,20 +890,20 @@ export function WorldEditor({
               "object"}{" "}
             at center
           </button>
-          {additions.length > 0 && (
+          {editableEntities.length > 0 && (
             <label>
-              New object{" "}
+              Object{" "}
               <select
-                aria-label="Select a new object"
+                aria-label="Select an object"
                 value={selected ?? ""}
                 onChange={(e) => {
                   selectObject(e.target.value || null);
-                  const next = additions.find((a) => a.id === e.target.value);
+                  const next = editableEntities.find((a) => a.id === e.target.value);
                   if (next) focusObject(next);
                 }}
               >
                 <option value="">Choose an object…</option>
-                {additions.map((e) => (
+                {editableEntities.map((e) => (
                   <option key={e.id} value={e.id}>
                     {title(e)}
                   </option>
@@ -1000,7 +996,7 @@ export function WorldEditor({
               className="editor-canvas"
               viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
               preserveAspectRatio="none"
-              aria-label="World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes it. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Existing objects are kept."
+              aria-label="World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes it. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Object identities and earned progress are kept."
               onKeyDown={canvasKey}
               onKeyUp={(e) => {
                 if (e.key === " ") setSpaceHeld(false);
@@ -1050,9 +1046,9 @@ export function WorldEditor({
                 />
               )}
               <g opacity={paperVisible ? 0.25 : 1}>
-                {sourceBackdrop && object(sourceBackdrop)}
-                {world.entities
-                  .filter((entity) => entity !== sourceBackdrop)
+                {sourceBackdrop && mode !== "platform" && object(sourceBackdrop)}
+                {currentEntities
+                  .filter((entity) => entity.id !== sourceBackdrop?.id)
                   .map((e) => object(e))}
               </g>
               {additions.map((e) => object(e, true))}
@@ -1081,7 +1077,7 @@ export function WorldEditor({
               : item
                 ? "Arrows move 10 units; Shift + arrows move 1. F focuses selection. Hold Space to pan; + / − zoom; 0 fits the world."
                 : tool === "move"
-                  ? "Drag a new object to move it. Existing objects stay put."
+                  ? "Select an object to move it, or add a new one."
                   : `${editorTools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
           </span>
         </div>
@@ -1099,10 +1095,10 @@ export function WorldEditor({
                   </strong>
                   <button
                     className="icon-button"
-                    aria-label="Remove selected new object"
+                    aria-label={existingSelected ? "Reset selected object changes" : "Remove selected object"}
                     onClick={removeSelected}
                   >
-                    <Trash2 size={16} />
+                    {existingSelected ? <Undo2 size={16} /> : <Trash2 size={16} />}
                   </button>
                 </div>
                 {item.art && mode !== "discover" && (
@@ -1124,6 +1120,8 @@ export function WorldEditor({
                   Object role
                   <select
                     aria-label="Selected object role"
+                    disabled={existingSelected}
+                    title={existingSelected ? "This role is referenced by the world rules." : undefined}
                     value={item.kind}
                     onChange={(e) =>
                       update({
@@ -1153,12 +1151,13 @@ export function WorldEditor({
                 <label>
                   Give it a name
                   <input
-                    aria-label="New object name"
+                    aria-label="Object name"
                     value={item.label ?? ""}
                     maxLength={60}
                     onChange={(e) => update({ label: e.target.value })}
                   />
                 </label>
+                {item.kind === "player" && <p className="editor-scope">Start position. Your current run stays where it is.</p>}
                 <div className="editor-dimensions">
                   {(["x", "y", "width", "height"] as const).map((key) => (
                     <label key={key}>
@@ -1202,7 +1201,7 @@ export function WorldEditor({
                     </label>
                   ))}
                 </div>
-                {revisedImage && mode !== "discover" && (
+                {revisedImage && mode !== "discover" && !existingSelected && (
                   <div className="editor-page-art">
                     <button
                       className="secondary-button"
@@ -1259,8 +1258,7 @@ export function WorldEditor({
               <div className="editor-empty-selection">
                 <Move size={22} />
                 <p>
-                  Choose an object above, then place it in the world. Select any
-                  new object to fine-tune it.
+                  Select an object in the image or the object list.
                 </p>
               </div>
             )}
@@ -1287,21 +1285,12 @@ export function WorldEditor({
                 ))}
               </div>
             )}
-            <h3>
-              <Check size={16} /> Your adventure comes with you
-            </h3>
-            <p>
-              {state.collected.length} collected{" "}
-              {state.collected.length === 1 ? "item" : "items"} ·{" "}
-              {state.activated.length} used{" "}
-              {state.activated.length === 1 ? "interaction" : "interactions"}
-              {hero ? " · character position kept" : " · discoveries kept"}
-            </p>
+            <p className="editor-progress-note">Earned progress is kept.</p>
             {mode !== "discover" && (
               <div className="editor-art-action">
                 <button
                   className="secondary-button"
-                  onClick={() => setDrawing(true)}
+                  onClick={() => { selectObject(null); setDrawing(true); }}
                 >
                   <ImagePlus size={15} /> Draw your own object
                 </button>
@@ -1319,7 +1308,7 @@ export function WorldEditor({
               {additions.length > 0
                 ? `${additions.length} new ${additions.length === 1 ? "object" : "objects"}. `
                 : ""}
-              Your existing objects and progress stay with you.
+              {changedCount > 0 ? `${changedCount} changed ${changedCount === 1 ? "object" : "objects"}.` : ""}
             </p>
             {(problem || error) && (
               <p className="editor-error" role="alert">
@@ -1354,14 +1343,14 @@ export function WorldEditor({
               <button
                 className="primary-button"
                 disabled={
-                  (!additions.length && !expanded) ||
+                  (!additions.length && !changedCount && !expanded) ||
                   preparingArtwork ||
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
                 }
                 onClick={apply}
               >
-                Apply & keep playing <ArrowUpRight size={17} />
+                Apply changes <ArrowUpRight size={17} />
               </button>
             </div>
           </section>

@@ -13,7 +13,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Suspense
       fallback={
-        <div className="studio-loading">A little world is waking up…</div>
+        <div className="studio-loading">Opening your studio…</div>
       }
     >
       {isCapture ? <Capture /> : <Studio />}

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { artworkRasterSize } from "./artwork-raster.ts";
-import { containArtwork, imageDirection } from "./image-direction.ts";
+import {
+  containArtwork,
+  imageDirection,
+  sourceColorField,
+} from "./image-direction.ts";
 
 test("SVG raster budgets preserve normal artwork and bound extreme display sizes without aspect distortion", () => {
   assert.deepEqual(artworkRasterSize(79, 95), { width: 237, height: 285 });
@@ -58,5 +62,24 @@ test("SVG raster budgets preserve normal artwork and bound extreme display sizes
     imageDirection([210, 50, 30, 255]).accent,
     bright.accent,
     "palette follows source pixels rather than file names or themes",
+  );
+  const checker = new Uint8ClampedArray(6 * 4 * 4);
+  for (let y = 0; y < 4; y++)
+    for (let x = 0; x < 6; x++) {
+      const i = (y * 6 + x) * 4;
+      checker[i] = (x + y) % 2 ? 255 : 0;
+      checker[i + 1] = (x + y) % 2 ? 0 : 255;
+      checker[i + 3] = 255;
+    }
+  const unchanged = [...checker];
+  assert.deepEqual(
+    sourceColorField(checker, 6, 4),
+    Array(6).fill(0x808000),
+    "platform atmosphere retains only six mean colors, discarding fine source detail",
+  );
+  assert.deepEqual(
+    [...checker],
+    unchanged,
+    "the original source pixels remain unchanged",
   );
 });
