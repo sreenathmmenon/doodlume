@@ -1,5 +1,7 @@
 # Doodlume — post-repair acceptance council — Product Council
 
+> **Correction — 2 November 2026:** The earlier all-10/10 presentation was overstated as an overall product-quality sign-off and is withdrawn. A fresh 25-perspective, four-round review reproduced missed editing/persistence failures and visible interface defects. See [the superseding critical review](FRESH-25-CRITICAL-REVIEW.md). The original comments below are preserved as historical records; they do not establish production readiness.
+
 Simulated perspectives inspired by public work. The named people did not participate, and these comments are not their quotations or endorsements.
 
 Simulated perspectives inspired by public work. The named people did not participate, and these comments are not their quotations or endorsements.

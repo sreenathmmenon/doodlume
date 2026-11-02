@@ -1,0 +1,134 @@
+[
+  {
+    "id": "E1",
+    "source": "Product source at0a4e3e9; src/App.tsx, src/components,src/game,server,shared",
+    "observation": "Frozen current implementation; independently inspect relevant source. No reviewer should read earlier council scores.",
+    "limits": "Source inspection is not user interaction or usability evidence."
+  },
+  {
+    "id": "E2",
+    "source": "screens/01-studio.png;02-discovery-desktop.png;03-discovery-short.png;04-example.png;05-create-retained.png",
+    "observation": "Current-build captures collected in the previous verification session, copied without its reviews: studio, discovery1440x900 and1024x600, exampleownership and createform.",
+    "limits": "Screenshots may be incomplete flow coverage. New live captures will supplement; do not infer full product quality from these alone."
+  },
+  {
+    "id": "E3",
+    "source": "screens/06-completion.png/txt;07-editor.png/txt;08-editor-selected.png/txt;09-create-empty.png/txt",
+    "observation": "Fresh current-build root UI captures: completed discovery, editor default, selected long-name region, empty create dialog. Selected object via native selector; no modifications applied.",
+    "limits": "IAB1280x720. Game completed before this session; completion screen is not a new playthrough. Inspect pixels and text rather than inferring hidden states."
+  },
+  {
+    "id": "E4",
+    "source": "screens/10-gameplay-options.png/txt;11-drawing-workspace.png/txt;12-manual-arrangement.png/txt;13-manual-lower.png/txt;14-alignment.png/txt;15-alignment-preview.png/txt",
+    "observation": "Fresh root UI captures of Gameplay expanded, drawtools, manual source/layout workspace, lowerdisclosures, fourcorneralignment and straightened preview. Existing recorded watercolor source uploaded; no modelcalls or accepted changes.",
+    "limits": "Default IAB1280x720. Manual empty-state only, not full authored gameplay. Alignment on flat source, not real photographed perspective correction."
+  },
+  {
+    "id": "E5",
+    "source": "screens/16-settings.png/txt;17-library.png/txt;18-library-top.png/txt;19-rules.png/txt;src/studio.css:2550",
+    "observation": "Fresh settings, 11-worldlibrary top and destinationrules captures. Library visible count text clipped at scrollTop0: scrollbody top93px; library-meta top85px/bottom103px with margin-top -8px; top8px outside scrollport. Cards with two-line titles place Open/Backup at different heights. No changes applied.",
+    "limits": "QA library includes old and corrected duplicate imports; this reflects retrieval stress, not number of distinct user-created games. Count clipping observed at1280x720; other sizes untested thissession."
+  },
+  {
+    "id": "E6",
+    "source": "screens/20-world-actions.png/txt;21-update-image.png/txt",
+    "observation": "Fresh More/worldoptions and Updateimage workflow for a discovery watercolor world. Undo unavailable without edit history. Update form displays existing/revised image, drawing/upload/camera, optional request and disabled preview. Root did not send update.",
+    "limits": "Update submission and preservation not newly exercised; inspect source separately. Placeholder content is visible in screenshot."
+  },
+  {
+    "id": "E7",
+    "source": "screens/22-editor-before-delete.png/txt;23-editor-after-delete.png/txt;src/components/WorldEditor.tsx:715-730,1098",
+    "observation": "Fresh UI repro: selected existing collected peach region, renamed to Audit region rename, pressedRight on keyboardcanvas. Apply enabled with1changedobject. PressDelete: original name restored, object remains, Apply disabled. Canvas accessible instruction says Delete removes it. No liveworld change applied.",
+    "limits": "Demonstrates reset-versus-delete mismatch for existing objects; new additions have different behavior. This test intentionally reset only our temporary draft change."
+  },
+  {
+    "id": "GP1",
+    "source": "screens/gameplay-dino-start.png; screens/gameplay-dino-complete.png; CUA tab 870324876, 2026-11-02",
+    "observation": "Imported verified-crayon-platform.doodlume.json through My worlds > Import & backup > Import backup > Import 1 world. Opened Dino\u2019s Star Hop. Mission said reach yellow star above tower; intro described purple platforms and red spikes. Clicked Play adventure, then Right 500ms, Space+Right 700ms, Right 650ms, Space+Right 750ms. Visibly reached World complete. The sequence used2.6 seconds of held input; this is not elapsed completion time. The scene retained a large white dinosaur-shaped source cutout while a smaller green dinosaur moved.",
+    "limits": "Single reviewer and recorded world, no user-study evidence. Screenshots alone do not establish input behavior; notes record actual CUA actions. No fresh generation tested. PROVENANCE CORRECTION: imported pre-recompile legacy Dino backup; source cutout appearance must NOT be treated as final corrected output. Latest backup is verified-crayon-platform-ready.doodlume.json. Current runtime processed legacy save; final current fixture needs separate inspection."
+  },
+  {
+    "id": "GP2",
+    "source": "CUA tab 870324876 Dino replay attempt, 2026-11-02",
+    "observation": "Replay from start returned the game view; toggled Show whole world and attempted Right movement. Later screenshots showed the character at spawn without a clear intermediate failure event. Another agent was operating a separate Chrome tab concurrently. This was excluded from defect conclusions.",
+    "limits": "Cannot distinguish background input scheduling, recovery to spawn, focus behavior, or product behavior. Death and reset consequences remain unverified in live play."
+  },
+  {
+    "id": "GP3",
+    "source": "screens/gameplay-clockwork-start.png; screens/gameplay-clockwork-five-found.png; screens/gameplay-clockwork-complete.png; CUA tab 870324876, 2026-11-02",
+    "observation": "Imported verified-clockwork-final-live-ready.doodlume.json through the same normal backup flow. Opened Clockwork Citadel Ascent and clicked Play adventure. Space500ms yielded1/5; Space+Right500ms moved to an added beige platform; Space600ms reached upper platform and2/5; Left220ms yielded3/5; Space+Right1200ms reached upper-right platform and4/5; Down+Space+Left180ms descended to lower platform and5/5. Mission updated to reach tall art-deco temple doorway with blue crystal portal. Space+Right850ms triggered World complete. All original orb artwork remained visibly present after5/5; collected corner cues were fainter, not removed. Completion offered Continue creating, Keep exploring, Replay from start.",
+    "limits": "Seven input bursts total4.05 seconds held input; not elapsed completion time. No measurement of enjoyment, long-term retention, skill distribution, or generation robustness. Audio off."
+  },
+  {
+    "id": "GP4",
+    "source": "src/game/WorldScene.ts:1224,1611,2142,2188 at frozen0a4e3e9",
+    "observation": "createCoin disables the collected overlap region and redraws its source cue. drawSourceCue changes alpha from0.85 to0.42 for found items, preserving the same corner shape. Platform controls include coyote time/jump buffering, variable height and Down+Space drop-through. Falling below world teleports to spawn and announces that discoveries are kept.",
+    "limits": "Source verification supports implementation intent, not live quality or failure-effect verification."
+  },
+  {
+    "id": "GF1-1",
+    "source": "Live Chrome CUA play of verified-cat-photo.doodlume.json via normal My worlds > Import backup; screens/gamefeel-cat-start.png",
+    "observation": "Started photo hunt. Image remained original and clue specified golden eye. Wrong paw click showed That detail comes later. Follow the current clue. Correct eye, other eye, nose, paw and ear clicks advanced one clue and count each. Coordinates came from displayed photo; no injected state.",
+    "limits": "Single simulated player; no human comprehension or enjoyment measurement. Sound muted."
+  },
+  {
+    "id": "GF1-2",
+    "source": "screens/gamefeel-cat-complete.png and screens/gamefeel-cat-finish.png; src/App.tsx:1329; src/game/discovery-progress.ts; verified-cat-photo.doodlume.json",
+    "observation": "After fifth correct detail, progress was 5/5 found while mission requested final whiskers. Sixth click triggered World complete, Achievement earned, Continue creating, Keep exploring and Replay from start. Source confirms five required pickups plus separate goal clue.",
+    "limits": "A progress communication mismatch, not an inability to finish; one recorded world."
+  },
+  {
+    "id": "GF1-3",
+    "source": "Live CUA Keep exploring after cat completion; src/game/WorldScene.ts:953-1001",
+    "observation": "Keep exploring dismissed completion and restored original photo with all five collected details marked; main prompt became Explore freely or keep creating. All target locations remained known. No additional goal or variation was offered in the inspected screen.",
+    "limits": "Replay variation and longer-term creator attachment not yet tested; motivation inference is a design hypothesis."
+  },
+  {
+    "id": "GF1-4",
+    "source": "Live CUA verified-kitchen-roam.doodlume.json import/play; screens/gamefeel-kitchen-start.png; screens/gamefeel-kitchen-direct-finish.png",
+    "observation": "Started Sunlit Kitchen Table Hunt. Mission was Reach spiral-bound kraft notebook at bottom right corner, with 0/5 optional. One normal click on the nearby visible notebook moved the guide and triggered World complete / Achievement earned while counter remained 0/5 optional.",
+    "limits": "Consistent with authored goalRules requiring no pickups. This is design-depth evidence, not a completion logic defect. Recorded world, not fresh generation."
+  },
+  {
+    "id": "GF1-5",
+    "source": "Live CUA Keep exploring, Show whole world, clicks on mug/oranges/keys, Right and Down input; screens/gamefeel-kitchen-exploration.png; screens/gamefeel-kitchen-optional-end.png",
+    "observation": "Whole-world view exposed the full kitchen photograph; click steering and directional keys moved the guide. Optional pickups advanced with object-name notifications. Collected all5 after completion; mission remained Explore freely or keep creating and optional count became5/5. No additional achievement or new task was visible in final state.",
+    "limits": "Audio muted, no latency measurement. An object toast may have appeared between captures. No human replay preference or attachment evidence."
+  },
+  {
+    "id": "GF1-6",
+    "source": "Live CUA kitchen click navigation; screens/gamefeel-kitchen-blocked.png; screens/gamefeel-kitchen-optional-end.png; src/game/WorldScene.ts:2027-2048",
+    "observation": "Some click routes stopped near selected points and announced That path is blocked. Choose another point or steer around it. Keyboard steering and further clicks allowed all optional details to be collected. Source contains a400ms stalled-motion detector.",
+    "limits": "Cause unresolved: automation timing/background scheduling may influence detection. Not asserted as a proven gameplay defect and not used to penalize rating. No concurrent Chrome input during kitchen pass per coordination."
+  },
+  {
+    "id": "E8",
+    "source": "screens/24-current-dino-replay.png/txt;25-current-dino-attempt.png/txt; QA library saved16:46:42 Dino",
+    "observation": "Root opened corrected saved Dino world and Replay. Current output shows intact green dinosaur and no white silhouette hole. This corrects GP1 legacy artifact appearance. Root attempted native IABheld input but saw no confirmed motion; excluded from gameplay judgments.",
+    "limits": "Appearance verification only. Existing game-design reviewer completed legacyDino and currentClockwork; needs latestDino session if relying on its current gameplay. Root did not claim newcompletion."
+  },
+  {
+    "id": "E9",
+    "source": "performance-render.json; performance-ui-transition.json; real-pipeline-timings.json",
+    "observation": "Earlier current-runtime local measurements copied without ratings: real6pipeline processing21.8\u201355.8s; recorded-response review-to-play117.1ms;8826mostlystandingrender frames median8.3ms,p959.3ms,zero>33ms,firstworldready882.5ms. UItransitionrequestdelay artificial; userreviewdwell not processing.",
+    "limits": "Not new measurements thisreview. No arbitraryinput success rate, coldnetworkbench, sustainedcomplexplay or actualuserwaitfeedback. Timingrecords original playCompletedfalse becauseloggerdidnotplay; gameagents now provide separate playevidence."
+  },
+  {
+    "id": "E10",
+    "source": "screens/26-controls-help.png/txt",
+    "observation": "Fresh current adventure help includes movement/jump/drop shortcuts, required-actions-before-destination explanation and local save/backup explanation. Root opened Help normally; no changes.",
+    "limits": "Does not prove firsttime discovery of help or understanding; screenshot current1280x720."
+  },
+  {
+    "id": "E11",
+    "source": "Root live QA5184 UI; screens/27-applied-unsaved-edit.png/.txt,28-world-switch-no-warning.png/.txt,29-unsaved-edit-lost-on-reopen.png/.txt",
+    "observation": "Current corrected Dino saved16:46:42: Edit world, select yellow star above tower, rename Audit unsaved star, Apply changes. Main mission becomes Reach Audit unsaved star; toast World updated; Save remains static. Open My worlds and Clockwork, then reopen same saved Dino. No unsaved-change prompt appeared; editor lists original yellow star above tower and no pending draft. Applied rename was lost. No Save was pressed. Only disposable QA-session edit used; saved original unchanged.",
+    "limits": "Demonstrates loss of an applied-but-not-saved name edit during in-app world switching, not loss after explicit Save. Other unsaved transitions and new-world persistence not exercised here."
+  },
+  {
+    "id": "GP5",
+    "source": "screens/gameplay-current-dino-start.png; screens/gameplay-current-dino-complete.png; CUA Chrome tab870324906; outputs/pipeline-repair/verified-crayon-platform-ready.doodlume.json",
+    "observation": "Imported CURRENT ready Dino backup through My worlds > Import & backup > Import backup > Import1world, then opened library item saved02/11/2026 16:58:43. Corrected image has intact green dinosaur and no white silhouette hole. Clicked Play adventure, pressed Space+Right600ms, observed dinosaur over middle purple platform; pressed Space+Right750ms and verified World complete and Achievement earned. Exclusive Chrome input during this run. Total held input1.35seconds, two bursts. Measurement from just before Play click to completion-state capture was8.659seconds including tool round trips and observation; startEpochMs1793632620393/endEpochMs1793632629052. Completion offers Continue creating, Keep exploring, Replay from start.",
+    "limits": "Recorded fixture, not fresh generation or an unassisted novice. Reviewer had prior legacy-route familiarity. Wallclock includes tool/capture overhead and is not a human completion benchmark. Sound muted. No failure recovery test. GP5 supersedes GP1 for CURRENT Dino appearance and route evidence; GP1 remains legacy history."
+  }
+]
