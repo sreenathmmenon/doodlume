@@ -380,16 +380,16 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               </button>
               <button
                 type="button"
-                onClick={() => scene.current?.resetDiscoveryView()}
-              >
-                Fit image
-              </button>
-              <button
-                type="button"
                 aria-label="Zoom in"
                 onClick={() => scene.current?.zoomDiscovery(1.4)}
               >
                 +
+              </button>
+              <button
+                type="button"
+                onClick={() => scene.current?.resetDiscoveryView()}
+              >
+                Fit image
               </button>
             </div>
             <button
@@ -411,7 +411,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               <summary>Keyboard play</summary>
               <div className="discovery-keyboard-fields">
               <label>
-                Choose an object in the image
+                <span className="discovery-keyboard-label">Choose an object in the image</span>
                 <select
                   ref={discoveryChoice}
                   value={selectedDiscovery}

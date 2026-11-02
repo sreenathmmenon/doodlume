@@ -32,3 +32,16 @@ Final integrated checks: build and TypeScript pass; all 53 regression checks pas
 ## Practical limits
 
 The six inspected inputs do not establish arbitrary-image reliability. Background interpolation can leave subtle paper-texture changes. Draft caches retain dismissed work during the session, not across browser reloads. Mobile optimization remains deferred. Actual user delight, retention, willingness to pay, broad performance and competition outcomes have not been measured; this verification does not certify them as 10/10.
+
+## Post-repair council verification — November 2
+
+The new four-round council used ten separately delegated simulated perspectives and preserved all 40 original contributions in `docs/POST-REPAIR-COUNCIL.md`. Every final reviewer rated their explicitly inspected lens 10/10; this is not a universal product score. No remaining demonstrated defect was identified in those inspected scopes. Participant comprehension, comprehensive assistive technology/zoomed-text coverage, an independently ignored-abort response race, and arbitrary-image reliability remain unverified.
+
+Three residual interface corrections were implemented and verified:
+- Discovery zoom uses minus, plus, Fit in the same relative order as other view controls.
+- Example edit/save accessible names match visible Make a copy / Save a copy labels.
+- Short-desktop keyboard disclosure leaves 215 px of complete artwork height at actual 1024×600 rather than approximately 144 px. Selection advanced discovery progress and returned focus. 1280×720 and 1440×900 were also inspected without document overflow.
+
+A local controlled response check verified Stop preserves source and idea, a released cancelled response does not replace the draft, and retry reaches review and play. This used a recorded fixture, not new inference. Review acceptance to playable measured 117.1 ms; intentionally held response time and operator review dwell are recorded separately. A local Citadel rendering sample recorded 8,826 frames, median 8.3 ms and p95 9.3 ms; this mostly stationary sample is not a general performance guarantee.
+
+Build, TypeScript, two relevant existing regression checks, whitespace validation and credential scan passed. Evidence, original criteria, diagnostics and screenshots remain in `outputs/post-repair-council/` locally; outputs are intentionally excluded from Git.

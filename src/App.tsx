@@ -1271,7 +1271,7 @@ export default function App() {
               </button>
                 <button
                   className="secondary-button edit-world-button"
-                  aria-label="Edit world"
+                  aria-label={world.source === "example" ? "Make a copy" : "Edit world"}
                   onClick={openEditor}
                   disabled={busy}
                 >
@@ -1280,7 +1280,7 @@ export default function App() {
                 </button>
                 <button
                   className="secondary-button save-button"
-                  aria-label="Save world on this device"
+                  aria-label={world.source === "example" ? "Save a copy on this device" : "Save world on this device"}
                   onClick={() => void save()}
                   disabled={saving}
                   aria-busy={saving}

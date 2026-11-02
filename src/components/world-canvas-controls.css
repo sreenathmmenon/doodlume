@@ -222,3 +222,14 @@
   .discovery-keyboard-fields { align-items: end; }
   .discovery-keyboard-fields button { margin-right: 10px; }
 }
+
+/* On short desktops keep the image useful while its keyboard alternative is open. */
+@media (min-width: 801px) and (max-height: 700px) {
+  .discovery-access { column-gap: 8px; flex-basis: 360px; }
+  .discovery-keyboard[open] { width: 280px; max-width: 280px; }
+  .discovery-keyboard-fields { gap: 6px; }
+  .discovery-keyboard-fields label { gap: 0; }
+  .discovery-keyboard-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .discovery-keyboard-fields select { font-size: 13px; line-height: 18px; }
+  .discovery-keyboard-fields button { padding-inline: 8px; }
+}
