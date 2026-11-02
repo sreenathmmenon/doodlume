@@ -10,11 +10,14 @@ import {
 import { cropArtwork, imageData, pixelBox } from "./images.js";
 import type { ModelConnection } from "./provider.js";
 import type { WorldEntity, InputKind } from "../shared/world.js";
+import { localSegmentationArtwork, localSegmentationConfig, type LocalSegmentationConfig } from "./local-segmentation.js";
 
 export interface SegmentationConnection {
   enabled: boolean;
   apiKey: string;
   reserveRequest?: () => void;
+  provider?: "meta-api" | "local-sam2";
+  local?: LocalSegmentationConfig;
 }
 export interface ArtworkObject {
   id: string;
@@ -25,16 +28,22 @@ export interface ArtworkObject {
 }
 export type Artwork = Pick<WorldEntity, "art" | "artMethod" | "artNote">;
 
+export const segmentationConfigured = (connection: SegmentationConnection) =>
+  connection.provider === "local-sam2" ? Boolean(connection.local?.configured) : Boolean(connection.apiKey);
+
 // Hosted interpretation adapters do not expose this direct-Meta endpoint. Using both providers is opt-in.
 export function segmentationConnection(
   env: Record<string, string | undefined>,
   provider: ModelConnection,
 ): SegmentationConnection {
+  if (env.CUTOUT_PROVIDER === "local-sam2")
+    return { enabled: true, apiKey: "", provider: "local-sam2", local: localSegmentationConfig(env) };
   return {
     enabled:
       env.SAM_ENABLED === "true" ||
       (env.SAM_ENABLED !== "false" && provider.provider === "meta"),
     apiKey: env.MODEL_API_KEY?.trim() || "",
+    provider: "meta-api",
   };
 }
 
@@ -214,12 +223,25 @@ export async function extractArtwork(
   const iw = meta.width!,
     ih = meta.height!;
   const result = new Map<string, Artwork>();
-  let fallback = !connection.enabled
+  const useLocal = connection.provider === "local-sam2";
+  let fallback = useLocal
+    ? "Local Meta SAM 2.1 cutout unavailable; paper-background removal used. Check the edges."
+    : !connection.enabled
     ? "Paper-background removal; precise cutouts are off."
     : !connection.apiKey
       ? "Paper-background removal; precise cutouts need direct Meta access."
       : "Precise cutout unavailable; paper-background removal used. Check the edges.";
-  if (connection.enabled && connection.apiKey) {
+  if (connection.enabled && useLocal && connection.local?.configured) {
+    try {
+      const masks = await localSegmentationArtwork(source, objects.map(object => {
+        const box = pixelBox(object, iw, ih);
+        return { id: object.id, left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height };
+      }), connection.local, signal);
+      for (const [id, art] of masks) result.set(id, {
+        art, artMethod: "sam", artNote: "Original source pixels masked by Meta SAM 2.1 tiny running locally. Check the outline.",
+      });
+    } catch { signal.throwIfAborted(); /* No remote call, automatic retry or provider switch. */ }
+  } else if (connection.enabled && !useLocal && connection.apiKey) {
     // SAM accepts at most sixteen prompted objects per request.
     for (let offset = 0; offset < objects.length; offset += 16) {
       const batch = objects.slice(offset, offset + 16);
@@ -332,7 +354,9 @@ export async function extractArtwork(
         artMethod: inputKind === "picture" ? "crop" : "paper",
         artNote:
           inputKind === "picture"
-            ? "Picture crop; background is still included. A precise cutout was not available."
+            ? useLocal
+              ? "Original picture crop; background remains because the local Meta SAM 2.1 cutout was unavailable."
+              : "Picture crop; background is still included. A precise cutout was not available."
             : fallback,
       });
   }

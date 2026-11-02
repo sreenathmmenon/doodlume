@@ -12,6 +12,8 @@ const snapshot = resolve(homedir(), '.cache', `doodlume-preview-${suffix}`);
 if (!existsSync(resolve(root, 'dist/index.html'))) throw new Error('Build the studio first with npm run build.');
 mkdirSync(snapshot, { recursive: true, mode: 0o700 });
 for (const name of ['dist', 'server', 'shared']) cpSync(resolve(root, name), resolve(snapshot, name), { recursive: true });
+mkdirSync(resolve(snapshot, 'scripts'), { recursive: true });
+cpSync(resolve(root, 'scripts/local-sam-worker.py'), resolve(snapshot, 'scripts/local-sam-worker.py'));
 cpSync(resolve(root, 'package.json'), resolve(snapshot, 'package.json'));
 const modules = resolve(snapshot, 'node_modules');
 if (!existsSync(modules)) symlinkSync(realpathSync(resolve(root, 'node_modules')), modules, 'dir');

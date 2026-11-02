@@ -26,6 +26,8 @@ const snapshot = resolve(
 mkdirSync(snapshot, { recursive: true, mode: 0o700 });
 for (const name of ["src", "server", "shared", "public"])
   cpSync(resolve(root, name), resolve(snapshot, name), { recursive: true });
+mkdirSync(resolve(snapshot, "scripts"), { recursive: true });
+cpSync(resolve(root, "scripts/local-sam-worker.py"), resolve(snapshot, "scripts/local-sam-worker.py"));
 for (const name of [
   "package.json",
   "tsconfig.json",

@@ -7,6 +7,7 @@ import { validateWorld } from "../shared/world.js";
 import { setupFeedback } from "../shared/setup.js";
 import { imageData, cropArtwork } from "./images.js";
 import { removeBoundaryPaper } from "../shared/paper-art.js";
+import { groundDrawingBoxes } from "./ink-grounding.js";
 
 test("picture interpretation preserves pale photographic pixels without SAM and manual review rejects invalid selections and blocked spawns", async () => {
   const source = await sharp({
@@ -160,4 +161,87 @@ test("picture interpretation preserves pale photographic pixels without SAM and 
     () => removeBoundaryPaper(new Uint8Array(4), 2_000_001, 1),
     /smaller source image/,
   );
+
+  // Photographed/shaded paper must not be treated as a binary ink mask.
+  const platform = { kind: "terrain", x: 100, y: 600, width: 700, height: 200 };
+  const photograph = await sharp(
+    Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="#beb4a5"/><rect x="40" y="40" width="420" height="420" fill="#dededc"/><rect x="50" y="300" width="350" height="100" fill="#473561"/></svg>',
+    ),
+  )
+    .png()
+    .toBuffer();
+  assert.deepEqual(await groundDrawingBoxes(photograph, [platform]), [
+    platform,
+  ]);
+  const greyDrawing = await sharp(
+    Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="#dededc"/><rect x="100" y="100" width="60" height="90" fill="#ba4949"/></svg>',
+    ),
+  )
+    .png()
+    .toBuffer();
+  const located = (
+    await groundDrawingBoxes(greyDrawing, [
+      { kind: "player", x: 220, y: 150, width: 120, height: 170 },
+    ])
+  )[0];
+  assert.ok(located.x < 200 && located.y < 200);
+  assert.ok(located.width >= 120 && located.height >= 180);
+  const blank = (
+    await groundDrawingBoxes(greyDrawing, [
+      { kind: "coin", x: 700, y: 700, width: 40, height: 40 },
+    ])
+  )[0];
+  assert.ok("groundingIssue" in blank);
+  assert.match(String(blank.groundingIssue), /could not be isolated/);
+  const whitePage = await sharp(
+    Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="white"/><rect x="50" y="300" width="350" height="100" fill="#473561"/></svg>',
+    ),
+  )
+    .png()
+    .toBuffer();
+  const refined = (await groundDrawingBoxes(whitePage, [platform]))[0];
+  assert.ok(refined.y <= platform.y);
+  assert.ok(
+    refined.y + refined.height >= platform.y + platform.height,
+    "A support edge cannot replace the full platform artwork with a thin strip",
+  );
+
+  const shadedPaper = new Uint8Array(rgba);
+  for (let i = 0; i < shadedPaper.length; i += 4)
+    if (shadedPaper[i] > 226) {
+      shadedPaper[i] = 220;
+      shadedPaper[i + 1] = 222;
+      shadedPaper[i + 2] = 219;
+    }
+  shadedPaper[0] = 220;
+  shadedPaper[1] = 222;
+  shadedPaper[2] = 219;
+  const paleStroke = (1 * 12 + 1) * 4;
+  shadedPaper[paleStroke] = 198;
+  shadedPaper[paleStroke + 1] = 199;
+  shadedPaper[paleStroke + 2] = 197;
+  const photographedOriginal = new Uint8Array(shadedPaper);
+  assert.equal(
+    removeBoundaryPaper(shadedPaper, 12, 12).photographedPaper,
+    true,
+  );
+  assert.equal(shadedPaper[(1 * 12 + 10) * 4 + 3], 0);
+  assert.equal(shadedPaper[center + 3], 128);
+  assert.equal(shadedPaper[paleStroke + 3], 255);
+  for (let i = 0; i < shadedPaper.length; i += 4)
+    assert.deepEqual(
+      shadedPaper.slice(i, i + 3),
+      photographedOriginal.slice(i, i + 3),
+    );
+  const colouredEdge = new Uint8Array(12 * 12 * 4);
+  for (let i = 0; i < colouredEdge.length; i += 4)
+    colouredEdge.set([190, 162, 117, 255], i);
+  assert.equal(
+    removeBoundaryPaper(colouredEdge, 12, 12).photographedPaper,
+    false,
+  );
+  assert.equal(colouredEdge[3], 255);
 });

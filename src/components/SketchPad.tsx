@@ -208,7 +208,7 @@ export function SketchPad({
       <p className="modal-copy">
         {initialImage
           ? "Add to your current page. Your existing drawing is protected; the eraser and undo affect only your new strokes."
-          : "Draw a character, some ground, and somewhere to go. Keep shapes separate and give your character a clear outline."}
+          : "Draw whatever comes to mind. Your shapes, characters and colors can become a world to play in."}
       </p>
       <div className="sketch-tools">
         <div className="swatches">

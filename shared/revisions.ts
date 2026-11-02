@@ -1,10 +1,12 @@
 import {
   retainPlayState,
+  movementMode,
   validateWorld,
   type PlayState,
   type GoalRules,
   type WorldDefinition,
   type WorldEntity,
+  type WorldGameplay,
 } from "./world.js";
 
 export interface WorldPatch {
@@ -16,6 +18,7 @@ export interface WorldPatch {
   sourceImage?: string;
   bounds?: { width: number; height: number };
   goalRules?: GoalRules;
+  gameplay?: WorldGameplay;
 }
 export interface RevisionCheckpoint {
   before: WorldDefinition;
@@ -23,7 +26,7 @@ export interface RevisionCheckpoint {
 }
 
 function safePlayerPosition(world: WorldDefinition, state: PlayState) {
-  if (!state.player) return;
+  if (!state.player || movementMode(world) === "discover") return;
   if (state.player.x > world.width || state.player.y > world.height)
     throw new Error(
       "Move back inside the original world before undoing this expansion.",
@@ -67,7 +70,7 @@ export function applyWorldPatch(
     !patch.id ||
     !["manual", "meta"].includes(patch.origin) ||
     !Array.isArray(patch.additions) ||
-    (!patch.additions.length && !patch.bounds && patch.goalRules === undefined)
+    (!patch.additions.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined)
   )
     throw new Error("Add something to your world before applying this change.");
   if (patch.additions.some((e) => e.kind === "player"))
@@ -79,6 +82,8 @@ export function applyWorldPatch(
     (patch.bounds.width < world.width || patch.bounds.height < world.height)
   )
     throw new Error("New space must extend the existing world.");
+  if (patch.gameplay && patch.gameplay.movement !== movementMode(world))
+    throw new Error("Keep this world's movement style while editing its clues.");
   const next = validateWorld({
     ...structuredClone(world),
     revision: world.revision + 1,
@@ -87,8 +92,12 @@ export function applyWorldPatch(
     ...(patch.goalRules !== undefined
       ? { goalRules: structuredClone(patch.goalRules) }
       : {}),
+    ...(patch.gameplay !== undefined ? {gameplay: structuredClone(patch.gameplay)} : {}),
     entities: [
-      ...structuredClone(world.entities),
+      ...structuredClone(world.entities).map(entity =>
+        patch.sourceImage && entity.artNote === "Full original image used as the world backdrop; generated gameplay is separate."
+          ? {...entity, art: patch.sourceImage}
+          : entity),
       ...structuredClone(patch.additions),
     ],
   });

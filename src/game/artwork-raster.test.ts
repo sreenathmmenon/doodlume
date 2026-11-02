@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { artworkRasterSize } from "./artwork-raster.ts";
+import { containArtwork, imageDirection } from "./image-direction.ts";
 
 test("SVG raster budgets preserve normal artwork and bound extreme display sizes without aspect distortion", () => {
   assert.deepEqual(artworkRasterSize(79, 95), { width: 237, height: 285 });
@@ -27,4 +28,35 @@ test("SVG raster budgets preserve normal artwork and bound extreme display sizes
       height: raster.width,
     });
   }
+  const wide = containArtwork(800, 200, 110, 88);
+  const tall = containArtwork(200, 800, 72, 88);
+  assert.ok(
+    Math.abs(wide.width - 110) < 1e-9 && Math.abs(wide.height - 27.5) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(tall.width - 22) < 1e-9 && Math.abs(tall.height - 88) < 1e-9,
+  );
+  const bright = imageDirection(
+    new Uint8ClampedArray([255, 255, 255, 255, 10, 100, 180, 255]),
+  );
+  const dark = imageDirection(
+    new Uint8ClampedArray([0, 0, 0, 255, 10, 100, 180, 255]),
+  );
+  assert.equal(
+    bright.accent,
+    dark.accent,
+    "source accent survives bright or dark neutral backgrounds",
+  );
+  assert.equal(bright.lightSource, true);
+  assert.equal(dark.lightSource, false);
+  assert.equal(
+    imageDirection([255, 0, 0, 0]).accent,
+    imageDirection([]).accent,
+    "transparent colors do not invent a palette",
+  );
+  assert.notEqual(
+    imageDirection([210, 50, 30, 255]).accent,
+    bright.accent,
+    "palette follows source pixels rather than file names or themes",
+  );
 });

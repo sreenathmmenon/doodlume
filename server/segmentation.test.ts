@@ -9,6 +9,10 @@ import { modelConnection } from "./provider.js";
 import { imageData } from "./images.js";
 import { applyWorldPatch } from "../shared/revisions.js";
 import { emptyPlayState } from "../shared/world.js";
+import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { localSegmentationArtwork, closeLocalSegmentationWorkers } from "./local-segmentation.js";
 
 // Published Meta wire-format example, used as synthetic protocol data only.
 // It is not an inference result from this app or a drawing-recognition benchmark.
@@ -29,6 +33,35 @@ const image = await sharp(
 )
   .png()
   .toBuffer();
+
+test("local cutout replies cannot change crop dimensions, failures stay local and cancellation stops an owned worker", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "doodlume-local-mask-test-"));
+  const wrongSizePng = (await sharp({ create: { width: 2, height: 2, channels: 4, background: "red" } }).png().toBuffer()).toString("base64");
+  const makeConfig = async (name: string, reply: boolean) => {
+    const executable = join(directory, name);
+    await writeFile(executable, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');\nprocess.stdin.setEncoding('utf8');let pending='';process.stdin.on('data',chunk=>{pending+=chunk;let end;while((end=pending.indexOf('\\n'))!==-1){const request=JSON.parse(pending.slice(0,end));pending=pending.slice(end+1);${reply ? `process.stdout.write(JSON.stringify({id:request.id,records:[{id:'hero',png:'${wrongSizePng}',score:.9,visible:10,pixels:1620}],ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');` : ""}}});\n`);
+    await chmod(executable, 0o700);
+    return { python: executable, checkpoint: "synthetic-protocol-only", worker: "synthetic-protocol-only", configured: true };
+  };
+  const boxes = [{ id: "hero", left: 20, top: 30, right: 80, bottom: 57 }];
+  try {
+    const malformed = await makeConfig("wrong-dimensions", true);
+    await assert.rejects(() => localSegmentationArtwork(image, boxes, malformed, new AbortController().signal), /dimensions/);
+    let paid = 0, remote = 0;
+    const fallback = await extractArtwork(image, [object], {
+      enabled: true, apiKey: "", provider: "local-sam2", local: malformed,
+      reserveRequest: () => { paid++; },
+    }, new AbortController().signal, async () => { remote++; throw new Error("Remote must not be called"); });
+    assert.equal(paid, 0); assert.equal(remote, 0);
+    assert.equal(fallback.get("hero")?.artMethod, "paper");
+    assert.match(fallback.get("hero")?.artNote ?? "", /Local Meta SAM 2.1 cutout unavailable/);
+    const cancellation = new AbortController();
+    const waiting = await makeConfig("wait-for-cancellation", false);
+    const timer = setTimeout(() => cancellation.abort(), 80);
+    try { await assert.rejects(() => localSegmentationArtwork(image, boxes, waiting, cancellation.signal)); }
+    finally { clearTimeout(timer); }
+  } finally { closeLocalSegmentationWorkers(); await rm(directory, { recursive: true, force: true }); }
+});
 const json = (value: unknown) =>
   new Response(
     JSON.stringify({

@@ -43,6 +43,17 @@ export interface GoalRules {
   requiredActivatedIds: string[];
 }
 
+export interface WorldGameplay {
+  movement: "platform" | "roam" | "discover";
+  objectiveTitle: string;
+  instructions: string;
+  clues?: { entityId: string; text: string }[];
+}
+
+export function movementMode(world: Pick<WorldDefinition, "gameplay">) {
+  return world.gameplay?.movement ?? "platform";
+}
+
 export interface WorldDefinition {
   id: string;
   name: string;
@@ -56,6 +67,7 @@ export interface WorldDefinition {
   sourceImage: string;
   entities: WorldEntity[];
   goalRules?: GoalRules;
+  gameplay?: WorldGameplay;
   revision: number;
 }
 
@@ -76,7 +88,7 @@ export const emptyPlayState = (): PlayState => ({
   completed: false,
 });
 
-export function validateWorld(value: unknown): WorldDefinition {
+export function validateWorld(value: unknown, options: { allowIncomplete?: boolean } = {}): WorldDefinition {
   if (!value || typeof value !== "object")
     throw new Error("This drawing did not produce a usable world.");
   const w = value as WorldDefinition;
@@ -121,6 +133,16 @@ export function validateWorld(value: unknown): WorldDefinition {
     w.entities.length > 160
   )
     throw new Error("The drawing is too complex for this world.");
+  if (w.gameplay !== undefined) {
+    const g = w.gameplay;
+    if (!g || typeof g !== "object" || Array.isArray(g) ||
+        !["platform", "roam", "discover"].includes(g.movement) ||
+        typeof g.objectiveTitle !== "string" || !g.objectiveTitle.trim() || g.objectiveTitle.length > 100 ||
+        typeof g.instructions !== "string" || !g.instructions.trim() || g.instructions.length > 180 ||
+        (g.clues !== undefined && (!Array.isArray(g.clues) || g.clues.length > 24)) ||
+        (g.movement === "discover" && (!Array.isArray(g.clues) || !g.clues.length)))
+      throw new Error("This world's game instructions are incomplete.");
+  }
   const allowed: EntityKind[] = [
     "player",
     "terrain",
@@ -213,17 +235,28 @@ export function validateWorld(value: unknown): WorldDefinition {
     )
       throw new Error("Unsupported selection shape.");
   }
-  if (
-    w.entities.filter((e) => e.kind === "player").length !== 1 ||
-    !w.entities.some((e) => ["terrain", "bridge"].includes(e.kind))
-  )
-    throw new Error(
-      "Choose one character and include some ground to stand on.",
-    );
-  for (const entity of w.entities.filter((e) => e.kind === "lever")) {
+  const mode = movementMode(w);
+  const characters = w.entities.filter((e) => e.kind === "player").length;
+  if (!options.allowIncomplete && (mode === "discover" ? characters !== 0 : characters !== 1))
+    throw new Error(mode === "discover"
+      ? "Discovery uses the original image directly, without a separate character."
+      : "Choose one character and include some ground to stand on.");
+  if (!options.allowIncomplete && mode === "platform" && !w.entities.some((e) => ["terrain", "bridge"].includes(e.kind)))
+    throw new Error("Choose one character and include some ground to stand on.");
+  if (w.gameplay?.clues) {
+    const targets = new Set<string>();
+    for (const clue of w.gameplay.clues) {
+      if (!clue || typeof clue !== "object" || typeof clue.entityId !== "string" ||
+          targets.has(clue.entityId) || typeof clue.text !== "string" || !clue.text.trim() || clue.text.length > 160 ||
+          !w.entities.some(e => e.id === clue.entityId && ["coin", "lever", "goal"].includes(e.kind)))
+        throw new Error("A discovery clue needs one distinct visible object and a short instruction.");
+      targets.add(clue.entityId);
+    }
+  }
+  for (const entity of w.entities.filter((e) => e.kind === "lever" && !options.allowIncomplete)) {
     if (
-      !entity.targetId ||
-      !w.entities.some((e) => e.id === entity.targetId && e.kind === "gate")
+      (mode === "platform" && !entity.targetId) ||
+      (entity.targetId !== undefined && !w.entities.some((e) => e.id === entity.targetId && e.kind === "gate"))
     )
       throw new Error(
         "A lever needs a clear connection to a gate in this world.",
@@ -252,13 +285,37 @@ export function validateWorld(value: unknown): WorldDefinition {
         );
     }
     if (
-      (rules.requiredCollectedIds.length ||
+      !options.allowIncomplete && (rules.requiredCollectedIds.length ||
         rules.requiredActivatedIds.length) &&
       !w.entities.some((e) => e.kind === "goal")
     )
       throw new Error("Add a destination before choosing its requirements.");
   }
+  if (!options.allowIncomplete && mode === "discover" && w.goalRules) {
+    const clued = new Set(w.gameplay?.clues?.map(clue => clue.entityId));
+    if ([...w.goalRules.requiredCollectedIds, ...w.goalRules.requiredActivatedIds].some(id => !clued.has(id)))
+      throw new Error("Add a discovery clue for each required object before applying these rules.");
+  }
   return w;
+}
+
+/** Keeps discovery order and finishing requirements in sync when the creator edits them. */
+export function withGoalRules(world: WorldDefinition, rules: GoalRules, clueTexts: Record<string, string> = {}) {
+  if (movementMode(world) !== "discover") return validateWorld({ ...world, goalRules: structuredClone(rules) });
+  const required = [...rules.requiredCollectedIds, ...rules.requiredActivatedIds];
+  const old = world.gameplay!.clues ?? [];
+  const ordered = [
+    ...old.filter(clue => required.includes(clue.entityId)).map(clue => clue.entityId),
+    ...required.filter(id => !old.some(clue => clue.entityId === id)),
+  ];
+  const clues = ordered.map(entityId => ({
+    entityId,
+    text: (clueTexts[entityId] ?? old.find(clue => clue.entityId === entityId)?.text ?? `Find ${objectiveObjectLabel(world, entityId)}.`).trim(),
+  }));
+  const destination = old.find(clue => world.entities.some(entity => entity.id === clue.entityId && entity.kind === "goal"))?.entityId
+    ?? world.entities.find(entity => entity.kind === "goal")?.id;
+  if (destination) clues.push({entityId: destination, text: (clueTexts[destination] ?? old.find(clue => clue.entityId === destination)?.text ?? `Finish at ${objectiveObjectLabel(world, destination)}.`).trim()});
+  return validateWorld({ ...world, goalRules: structuredClone(rules), gameplay: { ...world.gameplay!, clues } });
 }
 
 export function objectiveObjectLabel(

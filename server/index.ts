@@ -13,7 +13,8 @@ import { interpretAmendment } from "./amend.js";
 import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
 import { loadLocalProviderKeys } from "./credentials.js";
-import { segmentationConnection } from "./segmentation.js";
+import { segmentationConnection, segmentationConfigured } from "./segmentation.js";
+import { closeLocalSegmentationWorkers } from "./local-segmentation.js";
 import { installStudioFallback } from "./static-routing.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,6 +42,9 @@ const segmentation = {
   reserveRequest,
 };
 const app = Fastify({ bodyLimit: 17_000_000, logger: false });
+app.addHook("onClose", async () => { closeLocalSegmentationWorkers(); });
+for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const)
+  process.once(signal, () => { closeLocalSegmentationWorkers(); process.exit(code); });
 app.addHook("onRequest", async (request, reply) => {
   const origin = request.headers.origin;
   if (
@@ -69,8 +73,10 @@ app.get("/api/status", async () => ({
   requestsRemaining: Math.max(0, maxRequests - requests),
   segmentation: {
     enabled: segmentation.enabled,
-    configured: Boolean(segmentation.apiKey),
-    model: "sam-3.1",
+    configured: segmentationConfigured(segmentation),
+    provider: segmentation.provider ?? "meta-api",
+    localConfigured: Boolean(segmentation.local?.configured),
+    model: segmentation.provider === "local-sam2" ? "Meta SAM 2.1 tiny" : "sam-3.1",
   },
 }));
 for (const action of ["interpret", "amend"] as const)

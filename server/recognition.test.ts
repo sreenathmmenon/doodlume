@@ -51,6 +51,104 @@ function response(value: unknown) {
   );
 }
 
+test("creative images without game pieces produce bounded playable routes, including a wide source subject beside a steep proposed rise", async () => {
+  const image = imageData(await sharp(Buffer.from(
+    '<svg width="1000" height="1000" xmlns="http://www.w3.org/2000/svg"><rect width="1000" height="1000" fill="white"/><rect x="100" y="300" width="800" height="100" fill="#7243b1"/></svg>',
+  )).png().toBuffer());
+  for (const hasSubject of [false, true]) {
+    let calls = 0;
+    const world = await interpretDrawing(
+      image, "Explore my picture", connection, new AbortController().signal,
+      { enabled: false, apiKey: "" },
+      async () => {
+        calls++;
+        return response({
+          name: "Synthetic creative route fixture",
+          description: "Compiler regression, not a live recognition result.",
+          theme: "moon", clarification: "",
+          objects: hasSubject ? [{...object("wide-subject", "player", 500, 350, 800, 100),bounds:{left:100,top:300,right:900,bottom:400}}] : [],
+          goalRules: { requiredCollectedIds: [], requiredActivatedIds: [] },
+          gameplay: {
+            mode: "creative", reason: "Actual marks are not a pre-drawn platform game.",
+            avatarId: hasSubject ? "wide-subject" : null,
+            objective: "explore", objectiveLabel: "Color fragments", destinationLabel: "Color haven",
+            // The old compiler inserted an overhanging halfway platform when
+            // this proposed rise exceeded 80px, intersecting the wide avatar.
+            path: [{ x: 0, y: 900, label: "Start" }, { x: 0, y: 0, label: "Rise" }, { x: 0, y: 0, label: "Haven" }],
+          },
+        });
+      },
+    );
+    assert.equal(calls, 1);
+    assert.equal(world.source, "meta");
+    assert.deepEqual(setupFeedback(world).errors, []);
+    assert.equal(world.entities.filter(entity => entity.kind === "player").length, 1);
+    assert.ok(world.entities.some(entity => entity.kind === "goal"));
+    const hero = world.entities.find(entity => entity.kind === "player")!;
+    const backdrop = world.entities.find(entity => entity.artNote?.startsWith("Full original image"))!;
+    assert.equal(backdrop.art, world.sourceImage);
+    if (hasSubject) {
+      assert.match(hero.art!, /^data:image\/png;base64,/);
+      assert.deepEqual(hero.artSource, { x: 100, y: 300, width: 800, height: 100 });
+    } else {
+      assert.equal(hero.art, undefined);
+      assert.match(hero.artNote!, /Generated guide/);
+    }
+    const platforms = world.entities.filter(entity => entity.kind === "bridge");
+    for (const [index, platform] of platforms.entries()) {
+      assert.ok(platform.x >= 0 && platform.x + platform.width <= world.width);
+      assert.ok(platform.y >= 0 && platform.y + platform.height <= world.height);
+      if (index) {
+        assert.ok(platform.x - platforms[index - 1].x <= 180);
+        assert.ok(Math.abs(platform.y - platforms[index - 1].y) <= 80);
+      }
+    }
+  }
+});
+
+test("image-native discovery and exploration preserve source geometry, aspect and combined explicit requirements without duplicating crops", async () => {
+  const image = imageData(await sharp(Buffer.from(
+    '<svg width="500" height="1000" xmlns="http://www.w3.org/2000/svg"><rect width="500" height="1000" fill="#e8eef2"/><rect x="50" y="200" width="50" height="100" fill="red"/><rect x="300" y="500" width="50" height="100" fill="blue"/><rect x="150" y="700" width="50" height="100" fill="gold"/><rect x="400" y="800" width="50" height="100" fill="green"/></svg>',
+  )).png().toBuffer());
+  const objects = [object("red", "coin", 100, 200, 100, 100), object("blue", "coin", 600, 500, 100, 100),
+    object("button", "lever", 300, 700, 100, 100), object("home", "goal", 800, 800, 100, 100)];
+  for (const movement of ["discover", "roam"]) {
+    let calls = 0;
+    const world = await interpretDrawing(image,
+      "Collect red and activate the button before reaching home. Blue is optional.", connection, new AbortController().signal,
+      { enabled: false, apiKey: "" }, async () => {
+        calls++;
+        return response({ ...interpretation(objects),
+          goalRules: { requiredCollectedIds: ["red"], requiredActivatedIds: ["button"] },
+          gameplay: { mode: "creative", movement, objectiveTitle: "Color investigation", instructions: "Find the warm color, activate the button, then go home.",
+            reason: "Synthetic source geometry fixture, not a live model result.", avatarId: null,
+            objective: "collect", objectiveLabel: "Color details", destinationLabel: "Home", obstacleIds: [],
+            path: [{ x: 0, y: 900, label: "Start" }, { x: 500, y: 500, label: "Middle" }, { x: 900, y: 900, label: "Home" }],
+            clues: [{ entityId: "home", text: "Finish at the green rectangle near the bottom." },
+              { entityId: "red", text: "Find the warm-colored rectangle near the upper left." },
+              { entityId: "button", text: "Activate the golden rectangle below the middle." }],
+          } });
+      }, "picture");
+    assert.equal(calls, 1);
+    assert.deepEqual(world.goalRules, { requiredCollectedIds: ["red"], requiredActivatedIds: ["button"] });
+    assert.equal(world.gameplay?.movement, movement);
+    assert.equal(world.width / world.height, .5);
+    assert.deepEqual(setupFeedback(world).errors, []);
+    assert.equal(world.entities.filter(entity => entity.art).length, 1, "Only the full original image has artwork; targets must not paste rectangles over it");
+    const target = world.entities.find(entity => entity.id === "red")!;
+    assert.deepEqual(target.artSource, { x: 100, y: 200, width: 100, height: 100 });
+    assert.equal(target.x, world.width * .1);
+    assert.equal(target.y, world.height * .2);
+    assert.equal(world.entities.filter(entity => entity.kind === "player").length, movement === "discover" ? 0 : 1);
+    assert.equal(world.entities.some(entity => ["terrain", "bridge"].includes(entity.kind)), false);
+    const clueIds = world.gameplay!.clues!.map(clue => clue.entityId);
+    assert.ok(clueIds.indexOf("red") < clueIds.indexOf("home"));
+    assert.ok(clueIds.indexOf("button") < clueIds.indexOf("home"));
+    assert.equal(clueIds[clueIds.length - 1], "home");
+    if (movement === "discover") assert.equal(clueIds.includes("blue"), false, "An explicitly optional object cannot become a hidden ordered-clue prerequisite");
+  }
+});
+
 test("a failed crop keeps valid original artwork in review, makes no segmentation request, and cannot be returned as success", async () => {
   let calls = 0,
     segmentationCalls = 0;

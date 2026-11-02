@@ -26,3 +26,8 @@ modal-credentials*
 
 __pycache__/
 *.pyc
+
+# Local verification recordings and generated test artifacts.
+.playwright-cli/
+output/
+outputs/

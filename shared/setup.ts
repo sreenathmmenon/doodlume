@@ -1,28 +1,30 @@
-import { validateWorld, type WorldDefinition } from "./world.js";
+import { validateWorld, movementMode, type WorldDefinition } from "./world.js";
 import { reviewGoalRules } from "./recognition-review.js";
 
 export function setupFeedback(world: WorldDefinition) {
   const errors: string[] = [],
     warnings: string[] = [];
+  const mode = movementMode(world);
   const characters = world.entities.filter((e) => e.kind === "player");
-  if (!characters.length)
+  if (mode !== "discover" && !characters.length)
     errors.push(
       "Choose one recognizable character in the original picture and give it the Character role.",
     );
-  else if (characters.length > 1)
+  else if (mode !== "discover" && characters.length > 1)
     errors.push(
       "Keep one Character. Change the other characters to Scenery, or remove those selections.",
     );
-  if (!world.entities.some((e) => e.kind === "terrain" || e.kind === "bridge"))
+  if (mode === "platform" && !world.entities.some((e) => e.kind === "terrain" || e.kind === "bridge"))
     errors.push(
       "Mark a visible surface as Platform or Bridge, or add a platform to the game.",
     );
   for (const entity of world.entities) {
     if (
       entity.kind === "lever" &&
-      !world.entities.some(
+      ((mode === "platform" && !entity.targetId) ||
+       (entity.targetId !== undefined && !world.entities.some(
         (gate) => gate.kind === "gate" && gate.id === entity.targetId,
-      )
+      )))
     )
       errors.push(
         `Choose the gate opened by “${entity.label || "Switch"}” in its object settings, or change its role.`,
@@ -55,7 +57,7 @@ export function setupFeedback(world: WorldDefinition) {
   )
     errors.push("Keep every object inside the game frame.");
   const hero = world.entities.find((e) => e.kind === "player");
-  if (hero) {
+  if (hero && mode !== "discover") {
     const body = {
       x: hero.x + hero.width * 0.17,
       y: hero.y + hero.height * 0.24,
@@ -79,7 +81,7 @@ export function setupFeedback(world: WorldDefinition) {
         "Move the character out of the ground, bridge or closed gate before starting.",
       );
     if (
-      !solids.some(
+      mode === "platform" && !solids.some(
         (e) =>
           e.x < body.x + body.width &&
           e.x + e.width > body.x &&
@@ -98,8 +100,10 @@ export function setupFeedback(world: WorldDefinition) {
     warnings.push(
       "There is no destination yet. You can explore, or add somewhere to finish.",
     );
-  warnings.push(
-    "This checks placement, not the whole route. Play the world to check which jumps and paths work.",
-  );
+  warnings.push(mode === "discover"
+    ? "Play the clues to check that each target is clear in the original image."
+    : mode === "roam"
+      ? "Explore the scene to check that each required object and destination is reachable."
+      : "This checks placement, not the whole route. Play the world to check which jumps and paths work.");
   return { errors, warnings };
 }

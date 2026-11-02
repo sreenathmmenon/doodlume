@@ -5,6 +5,7 @@ import {
   retainPlayState,
   goalProgress,
   emptyPlayState,
+  withGoalRules,
 } from "./world.js";
 import { EXAMPLES, freshExample } from "../src/lib/examples.js";
 
@@ -129,4 +130,22 @@ test("only selected collectible and lever IDs gate a destination, with explicit 
       }),
     /destination/,
   );
+});
+
+
+test("discovery keeps required clues synchronized without making optional objects prerequisites", () => {
+  const world = freshExample(EXAMPLES[0].id);
+  world.entities = world.entities.filter(entity => entity.kind !== "player");
+  const coins = world.entities.filter(entity => entity.kind === "coin");
+  const destination = world.entities.find(entity => entity.kind === "goal")!;
+  world.gameplay = {movement:"discover",objectiveTitle:"Find the original marks",instructions:"Follow each clue in the original image.",clues:[{entityId:coins[0].id,text:"Find the first mark."},{entityId:destination.id,text:"Return home."}]};
+  world.goalRules = {requiredCollectedIds:[coins[0].id],requiredActivatedIds:[]};
+  validateWorld(world);
+  const changed = withGoalRules(world,{requiredCollectedIds:[coins[1].id],requiredActivatedIds:[]},{[coins[1].id]:"Find the brighter mark."});
+  assert.deepEqual(changed.gameplay!.clues,[{entityId:coins[1].id,text:"Find the brighter mark."},{entityId:destination.id,text:"Return home."}]);
+  assert.throws(() => validateWorld({...world,goalRules:changed.goalRules}),/discovery clue/);
+  assert.throws(() => withGoalRules(world,changed.goalRules!,{[coins[1].id]:""}),/discovery clue/);
+  assert.doesNotThrow(() => validateWorld({...world,entities:world.entities.filter(entity=>entity.kind!=="terrain"&&entity.kind!=="bridge")}));
+  const malformed=structuredClone(world);malformed.gameplay!.clues![0].entityId="not-an-object";
+  assert.throws(()=>validateWorld(malformed,{allowIncomplete:true}),/discovery clue/);
 });

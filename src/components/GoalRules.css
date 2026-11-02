@@ -131,3 +131,7 @@
     justify-content: center;
   }
 }
+
+.goal-clue-field{display:grid;gap:7px;font-size:12px;line-height:1.5;margin:12px 0;color:var(--ink,#20393c)}
+.goal-clue-field input{min-height:42px;padding:10px 12px;border:1px solid #c4cdc4;border-radius:6px;background:#fffdf7;color:#20393c;font:inherit;width:100%;box-sizing:border-box}
+.goal-clue-field input:focus-visible{outline:3px solid #c5ad6d;outline-offset:2px}

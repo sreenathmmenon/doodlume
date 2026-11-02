@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Flag, Sparkles, ToggleRight } from "lucide-react";
 import {
   objectiveObjectLabel,
-  validateWorld,
+  withGoalRules,
+  movementMode,
+  type WorldGameplay,
   type GoalRules as Rules,
   type PlayState,
   type WorldDefinition,
@@ -20,7 +22,7 @@ export function GoalRules({
 }: {
   world: WorldDefinition;
   state?: PlayState;
-  onApply: (rules: Rules) => void;
+  onApply: (rules: Rules, gameplay?: WorldGameplay) => void;
   onCancel: () => void;
 }) {
   const [rules, setRules] = useState<Rules>(() =>
@@ -32,6 +34,8 @@ export function GoalRules({
     ),
   );
   const [error, setError] = useState("");
+  const isDiscovery = movementMode(world) === "discover";
+  const [clueTexts, setClueTexts] = useState<Record<string,string>>(() => Object.fromEntries((world.gameplay?.clues ?? []).map(clue => [clue.entityId, clue.text])));
   const hasGoal = world.entities.some((e) => e.kind === "goal");
   const count =
     rules.requiredCollectedIds.length + rules.requiredActivatedIds.length;
@@ -39,7 +43,7 @@ export function GoalRules({
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  const changed = (Object.keys(rules) as (keyof Rules)[]).some(
+  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (Object.keys(rules) as (keyof Rules)[]).some(
     (key) =>
       rules[key].length !== original[key].length ||
       rules[key].some((id) => !original[key].includes(id)),
@@ -80,7 +84,7 @@ export function GoalRules({
               <strong>{objectiveObjectLabel(world, entity.id)}</strong>
               <small>
                 {Math.round(entity.x)}, {Math.round(entity.y)}
-                {kind === "lever" &&
+                {kind === "lever" && entity.targetId &&
                   ` → ${objectName(world, entity.targetId, 60)}`}
               </small>
             </span>
@@ -96,8 +100,8 @@ export function GoalRules({
   }
   function apply() {
     try {
-      validateWorld({ ...world, goalRules: rules });
-      onApply(structuredClone(rules));
+      const next = withGoalRules(world, rules, clueTexts);
+      onApply(structuredClone(rules), next.gameplay);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -121,6 +125,22 @@ export function GoalRules({
         )}
         {choices("coin", "requiredCollectedIds")}
         {choices("lever", "requiredActivatedIds")}
+        {isDiscovery && hasGoal && (
+          <fieldset className="goal-rules-group">
+            <legend>Discovery clues</legend>
+            <p className="goal-rules-empty">These clues lead through your required objects, then to the finish.</p>
+            {[...rules.requiredCollectedIds, ...rules.requiredActivatedIds,
+              world.gameplay?.clues?.find(clue => world.entities.some(entity => entity.id === clue.entityId && entity.kind === "goal"))?.entityId ?? world.entities.find(entity => entity.kind === "goal")?.id
+            ].filter((id): id is string => Boolean(id)).map(id => (
+              <label className="goal-clue-field" key={id}>
+                {objectiveObjectLabel(world, id)}
+                <input aria-label={`Clue for ${objectiveObjectLabel(world,id)}`} maxLength={160}
+                  value={clueTexts[id] ?? `Find ${objectiveObjectLabel(world,id)}.`}
+                  onChange={event => { setError("");setClueTexts(old => ({...old,[id]:event.target.value})); }} />
+              </label>
+            ))}
+          </fieldset>
+        )}
         <section
           className="goal-rules-summary"
           aria-label="Completion rule"

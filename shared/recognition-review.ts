@@ -100,7 +100,7 @@ export function validateRecognitionReview(value: unknown): RecognitionReview {
     draft.height !== 820 ||
     !Array.isArray(draft.entities) ||
     draft.entities.length < 1 ||
-    draft.entities.length > 24 ||
+    draft.entities.length > 160 ||
     !Array.isArray(review.issues) ||
     review.issues.length < 1 ||
     review.issues.length > 80
@@ -134,39 +134,11 @@ export function validateRecognitionReview(value: unknown): RecognitionReview {
     )
       throw new Error("An object in the repair draft could not be read.");
   }
-  // Exercise the ordinary world contract without pretending the missing player,
-  // support or gate relationships have been repaired. The extra objects exist
-  // only in this validation copy; they never enter the returned review data.
-  const ids = new Set(draft.entities.map((e) => e.id));
-  let prefix = "review-validation";
-  while (ids.has(`${prefix}-player`) || ids.has(`${prefix}-terrain`))
-    prefix += "x";
-  validateWorld({
-    ...draft,
-    goalRules: undefined,
-    entities: [
-      ...draft.entities.map((e) => ({
-        ...e,
-        kind: e.kind === "player" || e.kind === "lever" ? "decoration" : e.kind,
-      })),
-      {
-        id: `${prefix}-player`,
-        kind: "player",
-        x: 0,
-        y: 0,
-        width: 4,
-        height: 4,
-      },
-      {
-        id: `${prefix}-terrain`,
-        kind: "terrain",
-        x: 0,
-        y: 4,
-        width: 4,
-        height: 4,
-      },
-    ],
-  });
+  // A repair draft keeps its real objects and gameplay intact. This checks the
+  // normal field, artwork and clue contracts while allowing the incomplete
+  // playable relationships that the creator is explicitly being asked to fix.
+  validateWorld(draft, { allowIncomplete: true });
+  const ids = new Set(draft.entities.map((entity) => entity.id));
   const issueIds = new Set<string>();
   for (const issue of review.issues) {
     if (
