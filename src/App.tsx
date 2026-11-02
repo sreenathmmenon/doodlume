@@ -184,6 +184,12 @@ export default function App() {
   const [settingsReturn, setSettingsReturn] = useState<Dialog>(null);
   const [playing, setPlaying] = useState(false);
   const [focusedPlay, setFocusedPlay] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const update = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
   const [mapView, setMapView] = useState(false);
   const [started, setStarted] = useState(Boolean(boot.returning));
   const [muted, setMuted] = useState(true);
@@ -239,6 +245,7 @@ export default function App() {
   const reviewSourceInspect = useRef<HTMLButtonElement>(null);
   const draftRulesAnchor = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
+  const [gameControlsHost, setGameControlsHost] = useState<HTMLDivElement | null>(null);
   const recoveryAction = useRef<HTMLButtonElement>(null);
   const directionPresses = useRef(
     new globalThis.Map<
@@ -543,15 +550,14 @@ export default function App() {
       );
     }
   }
-  function framePlaySurface(focused: boolean, instant = false) {
+  function framePlaySurface(_focused: boolean, instant = false) {
     const behavior =
       instant || window.matchMedia("(prefers-reduced-motion: reduce)").matches
         ? "instant"
         : "smooth";
-    // Focus mode reserves the entire viewport, including its heading and toolbar.
-    // Centering only the canvas would scroll those surrounding controls out of view.
-    if (focused) window.scrollTo({ top: 0, behavior });
-    else stage.current?.scrollIntoView({ block: "center", behavior });
+    // Both layouts start at the page top. Centering the stage on studio return
+    // clips navigation and the title above it.
+    window.scrollTo({ top: 0, behavior });
   }
   function start() {
     if (worldError) return;
@@ -735,7 +741,7 @@ export default function App() {
   async function fullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await stage.current?.requestFullscreen();
+      else await stage.current?.closest<HTMLElement>(".world-panel")?.requestFullscreen();
     } catch {
       tell("Your browser does not support full screen here.");
     }
@@ -994,9 +1000,6 @@ export default function App() {
         </label>
       </div>
       <div className="creation-intent-column">
-        <div className="panel-heading">
-          <h2>Make it yours</h2>
-        </div>
         <label className="intent-label" htmlFor="world-intent">
           Your idea <span className="field-optional">Optional</span>
         </label>
@@ -1175,6 +1178,7 @@ export default function App() {
                 <span className="world-stage-label">{modeLabel}</span>
                 <label className="world-name-label">
                   <span className="sr-only">World name</span>
+                  <span className="world-name-measure" aria-hidden="true">{world.name || "Untitled world"}</span>
                   <input
                     aria-label="World name"
                     title={world.name}
@@ -1303,6 +1307,7 @@ export default function App() {
                       );
                   }}
                   world={world}
+                  controlsHost={gameControlsHost}
                   overview={mapView}
                   initial={initial}
                   playing={playing && !dialog && !busy}
@@ -1409,6 +1414,7 @@ export default function App() {
                 <button
                   className="icon-button"
                   aria-label={`Restart ${modeLabel.toLowerCase()}`}
+                  title="Restart"
                   onClick={restart}
                   disabled={busy}
                 >
@@ -1418,60 +1424,66 @@ export default function App() {
                 <button
                   className="icon-button"
                   aria-label={muted ? "Turn sound on" : "Mute sound"}
+                  title={muted ? "Turn sound on" : "Mute sound"}
                   aria-pressed={!muted}
                   onClick={() => setMuted(!muted)}
                 >
                   {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
               </div>
-              {mode !== "discover" && (
-                <button
-                  className="focus-play-button map-view-button"
-                  aria-label={mapView ? "Follow character" : "Show whole world"}
-                  title={mapView ? "Follow character" : "Show whole world"}
-                  aria-pressed={mapView}
-                  onClick={() => setMapView((value) => !value)}
-                >
-                  <Map size={17} />
-                </button>
-              )}
-              <button
-                className="focus-play-button"
-                aria-label={focusedPlay ? "Back to studio" : "Focus on play"}
-                aria-pressed={focusedPlay}
-                onClick={() => {
-                  setFocusedPlay(!focusedPlay);
-                  requestAnimationFrame(() => {
-                    framePlaySurface(!focusedPlay, true);
-                    stage.current
-                      ?.querySelector<HTMLElement>(".world-canvas")
-                      ?.focus({ preventScroll: true });
-                  });
-                }}
-              >
-                {focusedPlay ? (
-                  <Minimize2 size={15} />
-                ) : (
-                  <Maximize2 size={15} />
+              <div className="game-context-controls" ref={setGameControlsHost} />
+              <div className="game-view-controls">
+                {mode !== "discover" && (
+                  <button
+                    className="focus-play-button map-view-button"
+                    aria-label={mapView ? "Follow character" : "Show whole world"}
+                    title={mapView ? "Follow character" : "Show whole world"}
+                    aria-pressed={mapView}
+                    onClick={() => setMapView((value) => !value)}
+                  >
+                    <Map size={17} />
+                  </button>
                 )}
-                <span>{focusedPlay ? "Back to studio" : "Focus on play"}</span>
-              </button>
-              <button
-                className="icon-button play-help-button"
-                aria-label="Controls and help"
-                title="Controls and help"
-                onClick={() => setDialog("help")}
-              >
-                <CircleHelp size={18} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Full screen world"
-                title="Full screen"
-                onClick={fullscreen}
-              >
-                <Maximize2 size={17} />
-              </button>
+                <button
+                  className="focus-play-button"
+                  aria-label={focusedPlay || isFullscreen ? "Back to studio" : "Focus on play"}
+                  aria-pressed={focusedPlay || isFullscreen}
+                  onClick={async () => {
+                    const next = isFullscreen ? false : !focusedPlay;
+                    if (document.fullscreenElement) await document.exitFullscreen();
+                    setFocusedPlay(next);
+                    requestAnimationFrame(() => {
+                      framePlaySurface(next, true);
+                      stage.current
+                        ?.querySelector<HTMLElement>(".world-canvas")
+                        ?.focus({ preventScroll: true });
+                    });
+                  }}
+                >
+                  {focusedPlay || isFullscreen ? (
+                    <Minimize2 size={15} />
+                  ) : (
+                    <Maximize2 size={15} />
+                  )}
+                  <span>{focusedPlay || isFullscreen ? "Back to studio" : "Focus on play"}</span>
+                </button>
+                <button
+                  className="icon-button play-help-button"
+                  aria-label="Controls and help"
+                  title="Controls and help"
+                  onClick={() => setDialog("help")}
+                >
+                  <CircleHelp size={18} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={isFullscreen ? "Exit full screen" : "Full screen world"}
+                  title={isFullscreen ? "Exit full screen" : "Full screen"}
+                  onClick={fullscreen}
+                >
+                  {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                </button>
+              </div>
             </div>
             {mode !== "discover" && (
               <div

@@ -4,6 +4,7 @@ import { extractInkLayer, type InkMark } from "../lib/ink";
 import { Modal } from "./Modal";
 
 const colors = ["#444b43", "#94ad7c", "#baa4cf", "#ddb46b", "#d99483"];
+const inkNames: Record<string, string> = { "#444b43": "Graphite", "#94ad7c": "Sage", "#baa4cf": "Lavender", "#ddb46b": "Gold", "#d99483": "Coral" };
 export function SketchPad({
   onUse,
   onClose,
@@ -193,7 +194,7 @@ export function SketchPad({
           <p>
             {initialImage
               ? "Your existing world stays unchanged until you apply."
-              : "Your drawing stays in this draft until you use it."}
+              : "Saved as a draft when you close."}
           </p>
           <button
             className="primary-button"
@@ -205,17 +206,14 @@ export function SketchPad({
         </div>
       }
     >
-      <p className="modal-copy">
-        {initialImage
-          ? "Eraser and undo affect only your new strokes."
-          : "Draw whatever comes to mind. Your shapes, characters and colors can become a world to play in."}
-      </p>
+      {initialImage && <p className="modal-copy">Eraser and undo affect only your new strokes.</p>}
       <div className="sketch-tools">
         <div className="swatches">
           {colors.map((c) => (
             <button
               key={c}
-              aria-label={`Ink ${c}`}
+              aria-label={`${inkNames[c]} ink`}
+              title={`${inkNames[c]} ink`}
               aria-pressed={!eraser && color === c}
               style={{ "--swatch": c } as React.CSSProperties}
               onClick={() => {
@@ -229,6 +227,8 @@ export function SketchPad({
         <button
           className={`icon-button ${!eraser ? "active" : ""}`}
           aria-label="Pencil"
+          title="Pencil"
+          aria-pressed={!eraser}
           onClick={() => setEraser(false)}
         >
           <Pencil size={18} />
@@ -236,6 +236,8 @@ export function SketchPad({
         <button
           className={`icon-button ${eraser ? "active" : ""}`}
           aria-label="Eraser"
+          title="Eraser"
+          aria-pressed={eraser}
           onClick={() => setEraser(true)}
         >
           <Eraser size={18} />

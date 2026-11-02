@@ -1,6 +1,9 @@
 import { useEffect, useRef, useId, type ReactNode } from "react";
 import { X } from "lucide-react";
 
+// Preserve the workspace opener while related dialogs replace one another.
+let workspaceOpener: HTMLElement | null = null;
+
 export function Modal({
   title,
   children,
@@ -20,8 +23,21 @@ export function Modal({
   const titleId = useId();
   useEffect(() => {
     const node = dialog.current!;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && !active.closest("dialog"))
+      workspaceOpener = active;
+    const opener = workspaceOpener;
     node.showModal();
-    return () => node.close();
+    return () => {
+      node.close();
+      requestAnimationFrame(() => {
+        // A replacement dialog or a caller's explicit focus target takes priority.
+        if (document.querySelector("dialog[open]") || !opener?.isConnected) return;
+        if (document.activeElement === document.body || !document.activeElement?.isConnected)
+          opener.focus({ preventScroll: true });
+        if (workspaceOpener === opener) workspaceOpener = null;
+      });
+    };
   }, []);
   return (
     <dialog

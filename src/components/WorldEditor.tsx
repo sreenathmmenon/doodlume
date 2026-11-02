@@ -1100,7 +1100,7 @@ export function WorldEditor({
               : item
                 ? "Arrows move · Shift for precision · Space to pan · F to focus"
                 : tool === "move"
-                  ? "Select an object to move it, or add a new one."
+                  ? "Space to pan · + / − to zoom"
                   : `${editorTools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
           </span>
         </div>

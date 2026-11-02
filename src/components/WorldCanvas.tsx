@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import {
   forwardRef,
   type ReactNode,
@@ -39,6 +40,7 @@ export interface WorldCanvasHandle {
 }
 interface Props {
   overlay?: ReactNode;
+  controlsHost?: HTMLElement | null;
   world: WorldDefinition;
   initial?: PlayState;
   playing: boolean;
@@ -362,80 +364,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     useEffect(() => {
       if (!startupFailed.current) scene.current?.setMuted(props.muted);
     }, [props.muted]);
-    return (
-      <div className="world-canvas-shell">
-        <div
-          ref={host}
-          className="world-canvas"
-          data-ready={ready}
-          aria-busy={!ready && !failed}
-          aria-label={
-            mode === "discover"
-              ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
-              : mode === "roam"
-                ? "Exploration game. Start play, then click or tap to move, or use arrow keys or W A S D. E interacts with nearby objects."
-                : "Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."
-          }
-          role="application"
-          aria-describedby={
-            mode === "discover" ? canvasInstructions : undefined
-          }
-          tabIndex={0}
-          onKeyDown={(event) => {
-            if (
-              mode !== "discover" ||
-              event.target !== event.currentTarget ||
-              !ready ||
-              failed
-            )
-              return;
-            const directions: Record<string, [number, number]> = {
-              ArrowLeft: [-60, 0],
-              ArrowRight: [60, 0],
-              ArrowUp: [0, -60],
-              ArrowDown: [0, 60],
-            };
-            const direction = directions[event.key];
-            if (direction) scene.current?.panDiscovery(...direction);
-            else if (event.key === "+" || event.key === "=")
-              scene.current?.zoomDiscovery(1.4);
-            else if (event.key === "-") scene.current?.zoomDiscovery(1 / 1.4);
-            else if (event.key === "0") scene.current?.resetDiscoveryView();
-            else return;
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onPointerDown={(event) =>
-            event.currentTarget.focus({ preventScroll: true })
-          }
-        >
-          {mode === "discover" && (
-            <span id={canvasInstructions} className="sr-only">
-              Plus and minus zoom the image, arrow keys pan, and zero fits the
-              image. Keyboard play offers an object selector.
-            </span>
-          )}
-          {failed && (
-            <div className="world-display-paused">
-              <span>Display paused.</span>
-              <small>Your source and world are kept.</small>
-            </div>
-          )}
-          {!ready && !failed && (
-            <span className="world-loading" role="status">
-              <span className="world-loading-copy">
-                <span>Opening your artwork…</span>
-                {openingSlow && (
-                  <small>
-                    Still opening. Your world and progress are kept.
-                  </small>
-                )}
-              </span>
-            </span>
-          )}
-          {props.overlay}
-        </div>
-        {mode === "discover" && ready && !failed && (
+    const discoveryControls = mode === "discover" && ready && !failed && (
           <div
             className="discovery-access"
             onPointerDown={(event) => event.stopPropagation()}
@@ -534,7 +463,81 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               </div>
             </details>
           </div>
-        )}
+        );
+    return (
+      <div className="world-canvas-shell">
+        <div
+          ref={host}
+          className="world-canvas"
+          data-ready={ready}
+          aria-busy={!ready && !failed}
+          aria-label={
+            mode === "discover"
+              ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
+              : mode === "roam"
+                ? "Exploration game. Start play, then click or tap to move, or use arrow keys or W A S D. E interacts with nearby objects."
+                : "Playable drawing world. Use arrow keys or A and D to move, Space to jump, and E near a lever."
+          }
+          role="application"
+          aria-describedby={
+            mode === "discover" ? canvasInstructions : undefined
+          }
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (
+              mode !== "discover" ||
+              event.target !== event.currentTarget ||
+              !ready ||
+              failed
+            )
+              return;
+            const directions: Record<string, [number, number]> = {
+              ArrowLeft: [-60, 0],
+              ArrowRight: [60, 0],
+              ArrowUp: [0, -60],
+              ArrowDown: [0, 60],
+            };
+            const direction = directions[event.key];
+            if (direction) scene.current?.panDiscovery(...direction);
+            else if (event.key === "+" || event.key === "=")
+              scene.current?.zoomDiscovery(1.4);
+            else if (event.key === "-") scene.current?.zoomDiscovery(1 / 1.4);
+            else if (event.key === "0") scene.current?.resetDiscoveryView();
+            else return;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) =>
+            event.currentTarget.focus({ preventScroll: true })
+          }
+        >
+          {mode === "discover" && (
+            <span id={canvasInstructions} className="sr-only">
+              Plus and minus zoom the image, arrow keys pan, and zero fits the
+              image. Keyboard play offers an object selector.
+            </span>
+          )}
+          {failed && (
+            <div className="world-display-paused">
+              <span>Display paused.</span>
+              <small>Your source and world are kept.</small>
+            </div>
+          )}
+          {!ready && !failed && (
+            <span className="world-loading" role="status">
+              <span className="world-loading-copy">
+                <span>Opening your artwork…</span>
+                {openingSlow && (
+                  <small>
+                    Still opening. Your world and progress are kept.
+                  </small>
+                )}
+              </span>
+            </span>
+          )}
+          {props.overlay}
+        </div>
+        {props.controlsHost ? createPortal(discoveryControls, props.controlsHost) : discoveryControls}
       </div>
     );
   },

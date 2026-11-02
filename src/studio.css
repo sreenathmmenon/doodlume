@@ -267,21 +267,30 @@ body {
   line-height: 16px;
 }
 .studio-v2 .world-name-label {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
   gap: 8px;
   margin: 0;
-}
-.studio-v2 .world-name-label input {
-  width: 100%;
-  max-width: 520px;
-  min-width: 0;
-  color: var(--ink);
+  max-width: 100%;
   font: 700 30px/40px Manrope, sans-serif;
   letter-spacing: -1.1px;
+}
+.studio-v2 .world-name-label input,
+.world-name-measure {
+  grid-area: 1 / 1;
+  min-width: 0;
+  width: 100%;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: inherit;
   text-overflow: ellipsis;
 }
-.studio-v2 .world-name-label svg {
-  color: var(--muted);
-}
+.world-name-measure { visibility: hidden; white-space: pre; overflow: hidden; width: auto; }
+.studio-v2 .world-name-label input { position: absolute; inset: 0 auto 0 0; width: calc(100% - 24px); height: 40px; border-radius: 4px; }
+.studio-v2 .world-name-label input:hover { background: var(--surface-hover); }
+.studio-v2 .world-name-label svg { display: block; grid-area: 1 / 2; color: var(--muted); }
 .studio-v2 .world-heading-actions {
   flex: 0 0 auto;
   gap: 8px;
@@ -324,7 +333,7 @@ body {
   height: clamp(400px, calc(100dvh - 256px), 960px);
   min-height: 0;
   margin: 0;
-  border: 1px solid var(--stage-border);
+  border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
   overflow: hidden;
@@ -345,9 +354,9 @@ body {
   justify-content: space-between;
   gap: 24px;
   padding: 10px 20px;
-  border-bottom: 1px solid var(--stage-border);
-  background: var(--stage);
-  color: var(--stage-ink);
+  border-bottom: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--ink);
 }
 .world-mission {
   min-width: 0;
@@ -355,7 +364,7 @@ body {
 .world-mission > span {
   display: block;
   margin-bottom: 4px;
-  color: var(--stage-muted);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -364,31 +373,34 @@ body {
 .world-mission > strong {
   display: block;
   max-width: 76ch;
-  color: var(--stage-ink);
+  color: var(--ink);
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
   overflow-wrap: anywhere;
 }
 .world-progress-counts {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
   flex-shrink: 0;
   text-align: right;
   line-height: 16px;
 }
 .required-progress {
-  color: var(--stage-ink);
+  color: var(--ink);
   font-size: 12px;
 }
-.world-progress-counts button.required-progress { min-height: 36px; padding: 6px 10px; border: 1px solid var(--stage-border); border-radius: 6px; color: var(--stage-ink); }
-.world-progress-counts button.required-progress:hover { background: var(--stage-hover); }
+.world-progress-counts button.required-progress { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); }
+.world-progress-counts button.required-progress:hover { background: var(--surface-hover); }
 .required-progress b {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 .optional-progress {
-  color: var(--stage-muted);
+  color: var(--muted);
   font-size: 11px;
 }
 .studio-v2 .play-overlay {
@@ -450,50 +462,50 @@ body {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  min-height: 48px;
-  padding: 6px 12px;
-  border: 1px solid var(--stage-border);
-  border-top: 1px solid #ffffff14;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   border-radius: 0 0 12px 12px;
-  background: var(--stage);
-  color: var(--stage-ink);
+  background: var(--paper);
+  color: var(--ink);
 }
 .studio-v2 .play-controls {
   gap: 4px;
 }
 .studio-v2 .game-toolbar .icon-button {
-  color: var(--stage-muted);
+  color: var(--muted);
 }
 .studio-v2 .game-toolbar .icon-button:hover {
-  background: var(--stage-hover);
-  color: var(--stage-ink);
+  background: var(--surface-hover);
+  color: var(--ink);
 }
 .studio-v2 .game-toolbar .play-control {
-  background: var(--stage-hover);
-  color: var(--stage-ink);
+  background: var(--surface-hover);
+  color: var(--ink);
 }
 .studio-v2 .tool-divider {
-  background: var(--stage-border);
+  background: var(--border);
 }
 .studio-v2 .focus-play-button {
   min-height: 36px;
   padding: 8px 12px;
   gap: 8px;
   margin-left: 0;
-  border: 1px solid var(--stage-border);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: var(--stage-ink);
+  color: var(--ink);
   background: transparent;
   font-size: 12px;
   white-space: nowrap;
 }
 .studio-v2 .focus-play-button:hover {
-  background: var(--stage-hover);
+  background: var(--surface-hover);
 }
 .studio-v2 .game-toolbar .map-view-button {
   margin-left: auto;
 }
-.studio-v2 .game-toolbar .play-controls + .focus-play-button {
+.studio-v2 .game-toolbar .game-context-controls:empty + .focus-play-button {
   margin-left: auto;
 }
 .studio-v2 .game-toolbar .map-view-button + .focus-play-button {
@@ -779,10 +791,10 @@ body {
 .creation-intent-column {
   min-width: 0;
 }
-.creation-modal .panel-heading {
+.modal.creation-modal .panel-heading {
   margin: 0 0 16px;
 }
-.creation-modal .panel-heading h2 {
+.modal.creation-modal .panel-heading h2 {
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
@@ -916,9 +928,10 @@ body {
   background: var(--surface-hover);
   color: var(--primary);
 }
-.creation-modal .intent-label {
+.modal.creation-modal .intent-label {
   display: block;
-  margin: 0 0 8px;
+  line-height: 20px;
+  margin: 0 0 16px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
@@ -2100,7 +2113,7 @@ select:focus-visible {
   .modal.creation-modal .paper-frame img {
     max-height: 166px;
   }
-  .creation-modal .intent-label {
+  .modal.creation-modal .intent-label {
     margin-top: 0;
   }
   .creation-modal .intent-box textarea {
@@ -2503,8 +2516,16 @@ select:focus-visible {
 .paper-update-modal .paper-footer { margin: 0; width: 100%; }
 .paper-update-modal .modal-copy { margin: 0; }
 
-.sketch-modal .sketch-surface { background: var(--field); box-shadow: 0 0 0 1px var(--border); }
-.sketch-modal .sketch-surface canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(90dvh - 270px); margin: auto; }
+.sketch-modal .sketch-surface { width: fit-content; max-width: 100%; margin-inline: auto; background: transparent; box-shadow: 0 0 0 1px var(--border), 0 4px 18px #2026340a; border-radius: 4px; }
+.sketch-modal .swatches { gap: 4px; }
+.sketch-modal .swatches button { width: 36px; height: 36px; border-width: 8px; }
+.sketch-modal .swatches button[aria-pressed="true"] { outline: 2px solid var(--primary); outline-offset: 0; }
+.sketch-modal .modal-footer p { max-width: none; margin: 0; }
+.sketch-modal .sketch-tools { gap: 8px; padding: 0 0 16px; }
+.sketch-modal .sketch-tools .icon-button { width: 40px; height: 40px; }
+.game-context-controls { display: contents; }
+.game-context-controls:empty { display: none; }
+.sketch-modal .sketch-surface canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(90dvh - 220px); margin: auto; }
 .sketch-modal .icon-button.active { color: var(--primary); background: var(--surface-hover); }
 
 /* Contextual world commands share one line; artwork remains the visual focus. */
@@ -2518,8 +2539,8 @@ select:focus-visible {
 .studio-v2 .brand { font-weight: 800; font-size: 23px; }
 @media (min-width: 801px) and (max-width: 1100px) {
   .studio-v2 .world-heading { gap: 16px; }
-  .studio-v2 .world-heading-actions { gap: 4px; }
-  .studio-v2 .world-name-label input { font-size: 25px; }
+  .studio-v2 .world-heading-actions { gap: 8px; }
+  .studio-v2 .world-name-label { font-size: 25px; }
 }
 
 /* The library leads with the user's artwork; file management is secondary. */
@@ -2572,3 +2593,21 @@ select:focus-visible {
 .editor-precision { border-top: 1px solid var(--border); margin-top: 16px; }
 .editor-precision > summary { padding: 14px 0; cursor: pointer; color: var(--muted); font-size: 12px; }
 .editor-precision .editor-dimensions { margin-top: 0; }
+
+/* Full screen includes transport and discovery controls, not only the canvas. */
+.studio-v2 .world-panel:fullscreen {
+  display: flex; flex-direction: column; width: 100vw; height: 100dvh;
+  padding: 0; margin: 0; border: 0; border-radius: 0; background: var(--paper);
+}
+.studio-v2 .world-panel:fullscreen .world-heading { display: none; }
+.studio-v2 .world-panel:fullscreen > .game-stage {
+  flex: 1 1 0; height: auto; min-height: 0; max-height: none; border-radius: 0;
+}
+.studio-v2 .world-panel:fullscreen > .game-toolbar { flex: 0 0 auto; border-radius: 0; }
+
+/* Keep viewport actions together as contextual play controls wrap. */
+.game-view-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
+@media (min-width: 801px) and (min-height: 600px) {
+  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) { height: calc(100dvh - 116px); min-height: 0; }
+  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) > .game-stage { flex: 1 1 0; height: auto; min-height: 220px; }
+}
