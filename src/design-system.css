@@ -1,0 +1,30 @@
+/* Doodlume / Ink & Play. Shared semantic roles; source art owns the scene. */
+@font-face { font-family:Manrope; src:url('/fonts/manrope.ttf') format('truetype'); font-weight:200 800; font-display:swap; }
+@font-face { font-family:Fraunces; src:url('/fonts/fraunces.ttf') format('truetype'); font-weight:100 900; font-display:swap; }
+:root {
+  --font-ui:Manrope,sans-serif;
+  --font-display:Fraunces,Georgia,serif;
+  font-family:var(--font-ui); font-size:14px; color-scheme:light;
+  --ink:#20252f; --muted:#5e6673;
+  --brand:#e4543b; --primary:#b93724; --primary-hover:#942b1b;
+  --selection:var(--primary); --selection-muted:#945c50; --accent-ink:#fff;
+  --paper:#fff; --workspace:#f6f7f9; --field:#f2f4f7; --border:#d9dde4;
+  --surface-hover:#fbece7; --focus:#264eb4;
+  --danger:#9d1845; --danger-surface:#fff0f4;
+  --disabled-ink:#656d79; --disabled-surface:#e8ebef;
+  --stage:#202733; --stage-border:#434d5e; --stage-hover:#354252;
+  --stage-ink:#f7f9fc; --stage-muted:#cad2e0;
+  --sage:var(--primary);
+  --radius-control:8px; --radius-panel:16px; --radius-stage:20px;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-6:24px; --space-8:32px; --space-12:48px; --space-16:64px;
+  --ease-out:cubic-bezier(.22,.68,0,1.01);
+  --shadow-float:0 16px 48px #20252f12;
+  color:var(--ink); background:var(--workspace);
+}
+::selection { background:#f9d5cb; color:var(--ink); }
+.brand-lockup { display:inline-flex; align-items:center; gap:10px; white-space:nowrap; }
+.brand-symbol { display:block; flex:0 0 auto; width:30px; height:32px; color:var(--primary); }
+.brand-word { font:800 27px/1 var(--font-ui); letter-spacing:-1.7px; color:var(--ink); }
+.brand-lockup .brand-symbol path { vector-effect:non-scaling-stroke; }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; } }

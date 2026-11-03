@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
+import "./design-system.css";
 import "./styles.css";
 import "./studio.css";
 import { diagnosticsEnabled } from "./lib/runtime-diagnostics";

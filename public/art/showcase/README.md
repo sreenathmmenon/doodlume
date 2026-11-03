@@ -26,3 +26,7 @@ Clockwork is an authored illustration-adventure example. Its current revision us
 ## Claims and release boundaries
 
 The packaged worlds are reproducible examples of supported behavior. They do not establish universal photo conversion, perfect segmentation, player retention, production deployment readiness, or external judge approval. Original inputs and failed/corrected attempts are preserved in the verification directory. Generated browser assets contain no provider keys; fresh inference remains a server operation. Final public release must separately verify input/model rights and clean deployed access. Raw gameplay recordings are verification artifacts, not the finished submission film.
+
+## Display derivatives
+
+`*-thumb.webp` (192×128) and `*-preview.webp` (up to 1440px wide) are resized/compressed derivatives of the corresponding existing source artwork, not additional generated scenes. The homepage uses these lighter files for browsing; Original and the game continue to use the full source assets. Thumbnail crops are navigation previews only; the main artwork remains contained and uncropped.

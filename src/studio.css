@@ -1,44 +1,3 @@
-@font-face {
-  font-family: Manrope;
-  src: url("/fonts/manrope.ttf") format("truetype");
-  font-weight: 200 800;
-  font-display: swap;
-}
-@font-face {
-  font-family: Fraunces;
-  src: url("/fonts/fraunces.ttf") format("truetype");
-  font-weight: 100 900;
-  font-display: swap;
-}
-:root {
-  font-family: Manrope, sans-serif;
-  font-size: 14px;
-  --ink: #202634;
-  --muted: #596273;
-  --primary: #3458d4;
-  --primary-hover: #2847b9;
-  --selection: #3458d4;
-  --selection-muted: #667aaf;
-  --accent-ink: #ffffff;
-  --paper: #ffffff;
-  --workspace: #f5f5f3;
-  --border: #dadfdf;
-  --surface-hover: #eaf0fa;
-  --field: #f7f8f8;
-  --danger: #b33336;
-  --danger-surface: #fff0f0;
-  --disabled-ink: #727b8a;
-  --disabled-surface: #e8ecf2;
-  --stage: #202735;
-  --stage-border: #414b5c;
-  --stage-hover: #344157;
-  --stage-ink: #f6f8fc;
-  --stage-muted: #bec8d9;
-  --sage: var(--primary);
-  color: var(--ink);
-  background: var(--workspace);
-  color-scheme: light;
-}
 .modal .setup-rule-confirm {
   border-color: var(--border);
 }
@@ -110,7 +69,7 @@
   border-color: var(--border);
 }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus);
   outline-offset: 4px;
 }
 .secondary-button:hover, .modal .secondary-button:hover {
@@ -147,7 +106,7 @@ button:disabled, .studio-v2 button:disabled, .modal button:disabled {
   color: var(--disabled-ink);
 }
 .modal::backdrop {
-  background: #1b273955;
+  background: #20252f66;
   backdrop-filter: blur(4px);
 }
 body {
@@ -230,7 +189,7 @@ body {
 .studio-v2 main {
   max-width: 1560px;
   margin: 0 auto;
-  padding: 28px 28px 16px;
+  padding: 28px 40px 24px;
 }
 .studio-v2 .studio-workspace {
   display: block;
@@ -406,7 +365,7 @@ body {
 .studio-v2 .play-overlay {
   background: transparent;
   backdrop-filter: none;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   padding: 28px;
   gap: 12px;
@@ -424,24 +383,25 @@ body {
   margin: 0;
   padding: 12px 24px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--primary);
-  color: var(--accent-ink);
+  border-radius: 100px;
+  background: var(--paper);
+  color: var(--ink);
   box-shadow: none;
   font:
     650 14px/20px Manrope,
     sans-serif;
-  border-color: var(--primary);
+  border-color: var(--paper);
 }
 .studio-v2 .play-orb:hover {
   transform: translateY(-1px);
-  background: var(--primary-hover);
-  border-color: var(--primary-hover);
-  color: var(--accent-ink);
+  background: var(--surface-hover);
+  border-color: var(--paper);
+  color: var(--ink);
   box-shadow: none;
 }
 .studio-v2 .play-orb svg {
   margin: 0;
+  color: var(--primary);
   width: 20px;
   height: 20px;
 }
@@ -454,7 +414,7 @@ body {
   color: #fff;
   font-size: 12px;
   line-height: 18px;
-  text-align: left;
+  text-align: center;
 }
 .studio-v2 .game-toolbar {
   flex: 0 0 auto;
@@ -612,7 +572,7 @@ body {
 }
 .studio-v2 .world-panel button:focus-visible,
 .studio-v2 .world-panel input:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus);
   outline-offset: 3px;
 }
 .studio-v2.play-focused .topbar,
@@ -657,7 +617,7 @@ body {
 .creation-invitation h1 {
   margin: 0 0 8px;
   color: var(--ink);
-  font: 700 32px/40px Manrope, sans-serif;
+  font: 550 36px/44px var(--font-display);
   letter-spacing: -1px;
 }
 .creation-invitation p {
@@ -780,8 +740,8 @@ body {
 }
 /* Image-first creation uses the same neutral workshop controls. */
 .modal.creation-modal {
-  width: 960px;
-  max-width: min(900px, 94vw);
+  width: 820px;
+  max-width: min(820px, 94vw);
 }
 .modal.creation-modal .paper-panel {
   display: grid;
@@ -810,7 +770,7 @@ body {
   transform: none;
   background: var(--field);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   box-shadow: none;
 }
 .modal.creation-modal .paper-frame img {
@@ -830,9 +790,9 @@ body {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  min-height: 292px;
+  min-height: 220px;
   padding: 24px;
-  border: 1px dashed #9ba5b6;
+  border: 1px dashed var(--muted);
   border-radius: 12px;
   background: var(--field);
   color: var(--ink);
@@ -1202,7 +1162,7 @@ select {
 .editor-canvas:focus-visible,
 .source-inspector-view:focus-visible,
 select:focus-visible {
-  outline: 3px solid var(--primary);
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 @media (max-width: 520px) {
@@ -2522,7 +2482,7 @@ select:focus-visible {
 .sketch-modal .sketch-surface { width: fit-content; max-width: 100%; margin-inline: auto; background: transparent; box-shadow: 0 0 0 1px var(--border), 0 4px 18px #2026340a; border-radius: 4px; }
 .sketch-modal .swatches { gap: 4px; }
 .sketch-modal .swatches button { width: 36px; height: 36px; border-width: 8px; }
-.sketch-modal .swatches button[aria-pressed="true"] { outline: 2px solid var(--primary); outline-offset: 0; }
+.sketch-modal .swatches button[aria-pressed="true"] { outline: 2px solid var(--focus); outline-offset: 0; }
 .sketch-modal .modal-footer p { max-width: none; margin: 0; }
 .sketch-modal .sketch-tools { gap: 8px; padding: 0 0 16px; }
 .sketch-modal .sketch-tools .icon-button { width: 40px; height: 40px; }
@@ -2623,20 +2583,20 @@ select:focus-visible {
 .creation-failure p { margin: 7px 0; font-size: 13px; line-height: 1.55; color: var(--ink); }
 .creation-failure > span { color: var(--muted); font-size: 12px; }
 @media (min-width: 801px) and (min-height: 540px) {
-  .studio-v2:not(.play-focused) main { height: calc(100dvh - 60px); display: flex; flex-direction: column; gap: 0; padding: 24px 28px 16px; }
-  .studio-v2:not(.play-focused) .studio-workspace { flex: 1 1 0; min-height: 0; }
-  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .studio-v2:not(.play-focused) main { height: calc(100dvh - 60px); display: flex; flex-direction: column; gap: 0; padding: 16px 28px 16px; }
+  .studio-v2:not(.play-focused) .studio-workspace { flex: 1 1 0; min-height: 0; container-type: size; }
+  .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) { display: flex; flex-direction: column; height: 100%; min-height: 0; width: min(100%, max(760px, calc((100cqh - 180px) * 1.7778 + 120px))); margin-inline: auto; }
   .studio-v2:not(.play-focused) .world-panel:not(:fullscreen) > .game-stage { flex: 1 1 0; height: auto; min-height: 160px; }
   .studio-v2:not(.play-focused) .world-heading { flex: 0 0 auto; min-height: 68px; padding-bottom: 14px; }
   .studio-v2:not(.play-focused) .example-section { flex: 0 0 auto; margin: 14px 0 0; }
   .studio-v2:not(.play-focused) main:has(.example-section[open]) { height: auto; min-height: calc(100dvh - 60px); }
   .studio-v2:not(.play-focused) main:has(.example-section[open]) .studio-workspace { flex: none; height: calc(100dvh - 160px); }
   .studio-v2:not(.play-focused).showing-example main:has(.example-section[open]) .studio-workspace { height: calc(100dvh - 260px); }
-  .studio-v2 .creation-invitation { margin: 0 0 24px; padding: 0 0 20px; border-bottom: 1px solid var(--border); }
-  .studio-v2 .creation-invitation h1 { font-size: clamp(26px, 2.4vw, 34px); letter-spacing: -1.2px; line-height: 1.2; }
+  .studio-v2 .creation-invitation { margin: 0 0 16px; padding: 0 0 14px; border-bottom: 1px solid var(--border); }
+  .studio-v2 .creation-invitation h1 { font-size: clamp(26px, 2vw, 30px); letter-spacing: -1.2px; line-height: 1.2; }
   .studio-v2 .creation-invitation p { margin-top: 8px; font-size: 14px; }
   .studio-v2 .world-stage-label { font-size: 12px; line-height: 18px; letter-spacing: 0; }
-  .studio-v2 .game-toolbar { align-items: center; gap: 12px; padding: 10px 14px; }
+  .studio-v2 .game-toolbar { align-items: center; gap: 12px; padding: 6px 14px; }
   .studio-v2 .game-toolbar .icon-button { width: 36px; height: 36px; }
   .studio-v2 .game-context-controls { display: contents; }
 }

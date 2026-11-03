@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowRight, ArrowUpRight, Pause, Pencil, Play, RotateCcw } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Pause, Pencil, Play, RotateCcw, Maximize2, Minimize2, Check } from "lucide-react";
 import { retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "../../shared/world";
 import type { WorldCanvasHandle } from "./WorldCanvas";
 import { extractSketchInk } from "../lib/ink";
+import { Brand } from "./Brand";
 import "./Home.css";
 
 const LiveWorld = lazy(() => import("./WorldCanvas").then(m => ({ default: m.WorldCanvas })));
@@ -28,6 +29,8 @@ export default function Home() {
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
   const [initial, setInitial] = useState<PlayState>();
   const [drawing, setDrawing] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [displayNotice, setDisplayNotice] = useState("");
   const [drawingDraft, setDrawingDraft] = useState<string>();
   const game = useRef<WorldCanvasHandle>(null);
   const wasPlaying = useRef(false);
@@ -35,8 +38,30 @@ export default function Home() {
   const invention = world?.entities.find(entity=>entity.id===inventionAction?.toolId);
   const [inventionUsed, setInventionUsed] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
+  const showcase = useRef<HTMLDivElement>(null);
   const focusRequested = useRef(false);
   const scene = scenes[index];
+  useEffect(() => {
+    const update = () => setFullscreen(document.fullscreenElement === showcase.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
+  async function toggleFullscreen() {
+    setDisplayNotice("");
+    try {
+      if (document.fullscreenElement === showcase.current) await document.exitFullscreen();
+      else await showcase.current?.requestFullscreen();
+    } catch { setDisplayNotice("Full screen is unavailable. Keep playing here."); }
+  }
+  async function drawPart() {
+    // The drawing dialog lives outside the full-screen element. Leave full
+    // screen first so it stays visible and keyboard reachable.
+    if (document.fullscreenElement === showcase.current) {
+      try { await document.exitFullscreen(); }
+      catch { setDisplayNotice("Exit full screen to draw your part."); return; }
+    }
+    wasPlaying.current=playing; setPlaying(false); setDrawing(true);
+  }
   useEffect(() => { document.title = "Doodlume — Your imagination. Now playable."; }, []);
   useEffect(() => {
     if (!loading) return;
@@ -94,21 +119,22 @@ export default function Home() {
     } catch(e) { setDrawingDraft(image); setError(e instanceof Error ? e.message : "Your part could not be added. The game is unchanged."); setDrawing(false); }
   }
   return <div className="home-page">
+    <a className="home-skip" href="#home-content">Skip to content</a>
     <header className="home-header">
-      <a href="#" className="home-brand" aria-label="Doodlume home">doodlume<span>.</span></a>
+      <a href="#" className="home-brand" aria-label="Doodlume home"><Brand /></a>
       <nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#studio" className="home-studio-link">Open studio <ArrowUpRight size={16}/></a></nav>
     </header>
-    <main>
+    <main id="home-content">
       <section className="home-hero" aria-labelledby="home-title">
         <div className="home-intro">
-          <p className="home-eyebrow">FROM YOUR WORLD. INTO PLAY.</p>
-          <h1 id="home-title">Your imagination.<br/><span>Now playable.</span></h1>
-          <p className="home-description">Turn a drawing or photo into a game.<br/>Give objects a purpose. Draw what happens next.</p>
-          <a className="home-cta" href="#studio?create=upload">Make a game <ArrowRight size={19}/></a>
-          <a className="home-draw-link" href="#studio?create=sketch">Or start with a drawing <ArrowUpRight size={14}/></a>
+          <div className="home-title-block"><p className="home-eyebrow">A GAME STUDIO FOR YOUR IMAGINATION</p>
+          <h1 id="home-title">Play outside <em>the lines.</em></h1></div>
+          <div className="home-create-rail"><p className="home-description">Your drawings and photos. Now worlds you can play.</p>
+          <div className="home-create-options"><a className="home-cta" href="#studio?create=upload">Make your game <ArrowUpRight size={20}/></a>
+          <a className="home-draw-link" href="#studio?create=sketch"><Pencil size={16}/> Draw instead</a></div></div>
         </div>
-        <div className="home-showcase">
-          <div className={`home-showcase-caption ${world ? "has-mission" : ""}`}><span>{showSource ? "THE ORIGINAL" : world ? complete ? "World complete" : mission : "PLAY A REAL EXAMPLE"}</span><span>{world ? complete || showSource ? "" : progress : `0${index + 1} / 0${scenes.length}`}</span></div>
+        <div className="home-showcase" id="play-room" tabIndex={-1} ref={showcase}>
+          <div className={`home-showcase-caption ${world ? "has-mission" : ""}`}><span>{showSource ? "THE ORIGINAL" : world ? complete ? "World complete" : mission : "PLAY AN EXAMPLE"}</span><span>{world ? complete || showSource ? "" : progress : `0${index + 1} / 0${scenes.length}`}</span></div>
           <div ref={stage} style={{"--scene-aspect":scene.aspect} as CSSProperties} className={`home-live-stage ${world ? "is-live" : ""}`} onKeyDown={event => {
             // Keep game keys inside the playable stage even on the frame a
             // goal completes and the game releases its keyboard capture.
@@ -116,7 +142,7 @@ export default function Home() {
           }}>
             {world && <div className="home-game-layer" style={{visibility:showSource ? "hidden" : "visible"}} aria-hidden={showSource} inert={showSource}><Suspense fallback={<div className="home-stage-loading">Opening your world…</div>}><LiveWorld ref={game} world={world} initial={initial} controlsHost={controlsHost} playing={playing && !showSource && !drawing} muted run={run} overview={false}
               onUpdate={(state, metrics) => { const finished=metrics.completed && !metrics.exploring; setComplete(finished); setInventionUsed(Boolean(inventionAction && state.interactions?.completed.includes(inventionAction.id))); if (finished) setPlaying(false); setProgress(metrics.requiredTotal ? `${metrics.requiredDone}/${metrics.requiredTotal} done` : ""); }} onMoment={setMoment} onError={message => { setError(message); setPlaying(false); }}/></Suspense></div>}
-            {(!world || showSource) && <img className="home-source" src={scene.image} alt={scene.alt} fetchPriority="high" width="1536" height="1024"/>}
+            {(!world || showSource) && <img className="home-source" src={showSource ? scene.image : `/art/showcase/${scene.id}-preview.webp`} alt={scene.alt} fetchPriority="high" width="1536" height="1024"/>}
             {!playing && !complete && !showSource && !error && <div className={`home-play-prompt ${world ? "home-play-paused" : ""}`}>
               <button onClick={play} disabled={loading}>
                 <Play size={18} fill="currentColor"/>{loading ? "Opening…" : world ? "Continue playing" : "Play this example"}
@@ -124,27 +150,29 @@ export default function Home() {
             </div>}
             {error && <div className="home-play-prompt home-play-paused" role="alert"><p>{error}</p><button onClick={retry}>Try again</button></div>}
           </div>
-          <div className="home-stage-footer"><span>{showSource ? "AI-generated test image · original source" : world ? complete ? "What will you invent?" : scene.instruction : scene.type}</span><div className="home-stage-actions">{complete && !showSource && <button className="home-original-toggle" onClick={restart}><RotateCcw size={14}/>Play again</button>}{world && <button className="home-original-toggle" aria-pressed={showSource} onClick={() => { setShowSource(value=>!value); setPlaying(false); }}>{showSource ? "Back to game" : "See original"}</button>}{world && !complete && <button aria-label={playing ? "Pause example" : "Resume example"} onClick={() => { if (playing) setPlaying(false); else play(); }}>{playing ? <Pause size={15}/> : <Play size={15}/>}</button>}</div><span className="sr-only" aria-live="polite">{moment}</span></div>
+          <div className="home-stage-footer"><span>{showSource ? "AI-generated test image · original source" : world ? complete ? "What will you invent?" : scene.instruction : scene.type}</span><div className="home-stage-actions">{typeof document.documentElement.requestFullscreen === "function" && <button aria-label={fullscreen ? "Exit full screen" : "Full screen example"} title={fullscreen ? "Exit full screen" : "Full screen example"} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={17}/> : <Maximize2 size={17}/>}</button>}{complete && !showSource && <button className="home-original-toggle" onClick={restart}><RotateCcw size={14}/>Play again</button>}{world && <button className="home-original-toggle" aria-pressed={showSource} onClick={() => { setShowSource(value=>!value); setPlaying(false); }}>{showSource ? "Back to game" : "See original"}</button>}{world && !complete && <button aria-label={playing ? "Pause example" : "Resume example"} onClick={() => { if (playing) setPlaying(false); else play(); }}>{playing ? <Pause size={15}/> : <Play size={15}/>}</button>}</div><span className="sr-only" aria-live="polite">{moment}</span></div>
+          {displayNotice && <p className="home-display-notice" role="status">{displayNotice}</p>}
           {world && <div className="home-example-tools" style={{visibility:showSource ? "hidden" : "visible"}} aria-hidden={showSource} inert={showSource}>
-            {invention && !inventionUsed && <button className="home-invent-button" onClick={()=>{wasPlaying.current=playing;setPlaying(false);setDrawing(true);}}><Pencil size={14}/>Draw your own part</button>}
+            {invention && !inventionUsed && <button className="home-invent-button" onClick={()=>void drawPart()}><Pencil size={14}/>Draw your own part</button>}
             <div ref={setControlsHost} className="home-object-controls"/>
           </div>}
           <div className="home-scene-picker" aria-label="Choose an example">
-            {scenes.map((item,i) => <button key={item.id} aria-pressed={i === index} onClick={() => choose(i)}><img src={item.image} alt="" width="64" height="44"/><span>{item.title}</span><ArrowUpRight size={15}/></button>)}
+            {scenes.map((item,i) => <button key={item.id} aria-pressed={i === index} onClick={() => choose(i)}><img src={`/art/showcase/${item.id}-thumb.webp`} alt="" width="192" height="128" loading="lazy"/><span><small>{i === index ? "Selected" : `0${i+1}`}</small>{item.title}</span>{i === index && <Check size={15}/>}</button>)}
           </div>
+          <p className="home-example-note">Authored examples · AI-generated source artwork</p>
         </div>
       </section>
       <section className="home-making" id="how-it-works" aria-labelledby="making-title">
-        <div className="home-making-title"><p className="home-eyebrow">THE NEXT MOVE IS YOURS</p><h2 id="making-title">Don't just play a world.<br/>Make one.</h2></div>
+        <div className="home-making-art"><img src="/art/showcase/cat-care-preview.webp" alt="An imperfect pencil drawing of a cat, rooftops and a fish" loading="lazy" width="1536" height="1024"/><a className="home-drawing-play" href="#play-room" onClick={()=>{choose(1);focusRequested.current=true;setLoading(true);}}><Play size={15} fill="currentColor"/> Play this drawing</a><span><small>AI-generated sample drawing.</small></span></div>
+        <div className="home-making-content"><p className="home-eyebrow">FROM A MARK TO A MOVE</p><h2 id="making-title">A little imagination.<br/><em>A world of your own.</em></h2>
         <ol className="home-steps">
-          <li><span>01</span><div><h3>Start with something yours.</h3><p>A sketch, an illustration, a photograph. Add the idea you have in mind.</p></div></li>
-          <li><span>02</span><div><h3>Give your world a purpose.</h3><p>Care for a character. Restore a machine. Explore a place you imagined.</p></div></li>
-          <li><span>03</span><div><h3>Invent the next move.</h3><p>Draw a useful part, give it an ability and use it in the world you already made.</p></div></li>
-        </ol>
+          <li><span>01</span><div><h3>Bring something yours.</h3><p>A drawing, a photograph, an unfinished idea.</p></div></li>
+          <li><span>02</span><div><h3>Give it a reason to play.</h3><p>Choose what matters. Make a character care, a machine move, a place worth exploring.</p></div></li>
+          <li><span>03</span><div><h3>Change the next move.</h3><p>Draw a useful part and give it an ability. Keep the world you already made.</p></div></li>
+        </ol><a className="home-text-cta" href="#studio?create=upload">Make your game <ArrowUpRight size={18}/></a></div>
       </section>
-      <section className="home-closing"><p>Your art is the beginning.</p><a href="#studio?create=upload">What happens next? <ArrowUpRight size={32}/></a></section>
     </main>
-    <footer className="home-footer"><a className="home-brand" href="#">doodlume<span>.</span></a><p>Powered by Meta Muse Spark Open.</p><a href="#studio">Enter the studio <ArrowRight size={15}/></a></footer>
+    <footer className="home-footer"><a className="home-brand" href="#" aria-label="Doodlume home"><Brand /></a><p>Powered by Meta Muse Spark Open.</p><a href="#studio">Enter the studio <ArrowRight size={15}/></a></footer>
     {drawing && <Suspense fallback={<div className="home-stage-loading">Opening your drawing…</div>}><SketchPad title="Draw your rescue part" useLabel="Add to this game" resumeImage={drawingDraft} onPause={setDrawingDraft} onClose={()=>{setDrawing(false);setPlaying(wasPlaying.current);}} onUse={image=>void useInvention(image)}/></Suspense>}
   </div>;
 }

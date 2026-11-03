@@ -1,3 +1,5 @@
+import starterWorld from "../public/art/showcase/rover.json";
+import { Brand } from "./components/Brand";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   Save,
@@ -166,7 +168,7 @@ export default function App({ active = true }: { active?: boolean }) {
     return { entries, returning: returningWorld(entries, rememberedWorldId()) };
   });
   const [world, setWorld] = useState(
-    () => boot.returning?.world ?? freshExample(EXAMPLES[0].id),
+    () => boot.returning?.world ?? validateWorld({ ...structuredClone(starterWorld), id: crypto.randomUUID(), source: "example" }),
   );
   const [initial, setInitial] = useState<PlayState>(
     () => boot.returning?.state ?? emptyPlayState(),
@@ -1175,7 +1177,6 @@ export default function App({ active = true }: { active?: boolean }) {
             placeholder="What would make this image interesting to play?"
             disabled={busy}
           />
-          <Sparkles size={15} aria-hidden="true" />
         </div>
         <details className="creation-gameplay-options">
           <summary>Gameplay <span>{creationStyle === "auto" ? "Auto" : creationStyle === "platform" ? "Adventure" : creationStyle === "roam" ? "Explore" : "Hands-on"}</span></summary>
@@ -1278,10 +1279,8 @@ export default function App({ active = true }: { active?: boolean }) {
         onChange={upload}
       />
       <header className="topbar">
-        <a className="brand" href="#studio" aria-label="Doodlume studio">
-          <span>
-            doodlume<span className="brand-dot">.</span>
-          </span>
+        <a className="brand" href="#" aria-label="Doodlume home">
+          <Brand />
         </a>
         <nav aria-label="Main navigation">
           <button onClick={() => setDialog("worlds")}>
@@ -1292,13 +1291,13 @@ export default function App({ active = true }: { active?: boolean }) {
           <button
             className="secondary-button new-world-button"
             aria-label={
-              hasCreationDraft ? "Resume draft" : "Create a new world"
+              hasCreationDraft ? "Resume draft" : "Create a new game"
             }
             onClick={() => openCreation()}
           >
             <Plus size={17} />
             <span className="new-world-full">
-              {hasCreationDraft ? "Resume draft" : "New world"}
+              {hasCreationDraft ? "Resume draft" : "New game"}
             </span>
             <span className="new-world-short" aria-hidden="true">
               {hasCreationDraft ? "Draft" : "New"}
@@ -1323,20 +1322,20 @@ export default function App({ active = true }: { active?: boolean }) {
             aria-label="Make your own game"
           >
             <div>
-              <h1>Your image. Your game.</h1>
+              <h1>Make something only you could.</h1>
               <p>
-                Draw something. Make it playable.
+                Start with a drawing or photo. Give it a reason to play.
               </p>
             </div>
             <div className="creation-invitation-actions">
               <button
-                className="primary-button"
+                className="secondary-button"
                 onClick={() => openCreation("sketch")}
               >
                 <Pencil size={17} /> Draw here
               </button>
               <button
-                className="secondary-button"
+                className="primary-button"
                 onClick={() => openCreation("upload")}
               >
                 <ImagePlus size={17} /> Upload image
@@ -1870,12 +1869,13 @@ export default function App({ active = true }: { active?: boolean }) {
       )}
       {dialog === "create" && (
         <Modal
-          title="Create a world"
+          title="Make your game"
           className="creation-modal"
           wide
           footer={
             <div className="creation-footer">
               <div>
+                {!customSource && !busy && <span className="creation-prerequisite">Add an image or drawing to begin.</span>}
                 {hasCreationDraft && !busy && (
                   <button
                     className="text-button"
@@ -1900,7 +1900,7 @@ export default function App({ active = true }: { active?: boolean }) {
                   }
                   onClick={bringAlive}
                 >
-                  {creationError ? <RotateCcw size={18} /> : <WandSparkles size={18} />} {creationError ? "Try again" : "Create world"}
+                  {creationError ? <RotateCcw size={18} /> : <WandSparkles size={18} />} {creationError ? "Try again" : "Make game"}
                 </button>
               )}
             </div>

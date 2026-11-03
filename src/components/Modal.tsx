@@ -56,6 +56,27 @@ export function Modal({
       ref={dialog}
       className={`modal modal-stable ${wide ? "modal-wide" : ""} ${footer ? "modal-with-footer" : ""} ${className}`}
       aria-labelledby={titleId}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const node = event.currentTarget;
+        // Only the top native dialog owns the loop. Include newly disclosed
+        // fields and omit hidden/disabled controls at the time of the keypress.
+        if ([...document.querySelectorAll("dialog[open]")].at(-1) !== node) return;
+        const stops = [...node.querySelectorAll<HTMLElement>(
+          'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]',
+        )].filter(element => element.tabIndex >= 0 &&
+          !element.matches(":disabled") && !element.closest("[inert]") &&
+          // Closed details can still expose descendant layout boxes in Chrome.
+          (!element.closest("details:not([open])") ||
+            (element.matches("summary") && element.parentElement === element.closest("details:not([open])"))) &&
+          element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+        const first = stops[0], last = stops.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first?.focus();
+        }
+      }}
       onCancel={(e) => {
         e.preventDefault();
         onClose();
