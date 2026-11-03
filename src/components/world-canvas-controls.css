@@ -233,3 +233,11 @@
   .discovery-keyboard-fields select { font-size: 13px; line-height: 18px; }
   .discovery-keyboard-fields button { padding-inline: 8px; }
 }
+
+.object-keyboard-play { font-size: 12px; margin-left: auto; position: relative; color: var(--ink); }
+.object-keyboard-play summary { cursor: pointer; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--paper); }
+.object-keyboard-play > div { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 45; width: 300px; background: var(--paper); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 12px 36px #16203124; }
+.object-keyboard-play label { display: grid; gap: 8px; font-weight: 600; }
+.object-keyboard-play select { width: 100%; padding: 10px; margin-bottom: 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+.object-keyboard-play button { min-height: 36px; margin-right: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font: inherit; }
+.object-keyboard-play button:disabled { opacity: .45; cursor: default; }

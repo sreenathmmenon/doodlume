@@ -1,5 +1,7 @@
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 import Phaser from "phaser";
+import { ObjectInteractions } from "./object-interactions";
+import { interactionEffects } from "../../shared/interactions";
 import { createAtmosphere } from "./atmosphere";
 import { Soundscape } from "./soundscape";
 import { artworkRasterSize } from "./artwork-raster";
@@ -43,6 +45,8 @@ export interface WorldTelemetry {
   requiredTotal: number;
   playerX: number;
   playerY: number;
+  heldObjectId?: string | null;
+  actionLabel?: string;
 }
 export interface WorldControls {
   left: boolean;
@@ -96,6 +100,10 @@ const palettes = {
 
 
 export class WorldScene extends Phaser.Scene {
+  private objectInteractions?: ObjectInteractions;
+  private appliedInteractionGates = new Set<string>();
+  private jumpMultiplier = 1;
+  private moveSpeedMultiplier = 1;
   private definition: WorldDefinition;
   private hooks: Hooks;
   private initial: PlayState;
@@ -337,7 +345,7 @@ export class WorldScene extends Phaser.Scene {
     // painted underside retains its full height rather than becoming a 24px strip.
     if (sourceAlignedScenery && sourceBackdrop) {
       for (const entity of this.definition.entities) {
-        if (!entity.sourceLayer || !entity.art || entity.kind === "gate") continue;
+        if (!entity.sourceLayer || !entity.art || entity.kind === "gate" || this.isInteractionDecoration(entity)) continue;
         const box = sourceLayerArtworkBounds(entity, sourceBackdrop);
         this.add.image(box.x, box.y, `art-${entity.id}`)
           .setOrigin(0).setDisplaySize(box.width, box.height).setDepth(10);
@@ -499,7 +507,7 @@ export class WorldScene extends Phaser.Scene {
       if (e.kind === "coin") this.createCoin(e);
       if (e.kind === "lever") this.createLever(e);
       if (e.kind === "goal") this.createGoal(e);
-      if (e.kind === "decoration" && e.art && e !== sourceBackdrop && !sourceAlignedScenery)
+      if (e.kind === "decoration" && e.art && e !== sourceBackdrop && !sourceAlignedScenery && !this.isInteractionDecoration(e))
         this.add
           .image(e.x + e.width / 2, e.y + e.height / 2, `art-${e.id}`)
           .setDisplaySize(e.width, e.height)
@@ -524,6 +532,7 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(30)
       .setVisible(false);
     for (const id of this.state.activated) this.openLever(id, true);
+    this.createObjectInteractions();
     this.setPlaying(false);
     if (
       this.initial.velocity &&
@@ -763,7 +772,7 @@ export class WorldScene extends Phaser.Scene {
       const point = pointer.positionToCamera(
         this.cameras.main,
       ) as Phaser.Math.Vector2;
-      this.interactAt(point);
+      if (!this.objectInteractions?.containsPoint(point)) this.interactAt(point);
     });
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       const drag = this.discoveryDrag;
@@ -800,6 +809,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.on("pointerupoutside", () => {
       this.discoveryDrag = undefined;
     });
+    this.createObjectInteractions();
     this.setViewportWidth(this.cameras.main.width);
     this.report();
     this.hooks.onReady(this);
@@ -1186,7 +1196,7 @@ export class WorldScene extends Phaser.Scene {
     const art = this.add.container(e.x, e.y).setDepth(14);
     const g = this.add.graphics();
     const sourceGate =
-      e.artSource && !e.sourceLayer && (this.sourceAlignedArtwork && !this.definition.entities.some(other => other.kind === "lever" && other.targetId === e.id) || this.definition.gameplay?.movement === "roam" && !e.art);
+      e.artSource && !e.sourceLayer && (this.sourceAlignedArtwork && !this.definition.entities.some(other => other.kind === "lever" && other.targetId === e.id) && !this.definition.interactions?.actions.some(action => action.effects?.some(effect => effect.kind === "openGate" && effect.entityId === e.id)) || this.definition.gameplay?.movement === "roam" && !e.art);
     if (this.creativeArtwork) {
       g.fillStyle(this.direction.matte, 0.92);
       g.fillRoundedRect(0, 0, e.width, e.height, 2);
@@ -1216,10 +1226,12 @@ export class WorldScene extends Phaser.Scene {
     }
     if (e.art && !sourceGate) {
       g.setVisible(false);
+      const backdrop = this.definition.entities.find(isSourceBackdrop);
+      const box = e.sourceLayer && backdrop ? sourceLayerArtworkBounds(e, backdrop) : e;
       art.add(
         this.add
-          .image(e.width / 2, e.height / 2, `art-${e.id}`)
-          .setDisplaySize(e.width, e.height),
+          .image(box.x - e.x + box.width / 2, box.y - e.y + box.height / 2, `art-${e.id}`)
+          .setDisplaySize(box.width, box.height),
       );
     }
     this.gates.set(e.id, { collider, art });
@@ -1879,6 +1891,62 @@ export class WorldScene extends Phaser.Scene {
       facingLeft: this.player?.flipX ?? false,
     };
   }
+  private isInteractionDecoration(entity: WorldEntity) {
+    return entity.kind === "decoration" && Boolean(this.definition.interactions?.objects.some(o => o.entityId === entity.id));
+  }
+
+  private createObjectInteractions() {
+    if (!this.definition.interactions?.objects.length) return;
+    this.objectInteractions = new ObjectInteractions(this, this.definition, {
+      state: () => this.state,
+      change: state => {
+        this.state = state;
+        this.applyObjectEffects();
+        const progress = goalProgress(this.definition, this.state);
+        if (!this.state.completed && progress.total > 0 && progress.ready &&
+            !this.definition.entities.some(entity => entity.kind === "goal")) {
+          this.state.completed = true;
+          this.soundtrack.cue("finish");
+        }
+        this.report();
+      },
+      player: () => this.player,
+      playing: () => this.isPlaying && (!this.state.completed || Boolean(this.state.exploring)),
+      approach: point => {
+        this.roamTarget = point;
+        this.roamEngaged = true;
+        this.roamTrack = { x: this.player.x, y: this.player.y, stalledMs: 0 };
+        this.roamMarker?.setPosition(point.x, point.y).setVisible(true);
+      },
+      moment: message => this.hooks.onMoment(message),
+      feedback: kind => this.soundtrack.cue(kind === "pickup" || kind === "drop" ? "collect" : "gate"),
+    }, this.reducedMotion);
+    this.applyObjectEffects();
+  }
+
+  private applyObjectEffects() {
+    const effects = interactionEffects(this.definition, this.state);
+    this.jumpMultiplier = effects.jumpMultiplier;
+    this.moveSpeedMultiplier = effects.moveSpeedMultiplier;
+    if (this.player?.body) {
+      const body = this.player.body as Phaser.Physics.Arcade.Body;
+      const roam = this.definition.gameplay?.movement === "roam";
+      body.setMaxVelocity((roam ? 300 : 350) * this.moveSpeedMultiplier, roam ? 300 * this.moveSpeedMultiplier : Math.max(1100, 650 * this.jumpMultiplier));
+    }
+    for (const id of effects.openGateIds) {
+      if (this.appliedInteractionGates.has(id)) continue;
+      const gate = this.gates.get(id);
+      if (!gate) continue;
+      this.appliedInteractionGates.add(id);
+      (gate.collider.body as Phaser.Physics.Arcade.StaticBody).enable = false;
+      this.tweens.add({ targets: gate.art, alpha: 0, y: gate.art.y - 100,
+        duration: this.reducedMotion ? 0 : 400, ease: "Cubic.easeOut" });
+    }
+  }
+
+  interactWithObject(id: string) { return this.objectInteractions?.interact(id) ?? false; }
+  dropHeldObject() { this.objectInteractions?.putBack(); }
+
   private nearestLever() {
     if (!this.player) return undefined;
     return [...this.levers.values()]
@@ -1899,6 +1967,7 @@ export class WorldScene extends Phaser.Scene {
     const state = this.snapshot();
     const nearby = this.nearestLever();
     const objective = goalProgress(this.definition, state);
+    const objectContext = this.objectInteractions?.context();
     const clue =
       this.definition.gameplay?.movement === "discover"
         ? this.nextDiscoveryClue()?.text
@@ -1908,14 +1977,16 @@ export class WorldScene extends Phaser.Scene {
       total: this.definition.entities.filter((e) => e.kind === "coin").length,
       completed: state.completed,
       exploring: Boolean(state.exploring),
-      nearLever: Boolean(nearby),
+      nearLever: Boolean(nearby || objectContext?.nearby),
+      heldObjectId: objectContext?.heldEntityId,
+      actionLabel: objectContext?.label,
       interactionHint:
-        clue ??
+        objectContext?.label || (clue ??
         (nearby
           ? nearby.entity.targetId
             ? `Use ${objectName(this.definition, nearby.entity.id)} · opens ${objectName(this.definition, nearby.entity.targetId)}`
             : `Activate ${objectName(this.definition, nearby.entity.id)}`
-          : ""),
+          : "")),
       goalHint: clue ?? objective.hint,
       requiredDone: objective.done,
       requiredTotal: objective.total,
@@ -1977,6 +2048,7 @@ export class WorldScene extends Phaser.Scene {
         point.y > this.definition.height
       )
         return;
+      if (this.objectInteractions?.containsPoint(point)) return;
       this.roamTarget = { x: point.x, y: point.y };
       this.roamEngaged = true;
       this.roamTrack = { x: this.player.x, y: this.player.y, stalledMs: 0 };
@@ -2049,12 +2121,12 @@ export class WorldScene extends Phaser.Scene {
     const length = Math.max(1, Math.hypot(horizontal, vertical));
     const blend = 1 - Math.exp(-delta / 85);
     let desired = {
-      x: (horizontal / length) * 260,
-      y: (vertical / length) * 260,
+      x: (horizontal / length) * 260 * this.moveSpeedMultiplier,
+      y: (vertical / length) * 260 * this.moveSpeedMultiplier,
     };
     if (this.roamTarget) {
       const steering = roamSteering(this.player, this.roamTarget);
-      desired = steering;
+      desired = { x: steering.x * this.moveSpeedMultiplier, y: steering.y * this.moveSpeedMultiplier };
       const moved = Math.hypot(
         this.player.x - this.roamTrack.x,
         this.player.y - this.roamTrack.y,
@@ -2110,6 +2182,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    this.objectInteractions?.tick();
     if (this.definition.gameplay?.movement === "discover") {
       if (this.isPlaying) this.soundtrack.tick(time);
       return;
@@ -2184,7 +2257,7 @@ export class WorldScene extends Phaser.Scene {
       body.updateFromGameObject();
     } else if (jumpPressed) this.jumpQueued = time;
     if (time - this.jumpQueued < 120 && time - this.lastGrounded < 100) {
-      body.setVelocityY(-650);
+      body.setVelocityY(-650 * this.jumpMultiplier);
       this.lastGrounded = -1000;
       this.jumpQueued = -1000;
       this.soundtrack.cue("jump");

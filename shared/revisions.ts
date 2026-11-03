@@ -1,3 +1,4 @@
+import { interactionEffects, type InteractionPlan } from "./interactions.js";
 import { setupFeedback } from "./setup.js";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit } from "./source-scenery.js";
 import {
@@ -35,13 +36,14 @@ export interface WorldPatch {
   bounds?: { width: number; height: number };
   goalRules?: GoalRules;
   gameplay?: WorldGameplay;
+  interactions?: InteractionPlan | null;
 }
 export interface RevisionCheckpoint {
   before: WorldDefinition;
   appliedRevision: number;
 }
 
-function safePlayerPosition(world: WorldDefinition, state: PlayState, before: WorldDefinition) {
+function safePlayerPosition(world: WorldDefinition, state: PlayState, before: WorldDefinition, beforeState: PlayState) {
   if (!state.player || movementMode(world) === "discover") return;
   if (state.player.x > world.width || state.player.y > world.height)
     throw new Error(
@@ -59,9 +61,11 @@ function safePlayerPosition(world: WorldDefinition, state: PlayState, before: Wo
       .filter((e) => e.kind === "lever" && state.activated.includes(e.id))
       .map((e) => e.targetId),
   );
+  for (const id of interactionEffects(world, state).openGateIds) openGates.add(id);
   const beforeHero = before.entities.find(entity => entity.kind === "player");
   const sameBody = beforeHero?.width === hero.width && beforeHero?.height === hero.height;
-  const previouslyOpen = new Set(before.entities.filter(entity => entity.kind === "lever" && state.activated.includes(entity.id)).map(entity => entity.targetId));
+  const previouslyOpen = new Set(before.entities.filter(entity => entity.kind === "lever" && beforeState.activated.includes(entity.id)).map(entity => entity.targetId));
+  for (const id of interactionEffects(before, beforeState).openGateIds) previouslyOpen.add(id);
   for (const e of world.entities) {
     if (!["terrain", "bridge", "gate"].includes(e.kind) || openGates.has(e.id)) continue;
     const old = before.entities.find(entity => entity.id === e.id);
@@ -92,13 +96,13 @@ export function applyWorldPatch(
     !patch.id ||
     !["manual", "meta"].includes(patch.origin) ||
     !Array.isArray(patch.additions) ||
-    (!patch.additions.length && !patch.updates?.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined)
+    (!patch.additions.length && !patch.updates?.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined && patch.interactions === undefined)
   )
     throw new Error("Add something to your world before applying this change.");
   const derivedBackdrops = world.entities.filter(isSourceAlignedScenery);
   if (patch.sourceImage && derivedBackdrops.length && !patch.sourceScenery)
     throw new Error("The revised image needs a refreshed scenery preview. Review the image update again before applying.");
-  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || (!patch.sourceImage && !patch.updates?.length && !patch.additions.length) ||
+  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || (!patch.sourceImage && !patch.updates?.length && !patch.additions.length && patch.interactions === undefined) ||
       derivedBackdrops.length !== 1 || patch.sourceScenery.id !== derivedBackdrops[0].id || typeof patch.sourceScenery.art !== "string"))
     throw new Error("The scenery update does not match this image review. Review the image update again before applying.");
   const changes = new Map<string, WorldEntityUpdate>();
@@ -160,6 +164,7 @@ export function applyWorldPatch(
       ? { goalRules: structuredClone(patch.goalRules) }
       : {}),
     ...(patch.gameplay !== undefined ? {gameplay: structuredClone(patch.gameplay)} : {}),
+    ...(patch.interactions !== undefined ? {interactions: patch.interactions === null ? undefined : structuredClone(patch.interactions)} : {}),
     entities: [
       ...structuredClone(world.entities).map(entity => {
         const update = changes.get(entity.id);
@@ -179,7 +184,7 @@ export function applyWorldPatch(
     if (issue) throw new Error(issue);
   }
   const progress = retainPlayState(next, structuredClone(state));
-  safePlayerPosition(next, progress, world);
+  safePlayerPosition(next, progress, world, state);
   return {
     world: next,
     state: progress,
@@ -205,6 +210,6 @@ export function undoWorldPatch(
     revision: world.revision + 1,
   });
   const progress = retainPlayState(previous, structuredClone(state));
-  safePlayerPosition(previous, progress, world);
+  safePlayerPosition(previous, progress, world, state);
   return { world: previous, state: progress };
 }

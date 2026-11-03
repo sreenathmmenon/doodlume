@@ -12,7 +12,7 @@ import {recoverSourceObjectLayer} from './source-object-layer.js';
  * This endpoint never sends images to a remote model provider. */
 export function installSourceScenery(app: FastifyInstance) {
   let preparing=false;
-  app.post<{Body:{world?:unknown;image?:unknown;additions?:unknown;updates?:unknown;bounds?:WorldPatch['bounds']}}>('/api/source-scenery',async(request,reply)=>{
+  app.post<{Body:{world?:unknown;image?:unknown;additions?:unknown;updates?:unknown;bounds?:WorldPatch['bounds'];interactions?:WorldPatch['interactions'];goalRules?:WorldPatch['goalRules']}}>('/api/source-scenery',async(request,reply)=>{
     if(preparing)return reply.code(429).send({error:'An image update is already being prepared. Try applying again in a moment.'});
     preparing=true;
     try{
@@ -25,13 +25,17 @@ export function installSourceScenery(app: FastifyInstance) {
       if(updates!==undefined&&!Array.isArray(updates))throw Error('Invalid updates');
       const bounds=request.body?.bounds;
       if(bounds && (!Number.isFinite(bounds.width)||!Number.isFinite(bounds.height)||bounds.width<world.width||bounds.height<world.height))throw Error('Invalid bounds');
+      const interactions=request.body?.interactions;
+      const goalRules=request.body?.goalRules;
       const candidate=updates && updates.length ? applyWorldPatch(world,emptyPlayState(),{
         id:'prepare-source-layers',worldId:world.id,baseRevision:world.revision,origin:'manual',
-        additions,updates:updates as WorldPatch['updates'], ...(bounds ? {bounds} : {}),
+        additions,updates:updates as WorldPatch['updates'], ...(interactions !== undefined ? {interactions} : {}), ...(goalRules !== undefined ? {goalRules} : {}), ...(bounds ? {bounds} : {}),
         sourceScenery:{id:backdrop.id,art:backdrop.art??world.sourceImage},
-      }).world : validateWorld({...world,...bounds,entities:[...world.entities,...additions]});
-      const moving=candidate.entities.filter(entity=>entity.artSource&&(entity.sourceLayer||entity.kind==='player'||
-        (entity.kind==='gate'&&candidate.entities.some(other=>other.kind==='lever'&&other.targetId===entity.id))));
+      }).world : validateWorld({...world,...bounds,...(goalRules !== undefined ? {goalRules} : {}),...(interactions !== undefined ? {interactions:interactions??undefined} : {}),entities:[...world.entities,...additions]});
+      const interactionGates=new Set((candidate.interactions?.actions??[]).flatMap(action=>(action.effects??[]).flatMap(effect=>effect.kind==='openGate'?[effect.entityId]:[])));
+      const carried=new Set((candidate.interactions?.objects??[]).filter(object=>object.carryable).map(object=>object.entityId));
+      const moving=candidate.entities.filter(entity=>entity.artSource&&(entity.sourceLayer||carried.has(entity.id)||entity.kind==='player'||
+        (entity.kind==='gate'&&(interactionGates.has(entity.id)||candidate.entities.some(other=>other.kind==='lever'&&other.targetId===entity.id)))));
       if(moving.some(entity=>!entity.art))throw Error('Missing moving artwork');
       const source=await normalizeDrawing(request.body?.image);
       const [before,after]=await Promise.all([sharp(Buffer.from(world.sourceImage!.split(',')[1],'base64')).metadata(),sharp(source).metadata()]);
@@ -57,7 +61,7 @@ export function installSourceScenery(app: FastifyInstance) {
           sourceLayers.push({ id: entity.id, art: recovered.art, artSource: recovered.artSource, artMethod: recovered.artMethod, artNote: recovered.artNote, sourceLayer: entity.sourceLayer });
         }
       }
-      const art=await sourceScenery(source,candidate.entities);
+      const art=await sourceScenery(source,candidate.entities,candidate.interactions);
       return {sourceScenery:{id:backdrop.id,art}, ...(sourceLayers.length ? {sourceLayers} : {})};
     }catch{
       return reply.code(422).send({error:'The edited source artwork could not be prepared. Keep the same page framing and try again. Your draft is still here.'});

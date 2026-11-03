@@ -271,7 +271,7 @@ export async function interpretDrawing(
   // Creative inputs need source crops, not forced character/terrain detection.
   // Do not let a white-paper connected-component heuristic veto photographs,
   // abstract marks or a character attached to the rest of an illustration.
-  if (gameplay && (gameplay.mode === "creative" || gameplay.movement !== "platform" || !objects.length ||
+  if (gameplay && (gameplay.interactions || gameplay.mode === "creative" || gameplay.movement !== "platform" || !objects.length ||
       objects.filter(object => object.kind === "terrain" || object.kind === "bridge").length >= 2))
     return compileCreativeAdaptation({
       source: normalized, inputKind, name: detected.name,

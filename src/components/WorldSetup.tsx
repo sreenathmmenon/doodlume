@@ -132,7 +132,9 @@ export function WorldSetup({
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  function toggleRule(key: keyof GoalRules, id: string) {
+  const requiredActionCount = goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length + (goalRules.requiredInteractionIds?.length ?? 0);
+  const hasDestination = world.entities.some((entity) => entity.kind === "goal");
+  function toggleRule(key: "requiredCollectedIds" | "requiredActivatedIds" | "requiredInteractionIds", id: string) {
     setWorld((current) => {
       const rules = current.goalRules ?? {
         requiredCollectedIds: [],
@@ -142,16 +144,16 @@ export function WorldSetup({
         ...current,
         goalRules: {
           ...rules,
-          [key]: rules[key].includes(id)
-            ? rules[key].filter((value) => value !== id)
-            : [...rules[key], id],
+          [key]: (rules[key] ?? []).includes(id)
+            ? (rules[key] ?? []).filter((value) => value !== id)
+            : [...(rules[key] ?? []), id],
         },
       };
     });
     if (recovery?.rulesNeedConfirmation) setRulesConfirmed(false);
     setError("");
   }
-  function ruleChoices(key: keyof GoalRules, kind: "coin" | "lever") {
+  function ruleChoices(key: "requiredCollectedIds" | "requiredActivatedIds", kind: "coin" | "lever") {
     const choices = world.entities.filter((entity) => entity.kind === kind);
     const unavailable = goalRules[key].filter(
       (id) => !choices.some((entity) => entity.id === id),
@@ -842,10 +844,10 @@ export function WorldSetup({
         </details>
       </fieldset>
       <details className="setup-disclosure setup-finishing" open={recovery?.rulesNeedConfirmation || undefined}>
-      <summary>Finishing requirements <span>{goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length} required actions</span></summary>
+      <summary>Finishing requirements <span>{requiredActionCount} required actions</span></summary>
       <fieldset className="setup-rules" disabled={busy}>
         <legend className="sr-only">Finishing requirements</legend>
-        <p>Choose what is required before reaching the destination. Unchecked objects are optional.</p>
+        <p>Choose the actions required to finish. Unchecked actions are optional.</p>
         {recovery?.rulesNeedConfirmation && (
           <p className="setup-rule-attention">
             Meta could not confirm every part of your objective. Check these
@@ -856,14 +858,20 @@ export function WorldSetup({
         <div className="setup-rule-columns">
           {ruleChoices("requiredCollectedIds", "coin")}
           {ruleChoices("requiredActivatedIds", "lever")}
+          {Boolean(world.interactions?.actions.length) && <fieldset className="setup-rule-group">
+            <legend>Object actions</legend>
+            {world.interactions!.actions.map((action) => <label key={action.id}>
+              <input type="checkbox" checked={(goalRules.requiredInteractionIds ?? []).includes(action.id)} onChange={() => toggleRule("requiredInteractionIds", action.id)} />
+              <span>{action.label}</span>
+            </label>)}
+          </fieldset>}
         </div>
         <p className="setup-rule-summary">
-          {!world.entities.some((entity) => entity.kind === "goal")
-            ? "No destination yet. Add one to give this world a finish."
-            : goalRules.requiredCollectedIds.length +
-                goalRules.requiredActivatedIds.length
-              ? `${goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length} required actions, then reach a destination.`
-              : "Reach a destination. Collection and switches are optional."}
+          {!hasDestination && !world.interactions
+            ? "Explore freely. Add a destination to give this world a finish."
+            : requiredActionCount
+            ? `${requiredActionCount} required actions${hasDestination ? ", then reach a destination" : " to finish"}.`
+            : hasDestination ? "Reach a destination. All actions are optional." : "Explore freely. All actions are optional."}
         </p>
         {recovery?.rulesNeedConfirmation && (
           <label className="setup-rule-confirm">

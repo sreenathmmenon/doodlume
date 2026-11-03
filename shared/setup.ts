@@ -30,7 +30,7 @@ export function setupFeedback(world: WorldDefinition) {
         `Choose the gate opened by “${entity.label || "Switch"}” in its object settings, or change its role.`,
       );
   }
-  errors.push(...reviewGoalRules(world.goalRules, world.entities).issues);
+  errors.push(...reviewGoalRules(world.goalRules, world.entities, true, world.interactions).issues);
   try {
     validateWorld(world);
   } catch (e) {
@@ -96,11 +96,13 @@ export function setupFeedback(world: WorldDefinition) {
         "Your character is large for this stage. A smaller size leaves more room to explore.",
       );
   }
-  if (!world.entities.some((e) => e.kind === "goal"))
+  if (!world.entities.some((e) => e.kind === "goal") && !world.goalRules?.requiredInteractionIds?.length)
     warnings.push(
       "There is no destination yet. You can explore, or add somewhere to finish.",
     );
-  warnings.push(mode === "discover"
+  warnings.push(world.interactions
+    ? "Play each object action to check that targets, resource levels and consequences are clear."
+    : mode === "discover"
     ? "Play the clues to check that each target is clear in the original image."
     : mode === "roam"
       ? "Explore the scene to check that each required object and destination is reachable."

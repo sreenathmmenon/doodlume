@@ -1,3 +1,4 @@
+import { interactionState, validateInteractions, type InteractionPlan, type InteractionState } from "./interactions.js";
 import {
   validatePngArtwork,
   artworkRasterSize,
@@ -45,6 +46,7 @@ export interface WorldEntity {
 export interface GoalRules {
   requiredCollectedIds: string[];
   requiredActivatedIds: string[];
+  requiredInteractionIds?: string[];
 }
 
 export interface WorldGameplay {
@@ -72,6 +74,7 @@ export interface WorldDefinition {
   entities: WorldEntity[];
   goalRules?: GoalRules;
   gameplay?: WorldGameplay;
+  interactions?: InteractionPlan;
   revision: number;
 }
 
@@ -83,6 +86,7 @@ export interface PlayState {
   activated: string[];
   completed: boolean;
   exploring?: boolean;
+  interactions?: InteractionState;
 }
 
 export const emptyPlayState = (): PlayState => ({
@@ -144,7 +148,7 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
         typeof g.objectiveTitle !== "string" || !g.objectiveTitle.trim() || g.objectiveTitle.length > 100 ||
         typeof g.instructions !== "string" || !g.instructions.trim() || g.instructions.length > 180 ||
         (g.clues !== undefined && (!Array.isArray(g.clues) || g.clues.length > 24)) ||
-        (g.movement === "discover" && (!Array.isArray(g.clues) || !g.clues.length)))
+        (g.movement === "discover" && !w.interactions && (!Array.isArray(g.clues) || !g.clues.length)))
       throw new Error("This world's game instructions are incomplete.");
   }
   const allowed: EntityKind[] = [
@@ -306,12 +310,13 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
     if ([...w.goalRules.requiredCollectedIds, ...w.goalRules.requiredActivatedIds].some(id => !clued.has(id)))
       throw new Error("Add a discovery clue for each required object before applying these rules.");
   }
+  validateInteractions(w);
   return w;
 }
 
 /** Keeps discovery order and finishing requirements in sync when the creator edits them. */
 export function withGoalRules(world: WorldDefinition, rules: GoalRules, clueTexts: Record<string, string> = {}) {
-  if (movementMode(world) !== "discover") return validateWorld({ ...world, goalRules: structuredClone(rules) });
+  if (movementMode(world) !== "discover" || world.interactions) return validateWorld({ ...world, goalRules: structuredClone(rules) });
   const required = [...rules.requiredCollectedIds, ...rules.requiredActivatedIds];
   const old = world.gameplay!.clues ?? [];
   const ordered = [
@@ -349,11 +354,15 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
   const missingActivatedIds = (
     world.goalRules?.requiredActivatedIds ?? []
   ).filter((id) => !state.activated.includes(id));
+  const interactionProgress = interactionState(world, state);
+  const missingInteractionIds = (world.goalRules?.requiredInteractionIds ?? []).filter(id => !interactionProgress.completed.includes(id));
   const total =
+    (world.goalRules?.requiredInteractionIds?.length ?? 0) +
     (world.goalRules?.requiredCollectedIds.length ?? 0) +
     (world.goalRules?.requiredActivatedIds.length ?? 0);
-  const remaining = missingCollectedIds.length + missingActivatedIds.length;
+  const remaining = missingCollectedIds.length + missingActivatedIds.length + missingInteractionIds.length;
   const actions = [
+    ...missingInteractionIds.map(id => world.interactions?.actions.find(action => action.id === id)?.label ?? id),
     ...missingCollectedIds.map(
       (id) => `collect ${objectiveObjectLabel(world, id)}`,
     ),
@@ -362,10 +371,11 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
     ),
   ];
   const detail = actions.slice(0, 2).join(" and ");
+  const hasDestination = world.entities.some(e => e.kind === "goal");
   const hint = remaining
-    ? `Before the destination: ${detail}${remaining > 2 ? `, plus ${remaining - 2} more` : ""}.`
+    ? `${hasDestination ? "Before the destination" : "Next"}: ${detail}${remaining > 2 ? `, plus ${remaining - 2} more` : ""}.`
     : total
-      ? "Requirements complete. Reach a destination."
+      ? hasDestination ? "Requirements complete. Reach a destination." : "All tasks complete."
       : world.entities.some((e) => e.kind === "goal")
         ? "Reach a destination. Collectibles are optional."
         : "Explore this world. Add a destination in Edit world to give it a finish.";
@@ -375,6 +385,7 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
     total,
     missingCollectedIds,
     missingActivatedIds,
+    missingInteractionIds,
     hint,
   };
 }
@@ -395,6 +406,7 @@ export function retainPlayState(
       ...new Set(state.collected.filter((id) => collectibleIds.has(id))),
     ],
     activated: [...new Set(state.activated.filter((id) => leverIds.has(id)))],
+    ...(world.interactions ? { interactions: interactionState(world, state) } : state.interactions ? { interactions: undefined } : {}),
   };
 }
 

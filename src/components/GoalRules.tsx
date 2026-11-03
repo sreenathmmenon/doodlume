@@ -38,24 +38,25 @@ export function GoalRules({
   const isDiscovery = movementMode(world) === "discover";
   const [clueTexts, setClueTexts] = useState<Record<string,string>>(() => Object.fromEntries((world.gameplay?.clues ?? []).map(clue => [clue.entityId, clue.text])));
   const hasGoal = world.entities.some((e) => e.kind === "goal");
+  const canFinish = hasGoal || Boolean(world.interactions);
   const count =
-    rules.requiredCollectedIds.length + rules.requiredActivatedIds.length;
+    rules.requiredCollectedIds.length + rules.requiredActivatedIds.length + (rules.requiredInteractionIds?.length ?? 0);
   const original = world.goalRules ?? {
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (Object.keys(rules) as (keyof Rules)[]).some(
+  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (["requiredCollectedIds", "requiredActivatedIds", "requiredInteractionIds"] as (keyof Rules)[]).some(
     (key) =>
-      rules[key].length !== original[key].length ||
-      rules[key].some((id) => !original[key].includes(id)),
+      (rules[key] ?? []).length !== (original[key] ?? []).length ||
+      (rules[key] ?? []).some((id) => !(original[key] ?? []).includes(id)),
   );
   function toggle(key: keyof Rules, id: string) {
     setError("");
     setRules((old) => ({
       ...old,
-      [key]: old[key].includes(id)
-        ? old[key].filter((selected) => selected !== id)
-        : [...old[key], id],
+      [key]: (old[key] ?? []).includes(id)
+        ? (old[key] ?? []).filter((selected) => selected !== id)
+        : [...(old[key] ?? []), id],
     }));
   }
   function choices(kind: "coin" | "lever", key: keyof Rules) {
@@ -78,7 +79,7 @@ export function GoalRules({
           <label className="goal-rules-choice" key={entity.id}>
             <input
               type="checkbox"
-              checked={rules[key].includes(entity.id)}
+              checked={(rules[key] ?? []).includes(entity.id)}
               onChange={() => toggle(key, entity.id)}
             />
             {entity.art && <img src={entity.art} alt="" />}
@@ -111,20 +112,20 @@ export function GoalRules({
     }
   }
   return (
-    <Modal title="Destination rules" onClose={onCancel} footer={
+    <Modal title={world.interactions ? "Completion rules" : "Destination rules"} onClose={onCancel} footer={
         <div className="goal-rules-actions">
           <button
             className="text-button"
             disabled={!count}
             onClick={() =>
-              setRules({ requiredCollectedIds: [], requiredActivatedIds: [] })
+              setRules({ requiredCollectedIds: [], requiredActivatedIds: [], requiredInteractionIds: [] })
             }
           >
             Make all optional
           </button>
           <button
             className="primary-button"
-            disabled={!hasGoal || !changed}
+            disabled={!canFinish || !changed}
             onClick={apply}
           >
             Apply rules
@@ -135,7 +136,7 @@ export function GoalRules({
         <p className="goal-rules-intro">
           Choose the required actions. Everything else stays optional.
         </p>
-        {!hasGoal && (
+        {!canFinish && (
           <p className="goal-rules-error" role="status">
             This world has no destination. Add one in Edit world before setting
             a finish rule.
@@ -143,7 +144,15 @@ export function GoalRules({
         )}
         {choices("coin", "requiredCollectedIds")}
         {choices("lever", "requiredActivatedIds")}
-        {isDiscovery && hasGoal && (
+        {world.interactions && <fieldset className="goal-rules-group" disabled={!canFinish}>
+          <legend>Complete before finishing</legend>
+          {world.interactions.actions.map(action => <label className="goal-rules-choice" key={action.id}>
+            <input type="checkbox" checked={(rules.requiredInteractionIds ?? []).includes(action.id)} onChange={() => toggle("requiredInteractionIds", action.id)} />
+            <span><strong>{action.label}</strong></span>
+            {state?.interactions?.completed.includes(action.id) && <em>Done</em>}
+          </label>)}
+        </fieldset>}
+        {isDiscovery && !world.interactions && hasGoal && (
           <fieldset className="goal-rules-group">
             <legend>Discovery clues</legend>
             <p className="goal-rules-empty">These clues lead through your required objects, then to the finish.</p>
@@ -167,14 +176,18 @@ export function GoalRules({
           <Flag size={19} />
           <div>
             <strong>
-              {!hasGoal
+              {world.interactions && !hasGoal
+                ? count ? `${count} required ${count === 1 ? "action" : "actions"}` : "Free play"
+                : !hasGoal
                 ? "Exploration · no destination"
                 : count
                   ? `${count} required ${count === 1 ? "action" : "actions"}, then reach a destination`
                   : "Reach a destination"}
             </strong>
             <p>
-              {!hasGoal
+              {world.interactions && !hasGoal
+                ? count ? "Complete the checked actions to finish." : "All object interactions remain available."
+                : !hasGoal
                 ? "Add a destination in Edit world to give this world a finish."
                 : count
                   ? "Every checked object is required. Any destination can finish this world once they are done."

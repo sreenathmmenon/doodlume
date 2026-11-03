@@ -36,6 +36,8 @@ export interface WorldCanvasHandle {
   explore: () => PlayState | undefined;
   touch: (key: keyof WorldControls, value: boolean) => void;
   selectDiscovery: (entityId: string) => boolean;
+  interactWithObject: (entityId: string) => boolean;
+  dropHeldObject: () => void;
   interactAt: (point: { x: number; y: number }) => boolean;
 }
 interface Props {
@@ -84,6 +86,8 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       () => ({
         selectDiscovery: (entityId) =>
           scene.current?.selectDiscovery(entityId) ?? false,
+        interactWithObject: (entityId) => scene.current?.interactWithObject(entityId) ?? false,
+        dropHeldObject: () => scene.current?.dropHeldObject(),
         interactAt: (point) => scene.current?.interactAt(point) ?? false,
         snapshot: () =>
           startupFailed.current
@@ -186,7 +190,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         onUpdate: (s, m) => {
           if (active && !startupFailed.current) {
             lastState = s;
-            if (movementMode(callbacks.current.world) === "discover")
+            if (movementMode(callbacks.current.world) === "discover" || callbacks.current.world.interactions)
               setDiscoveryProgress(s);
             callbacks.current.onUpdate(s, m);
           }
@@ -368,7 +372,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     useEffect(() => {
       if (!startupFailed.current) scene.current?.setMuted(props.muted);
     }, [props.muted]);
-    const discoveryControls = mode === "discover" && ready && !failed && (
+    const discoveryControls = mode === "discover" && !props.world.interactions && ready && !failed && (
           <div
             className="discovery-access"
             onPointerDown={(event) => event.stopPropagation()}
@@ -470,6 +474,21 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
             </details>
           </div>
         );
+    const objectControls = props.world.interactions && ready && !failed && (
+      <details className="object-keyboard-play">
+        <summary>Object controls</summary>
+        <div>
+          <label>Choose an object
+            <select aria-label="Choose interactive object" value={selectedDiscovery} onChange={event => setSelectedDiscovery(event.target.value)}>
+              <option value="">Choose an object…</option>
+              {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
+            </select>
+          </label>
+          <button disabled={!props.playing || !selectedDiscovery || (discoveryProgress.completed && !discoveryProgress.exploring)} onClick={() => scene.current?.interactWithObject(selectedDiscovery)}>Use object</button>
+          <button disabled={!props.playing || !discoveryProgress.interactions?.heldEntityId} onClick={() => scene.current?.dropHeldObject()}>Put back</button>
+        </div>
+      </details>
+    );
     return (
       <div className="world-canvas-shell">
         <div
@@ -478,7 +497,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           data-ready={ready}
           aria-busy={!ready && !failed}
           aria-label={
-            mode === "discover"
+            props.world.interactions
+              ? "Interactive world. Select a tool, then its target. E uses a nearby object; Q puts it back."
+              : mode === "discover"
               ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
               : mode === "roam"
                 ? "Exploration game. Start play, then click or tap to move, or use arrow keys or W A S D. E interacts with nearby objects."
@@ -524,7 +545,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           {mode === "discover" && (
             <span id={canvasInstructions} className="sr-only">
               Plus and minus zoom the image, arrow keys pan, and zero fits the
-              image. Keyboard play offers an object selector.
+              image. Object controls or Keyboard play offer an object selector.
             </span>
           )}
           {failed && (
@@ -547,7 +568,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           )}
           {props.overlay}
         </div>
-        {props.controlsHost ? createPortal(discoveryControls, props.controlsHost) : discoveryControls}
+        {props.controlsHost ? createPortal(<>{discoveryControls}{objectControls}</>, props.controlsHost) : <>{discoveryControls}{objectControls}</>}
       </div>
     );
   },

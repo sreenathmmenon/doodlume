@@ -10,6 +10,7 @@ export function WorldRulesSummary({
   const required = new Set([
     ...(world.goalRules?.requiredCollectedIds ?? []),
     ...(world.goalRules?.requiredActivatedIds ?? []),
+    ...(world.goalRules?.requiredInteractionIds ?? []),
   ]);
   const objectives = world.entities.filter(
     (entity) => entity.kind === "coin" || entity.kind === "lever",
@@ -18,7 +19,12 @@ export function WorldRulesSummary({
     (entity) => entity.kind === "goal",
   );
   const describe = (id: string) =>
+    world.interactions?.actions.find((action) => action.id === id)?.label ??
     `${world.entities.find((entity) => entity.id === id)?.kind === "lever" ? "Use" : "Collect"} ${objectiveObjectLabel(world, id)}`;
+  const optional = [
+    ...objectives.filter((entity) => !required.has(entity.id)).map((entity) => objectiveObjectLabel(world, entity.id)),
+    ...(world.interactions?.actions ?? []).filter((action) => !required.has(action.id)).map((action) => action.label),
+  ];
   return (
     <section
       className="world-rules-summary"
@@ -36,7 +42,7 @@ export function WorldRulesSummary({
           <dd>
             {destinations.length
               ? `Reach ${destinations.map((entity, index) => entity.label?.trim() || `Destination ${index + 1}`).join(" or ")}${required.size ? " after the required actions." : "."}`
-              : "Explore freely. Add a destination in Edit objects to give this game a finish."}
+              : required.size && world.interactions ? "Complete the required actions." : "Explore freely. Add a destination to give this world a finish."}
           </dd>
         </div>
         <div>
@@ -44,12 +50,12 @@ export function WorldRulesSummary({
           <dd>
             {required.size
               ? <ul className="required-object-list">{[...required].map((id) => <li key={id}>{describe(id)}</li>)}</ul>
-              : "No collectible or switch is required."}
+              : "All actions are optional."}
           </dd>
         </div>
-        {objectives.some((entity) => !required.has(entity.id)) && <div>
+        {optional.length > 0 && <div>
           <dt>Optional</dt>
-          <dd>{objectives.filter((entity) => !required.has(entity.id)).map((entity) => objectiveObjectLabel(world, entity.id)).join(" · ")}</dd>
+          <dd>{optional.join(" · ")}</dd>
         </div>}
       </dl>
     </section>

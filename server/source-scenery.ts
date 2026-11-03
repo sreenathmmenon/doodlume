@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import { repairSourceBackground } from './source-background.js';
 import { imageData, pixelBox } from './images.js';
+import type { InteractionPlan } from '../shared/interactions.js';
 import type { WorldEntity } from '../shared/world.js';
 
 export { SOURCE_SCENERY_NOTE } from "../shared/source-scenery.js";
@@ -8,13 +9,15 @@ export { SOURCE_SCENERY_NOTE } from "../shared/source-scenery.js";
 /** Preserve stationary source pixels; reconstruct only the removed moving
  * silhouette from adjacent source colors. This is deterministic background
  * interpolation, not generated artwork or a claimed model inpainting result. */
-export async function sourceScenery(source: Buffer, entities: WorldEntity[]): Promise<string> {
+export async function sourceScenery(source: Buffer, entities: WorldEntity[], interactions?: InteractionPlan): Promise<string> {
   const { data, info } = await sharp(source).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const original = Buffer.from(data);
   const repairMask = Buffer.alloc(info.width * info.height);
+  const interactionGates = new Set((interactions?.actions ?? []).flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === 'openGate' ? [effect.entityId] : [])));
+  const carried = new Set((interactions?.objects ?? []).filter(object => object.carryable).map(object => object.entityId));
   for (const entity of entities) {
-    if (!entity.artSource || (!entity.sourceLayer && !['player','gate'].includes(entity.kind))) continue;
-    if (entity.kind === 'gate' && !entity.sourceLayer && !entities.some(other => other.kind === 'lever' && other.targetId === entity.id)) continue;
+    if (!entity.artSource || (!entity.sourceLayer && !carried.has(entity.id) && !['player','gate'].includes(entity.kind))) continue;
+    if (entity.kind === 'gate' && !entity.sourceLayer && !interactionGates.has(entity.id) && !entities.some(other => other.kind === 'lever' && other.targetId === entity.id)) continue;
     let box = pixelBox(entity.artSource, info.width, info.height);
     let mask: Buffer | undefined;
     if (entity.art && entity.artMethod !== 'crop' && entity.art.startsWith('data:image/png;base64,'))

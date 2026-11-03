@@ -1,3 +1,4 @@
+import type { InteractionPlan } from "./interactions.js";
 import {
   validateWorld,
   type WorldDefinition,
@@ -25,6 +26,7 @@ export function reviewGoalRules(
   value: unknown,
   entities: WorldEntity[],
   requireDestination = true,
+  interactions?: InteractionPlan,
 ): { rules: GoalRules; issues: string[] } {
   const rules: GoalRules = {
     requiredCollectedIds: [],
@@ -73,6 +75,12 @@ export function reviewGoalRules(
       rules[key].push(id);
     }
   }
+  if (input.requiredInteractionIds !== undefined) {
+    const selected = input.requiredInteractionIds;
+    if (!Array.isArray(selected) || selected.length > 64 || selected.some(id => typeof id !== "string" || !interactions?.actions.some(action => action.id === id)) || new Set(selected).size !== selected.length) {
+      issues.push("A required interaction could not be matched to its action. Review the object actions.");
+    } else rules.requiredInteractionIds = [...selected];
+  }
   if (
     requireDestination &&
     (rules.requiredCollectedIds.length || rules.requiredActivatedIds.length) &&
@@ -106,7 +114,7 @@ export function validateRecognitionReview(value: unknown): RecognitionReview {
     review.issues.length > 80
   )
     throw new Error("The repair draft could not be read.");
-  if (reviewGoalRules(draft.goalRules, draft.entities, false).issues.length)
+  if (reviewGoalRules(draft.goalRules, draft.entities, false, draft.interactions).issues.length)
     throw new Error("The repair draft has unmatched finishing requirements.");
   for (const entity of draft.entities) {
     if (

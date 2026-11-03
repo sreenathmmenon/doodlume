@@ -22,6 +22,8 @@ import {
   Crop,
   LoaderCircle,
 } from "lucide-react";
+import type { InteractionPlan } from "../../shared/interactions";
+import { ObjectBehaviorEditor } from "./ObjectBehaviorEditor";
 import { Modal } from "./Modal";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 import { WrappingTextarea } from "./WrappingTextarea";
@@ -48,6 +50,7 @@ import {
 } from "../../shared/world";
 
 const tools = [
+  { kind: "decoration", label: "Object", hint: "Give your creation a purpose.", width: 80, height: 80 },
   {
     kind: "bridge",
     label: "Bridge",
@@ -97,7 +100,7 @@ const limit = (v: number, low: number, high: number) =>
 const title = (e: WorldEntity) =>
   e.label || `${e.kind} · ${Math.round(e.x)}, ${Math.round(e.y)}`;
 
-type EditorRecovery = { action: "reset" | "remove"; entity: WorldEntity; index?: number };
+type EditorRecovery = { action: "reset" | "remove"; entity: WorldEntity; index?: number; interactionsBefore?: InteractionPlan };
 
 type EditorDraft = {
   bounds: { width: number; height: number };
@@ -107,6 +110,7 @@ type EditorDraft = {
   customArt: string | null;
   sketchDraft: string | undefined;
   recovery?: EditorRecovery | null;
+  interactions?: InteractionPlan;
 };
 // Session drafts never cross a world revision or a proposed image update.
 const editorDrafts = new Map<string, EditorDraft>();
@@ -146,7 +150,7 @@ function WorldEditorSession({
   const editorTools = tools
     .filter(
       (config) =>
-        mode === "platform" ||
+        config.kind === "decoration" || mode === "platform" ||
         (mode === "roam"
           ? config.kind !== "bridge"
           : ["coin", "lever", "goal"].includes(config.kind)),
@@ -154,7 +158,7 @@ function WorldEditorSession({
     .map((config) => ({
       ...config,
       label:
-        mode === "discover"
+        mode === "discover" && config.kind !== "decoration"
           ? config.kind === "coin"
             ? "Findable region"
             : config.kind === "lever"
@@ -184,6 +188,8 @@ function WorldEditorSession({
   const [modified, setModified] = useState<Record<string, WorldEntity>>(savedDraft?.modified ?? {});
   const currentEntities = world.entities.map(entity => modified[entity.id] ?? entity);
   const editableEntities = [...currentEntities.filter(entity => entity.id !== sourceBackdrop?.id), ...additions];
+  const [interactions, setInteractions] = useState<InteractionPlan | undefined>(() => structuredClone(savedDraft ? savedDraft.interactions : proposal?.patch.interactions !== undefined ? proposal.patch.interactions ?? undefined : world.interactions));
+  const interactionsChanged = JSON.stringify(interactions) !== JSON.stringify(world.interactions);
   const changedCount = Object.keys(modified).length;
   const [tool, setTool] = useState<Tool>("move");
   const [selected, setSelected] = useState<string | null>(
@@ -205,13 +211,13 @@ function WorldEditorSession({
   const [customArt, setCustomArt] = useState<string | null>(savedDraft?.customArt ?? null);
   const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
   useEffect(() => {
-    if (!additions.length && !Object.keys(modified).length && !expanded && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
+    if (!additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
       editorDrafts.delete(cacheKey);
       return;
     }
-    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, sketchDraft, recovery });
+    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, sketchDraft, recovery, interactions });
     if (editorDrafts.size > 12) editorDrafts.delete(editorDrafts.keys().next().value!);
-  }, [cacheKey, bounds, additions, modified, selected, customArt, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery]);
+  }, [cacheKey, bounds, additions, modified, selected, customArt, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged]);
   const [preparingArtwork, setPreparingArtwork] = useState(false);
   const artworkRequest = useRef<AbortController | null>(null);
   type PreparedScene = Pick<WorldPatch, "sourceScenery" | "sourceLayers">;
@@ -443,8 +449,16 @@ function WorldEditorSession({
       ...(revisedImage ? { sourceImage: revisedImage } : {}),
       ...(proposal?.patch.sourceScenery ? { sourceScenery: proposal.patch.sourceScenery } : {}),
       additions,
+      ...(proposal?.patch.goalRules ? { goalRules: proposal.patch.goalRules } : {}),
+      ...(proposal?.patch.gameplay ? { gameplay: proposal.patch.gameplay } : {}),
       ...(changedCount ? { updates: Object.values(modified).map(entity => ({id: entity.id, x: entity.x, y: entity.y, width: entity.width, height: entity.height, label: entity.label, targetId: entity.targetId ?? null})) } : {}),
       ...(expanded ? { bounds } : {}),
+      ...(interactionsChanged && interactions && !interactions.actions.length && mode === "discover" ? {
+        gameplay: { ...world.gameplay!, objectiveTitle: "Explore your world", instructions: "Select an object to pick it up. Q puts it back." },
+      } : {}),
+      ...(interactionsChanged ? { interactions: interactions ?? null,
+        goalRules: { ...(proposal?.patch.goalRules ?? world.goalRules ?? { requiredCollectedIds: [], requiredActivatedIds: [] }),
+          requiredInteractionIds: (proposal?.patch.goalRules?.requiredInteractionIds ?? world.goalRules?.requiredInteractionIds ?? []).filter(id => interactions?.actions.some(action => action.id === id)) } } : {}),
     }),
     [
       world.id,
@@ -456,6 +470,11 @@ function WorldEditorSession({
       revisedImage,
       bounds,
       expanded,
+      interactions,
+      interactionsChanged,
+      world.goalRules,
+      world.gameplay,
+      mode,
     ],
   );
   const patchNow = useRef(patch);
@@ -465,14 +484,17 @@ function WorldEditorSession({
     const original = world.entities.find(entity => entity.id === update.id);
     return original && !original.sourceLayer && sourceLayerForEdit(world, original, update) ? [original.id] : [];
   }).sort();
-  const gateLinks = (entities: WorldEntity[]) => [...new Set(entities.filter(entity => entity.kind === "lever" && entity.targetId).map(entity => entity.targetId))].sort();
-  const nextLinks = gateLinks([...currentEntities, ...additions]);
-  const gateLinksChanged = JSON.stringify(nextLinks) !== JSON.stringify(gateLinks(world.entities));
+  const gateLinks = (entities: WorldEntity[], plan?: InteractionPlan) => [...new Set([
+    ...entities.filter(entity => entity.kind === "lever" && entity.targetId).map(entity => entity.targetId),
+    ...(plan?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" ? [effect.entityId] : [])) ?? []),
+  ])].sort();
+  const nextLinks = gateLinks([...currentEntities, ...additions], interactions);
+  const gateLinksChanged = JSON.stringify(nextLinks) !== JSON.stringify(gateLinks(world.entities, world.interactions));
   const needsSourceScene = derivedScenery && Boolean(revisedImage || detachedIds.length || gateLinksChanged);
   const sceneKey = needsSourceScene ? JSON.stringify([detachedIds, nextLinks]) : "";
   const preparedScene = sceneKey ? preparedScenes.current.get(sceneKey) : undefined;
   let problem = "";
-  if (additions.length || changedCount || expanded) {
+  if (additions.length || changedCount || expanded || interactionsChanged) {
     try {
       // Validate placement locally; the actual image update gets freshly
       // reconstructed scenery before it can be committed below.
@@ -752,15 +774,18 @@ function WorldEditorSession({
     const index = additions.findIndex(entity => entity.id === id);
     const entity = additions[index];
     if (!entity) return;
+    const linkedAction = interactions?.actions.find(action => action.toolId === id || action.targetId === id || action.effects?.some(effect => effect.kind === "openGate" && effect.entityId === id));
+    if (linkedAction) { setError(`Remove the ability “${linkedAction.label}” before deleting ${title(entity)}.`); return; }
     const linked = editableEntities.find(other => other.targetId === id);
     if (linked) {
       setError(`Disconnect ${title(linked)} before deleting ${title(entity)}.`);
       return;
     }
     cancelArtwork();
-    setRecovery({ action: "remove", entity, index });
+    setRecovery({ action: "remove", entity, index, interactionsBefore: structuredClone(interactions) });
     setReviewed(false);
     setAdditions(items => items.filter(other => other.id !== id));
+    if (interactions?.objects.some(object => object.entityId === id)) setInteractions(plan => plan ? { ...plan, objects: plan.objects.filter(object => object.entityId !== id) } : undefined);
     if (selected === id) selectObject(null);
     setError("");
   }
@@ -778,6 +803,7 @@ function WorldEditorSession({
     if (recovery.action === "reset") {
       setModified(items => ({ ...items, [recovery.entity.id]: recovery.entity }));
     } else {
+      setInteractions(structuredClone(recovery.interactionsBefore));
       setAdditions(items => {
         if (items.some(entity => entity.id === recovery.entity.id)) return items;
         const next = [...items];
@@ -813,7 +839,7 @@ function WorldEditorSession({
       const response = await fetch("/api/source-scenery", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ world: context, image: revisedImage || world.sourceImage,
-          additions: submitted.additions, updates: submitted.updates, bounds: submitted.bounds }),
+          additions: submitted.additions, updates: submitted.updates, bounds: submitted.bounds, interactions: submitted.interactions, goalRules: submitted.goalRules }),
         signal: controller.signal,
       });
       const result = await response.json();
@@ -992,7 +1018,7 @@ function WorldEditorSession({
                   : "I checked the new objects, their placement, and interactions."}
               </label>
             )}
-            {(additions.length > 0 || changedCount > 0 || expanded || sketchDraft) && <p className="editor-draft-note">Draft kept when you close. Apply to update your world.</p>}
+            {(additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft) && <p className="editor-draft-note">Draft kept when you close. Apply to update your world.</p>}
             {recovery && <div className="editor-recovery" role="status">
               <span>{recovery.action === "reset" ? "Object changes reset." : "New object deleted."}</span>
               <button className="text-button" onClick={undoObjectAction}><Undo2 size={14} /> Undo</button>
@@ -1005,11 +1031,11 @@ function WorldEditorSession({
               >
                 <Undo2 size={15} /> Remove last addition
               </button>
-              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !customArt && !sketchDraft}
+              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft}
                 onClick={(event) => {
                   cancelArtwork();
                   setBounds({ width: world.width, height: world.height });
-                  setAdditions([]); setModified({}); setCustomArt(null); setSketchDraft(undefined); setRecovery(null);
+                  setAdditions([]); setModified({}); setInteractions(structuredClone(world.interactions)); setCustomArt(null); setSketchDraft(undefined); setRecovery(null);
                   setReviewed(false); selectObject(null); setError("");
                   editorDrafts.delete(cacheKey);
                   event.currentTarget.closest("dialog")?.querySelector<HTMLSelectElement>('select[aria-label="Select an object"]')?.focus({ preventScroll: true });
@@ -1017,7 +1043,7 @@ function WorldEditorSession({
               <button
                 className="primary-button"
                 disabled={
-                  (!additions.length && !changedCount && !expanded) ||
+                  (!additions.length && !changedCount && !expanded && !interactionsChanged) ||
                   preparingArtwork ||
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
@@ -1080,7 +1106,7 @@ function WorldEditorSession({
               <option value="move">Select & move</option>
               {editorTools.map((entry) => <option key={entry.kind} value={entry.kind}>Add {entry.label.toLowerCase()}</option>)}
             </select>
-          </label>            {mode !== "discover" && (
+          </label>            {(mode !== "discover" || world.interactions) && (
               <div className="editor-art-action">
                 <button
                   className="secondary-button"
@@ -1343,7 +1369,7 @@ function WorldEditorSession({
                         config.kind,
                         config.label,
                       ]),
-                      ["decoration", "Decoration"],
+
                       ...(editorTools.some(
                         (config) => config.kind === item.kind,
                       ) || item.kind === "decoration"
@@ -1359,13 +1385,14 @@ function WorldEditorSession({
                 <label>
                   Name
                   <WrappingTextarea
-                    rows={3}
+                    rows={1}
                     aria-label="Object name"
                     value={item.label ?? ""}
                     maxLength={60}
                     onChange={(e) => update({ label: e.target.value })}
                   />
                 </label>
+                <ObjectBehaviorEditor key={item.id} world={{...world, entities: [...currentEntities, ...additions]}} item={item} plan={interactions} onChange={setInteractions} onDraw={!existingSelected ? () => setDrawing(true) : undefined} />
                 {item.kind === "player" && <p className="editor-scope">Starting position · current run unchanged</p>}
                 <details className="editor-precision" key={item.id}>
                   <summary>Position &amp; size</summary>
@@ -1526,7 +1553,7 @@ function WorldEditorSession({
                     artMethod: undefined,
                     artNote: undefined,
                   });
-                else setCustomArt(ink);
+                else { setCustomArt(ink); setTool("decoration"); }
                 setSketchDraft(undefined);
                 setDrawing(false);
               })

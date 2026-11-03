@@ -211,6 +211,14 @@ export default function App({ active = true }: { active?: boolean }) {
         }
       : initialMetrics,
   );
+  const [completionVisible, setCompletionVisible] = useState(false);
+  useEffect(() => {
+    setCompletionVisible(false);
+    if (!metrics.completed || metrics.exploring) return;
+    // Let the action's visible consequence finish before presenting the next choices.
+    const timer = window.setTimeout(() => setCompletionVisible(true), world.interactions ? 850 : 0);
+    return () => window.clearTimeout(timer);
+  }, [metrics.completed, metrics.exploring, world.id, run]);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [saved, setSaved] = useState(boot.entries);
   const savedNow = useRef(saved);
@@ -304,7 +312,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const sourcePageSize = world.entities.find(isSourceAlignedScenery) ?? { width: 1440, height: 820 };
   const mode = movementMode(world);
   const modeLabel =
-    mode === "discover"
+    world.interactions ? "Interactive world" : mode === "discover"
       ? "Discovery"
       : mode === "roam"
         ? "Exploration"
@@ -615,8 +623,12 @@ export default function App({ active = true }: { active?: boolean }) {
     const personal = copyExample(result.world, [...history, result.checkpoint].slice(-12));
     setHistory(personal.history);
     keepRevision(personal.world, result.state);
+    if (patch.interactions !== undefined) {
+      tell("Object abilities updated.");
+      return;
+    }
     if (patch.goalRules) {
-      tell("Destination rules updated.");
+      tell(worldNow.current.interactions ? "Completion rules updated." : "Destination rules updated.");
       return;
     }
     if (patch.bounds) {
@@ -988,11 +1000,11 @@ export default function App({ active = true }: { active?: boolean }) {
     ).includes(entity.id),
   ).length;
   const destination = world.entities.find((entity) => entity.kind === "goal");
-  const finalClueRemaining = mode === "discover" && objective.ready && !metrics.completed && Boolean(destination);
+  const finalClueRemaining = mode === "discover" && !world.interactions && objective.ready && !metrics.completed && Boolean(destination);
   const completionTitle = objective.ready ? `${world.name} complete` : "Earlier completion retained";
   const completionDetail = objective.ready
     ? destination
-      ? `${mode === "discover" ? "Final clue found" : "Destination reached"}: ${objectName(world, destination.id, 80)}`
+      ? `${mode === "discover" && !world.interactions ? "Final clue found" : "Destination reached"}: ${objectName(world, destination.id, 80)}`
       : "Your world's objective is complete."
     : "Your achievement stays with this world after its rules change.";
   const missionText =
@@ -1427,13 +1439,13 @@ export default function App({ active = true }: { active?: boolean }) {
                   {objective.total > 0 && (
                     <button
                       className="required-progress"
-                      aria-label={finalClueRemaining ? "View requirements: final clue remaining" : `View requirements: ${objective.done} of ${objective.total} ${mode === "discover" ? "found" : "done"}`}
+                      aria-label={finalClueRemaining ? "View requirements: final clue remaining" : `View requirements: ${objective.done} of ${objective.total} ${mode === "discover" && !world.interactions ? "found" : "done"}`}
                       onClick={() => {
                         setEditorState(canvas.current?.snapshot() ?? latestState.current);
                         setDialog("rules");
                       }}
                     >
-                      {finalClueRemaining ? "Final clue remaining" : <><b>{objective.done}/{objective.total}</b>{" "}{mode === "discover" ? "found" : "done"}</>}
+                      {finalClueRemaining ? "Final clue remaining" : <><b>{objective.done}/{objective.total}</b>{" "}{mode === "discover" && !world.interactions ? "found" : "done"}</>}
                     </button>
                   )}
                   {optionalObjects.length > 0 && (
@@ -1496,7 +1508,7 @@ export default function App({ active = true }: { active?: boolean }) {
                       )}
                     </div>
                   )}
-                {metrics.completed && !metrics.exploring && (
+                {metrics.completed && !metrics.exploring && completionVisible && (
                   <div className="completion-overlay">
                     <div className="completion-icon">
                       <Sparkles size={25} />
@@ -2352,7 +2364,13 @@ export default function App({ active = true }: { active?: boolean }) {
             </p>
           )}
           <dl className="mode-control-guide">
-            {mode === "discover" ? (
+            {world.interactions ? (
+              <>
+                <div><dt>Use objects</dt><dd>Select a tool, then the object it works with. Q puts it back.</dd></div>
+                {mode !== "discover" && <div><dt>Move & interact</dt><dd>Use WASD or arrow keys. Press E near an object.{mode === "platform" ? " Space jumps." : " Click to move to a target."}</dd></div>}
+                <div><dt>Invent</dt><dd>Open Edit world, draw an object and give it a purpose.</dd></div>
+              </>
+            ) : mode === "discover" ? (
               <>
                 <div>
                   <dt>Find</dt>
