@@ -15,8 +15,8 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
     .sort((a,b) => Math.abs(a.y - actor.y - actor.height) - Math.abs(b.y - actor.y - actor.height))[0];
   const bottomLimit = support ? Math.min(1000, support.y + 6) : 1000;
   const regions = compactContext ? (actor.width*actor.height < 40000
-    ? [...[.08,.18,.3].flatMap(padding=>[0,.3,.6].map(bottom=>({padding,bottom}))), ...[.6,1].map(padding=>({padding,bottom:0}))]
-    : [.08,.18,.3].map(padding=>({padding,bottom:0}))).map(({padding,bottom}) => {
+    ? [...[.02,.04].map(padding=>({padding,bottom:0})), ...[.08,.18,.3].flatMap(padding=>[0,.3,.6].map(bottom=>({padding,bottom}))), ...[.6,1].map(padding=>({padding,bottom:0}))]
+    : [.02,.04,.08,.18,.3].map(padding=>({padding,bottom:0}))).map(({padding,bottom}) => {
     const x = Math.max(0,actor.x-actor.width*padding), y = Math.max(0,actor.y-actor.height*padding);
     return pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+padding))-x,height:Math.min(1000,actor.y+actor.height*(1+padding+bottom))-y},iw,ih);
   }) : [actor,contextActor].flatMap((observation, pass) => {
@@ -32,8 +32,17 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
     const x=Math.max(0,actor.x+actor.width*shift-actor.width*.12), y=Math.max(0,actor.y-actor.height*.12);
     regions.push(pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+shift+.12))-x,height:Math.min(1000,actor.y+actor.height*1.5)-y},iw,ih));
   }
-  const masks = await localSegmentationArtwork(source, regions.map((box, index) => ({ id: `actor-context-${index}`, left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height })), config, signal, { selectPrincipalComponent: true });
-  let best: SourceSelection | undefined, bestScore = -Infinity;
+  // Keep the worker's per-request pixel bound when extra tight contexts are
+  // needed for a large photograph; its image embedding stays cached across batches.
+  const masks=new Map<string,string>();
+  let batch:{id:string;left:number;top:number;right:number;bottom:number}[]=[],pixels=0;
+  const flush=async()=>{if(!batch.length)return;for(const [id,art] of await localSegmentationArtwork(source,batch,config,signal,{selectPrincipalComponent:true}))masks.set(id,art);batch=[];pixels=0;};
+  for(const [index,box] of regions.entries()){
+    if(batch.length && (pixels+box.width*box.height>8_000_000 || batch.length>=24))await flush();
+    batch.push({id:`actor-context-${index}`,left:box.left,top:box.top,right:box.left+box.width,bottom:box.top+box.height});pixels+=box.width*box.height;
+  }
+  await flush();
+  const candidates: {subject: SourceSelection; score:number; sparse:boolean; pixels:Uint32Array; context:string}[]=[];
   for (const [index, box] of regions.entries()) {
   const art = masks.get(`actor-context-${index}`); if (!art) continue;
   const { data, info } = await sharp(Buffer.from(art.split(',')[1], 'base64')).raw().toBuffer({ resolveWithObject: true });
@@ -62,7 +71,8 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
   // Expanded context may contain another larger subject. A candidate must
   // retain substantial overlap with the recognized actor before size matters.
   if (overlap < Math.min(originalBox.width * originalBox.height, (x2 - x1 + 1) * (y2 - y1 + 1)) * (compactContext ? .05 : .15)) continue;
-  if (compactContext && (largest.length < (x2-x1+1)*(y2-y1+1)*(actor.width/actor.height>.35 && actor.width/actor.height<2.8 ? .3 : .15) || (x2-x1+1)*(y2-y1+1) < originalBox.width*originalBox.height*.25 || x2-x1+1 < originalBox.width*.35 || y2-y1+1 < originalBox.height*.35)) continue;
+  const sparse=compactContext && largest.length < (x2-x1+1)*(y2-y1+1)*(actor.width/actor.height>.35 && actor.width/actor.height<2.8 ? .3 : .15);
+  if (compactContext && ((x2-x1+1)*(y2-y1+1) < originalBox.width*originalBox.height*.25 || x2-x1+1 < originalBox.width*.35 || y2-y1+1 < originalBox.height*.35)) continue;
   if (compactContext && (x2-x1+1)*(y2-y1+1)>originalBox.width*originalBox.height*2.5) continue;
   // A subject cut by the expanded context is not verified as whole. Keep the
   // source box for review rather than claiming the mask repaired its outline.
@@ -75,16 +85,32 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
   // Extra background pixels cannot improve a candidate merely by making it
   // larger; all retained RGB values still come directly from the source.
   const subjectScore=largest.length-paperPixels*1.25;
-  if (x1 === 0 || y1 === 0 || x2 === info.width - 1 || y2 === info.height - 1 || subjectScore <= bestScore) continue;
+  if (x1 === 0 || y1 === 0 || x2 === info.width - 1 || y2 === info.height - 1) continue;
   for (let at = 0; at < keep.length; at++) if (!keep[at]) data[at * 4 + 3] = 0;
   const trim = { left: x1, top: y1, width: x2 - x1 + 1, height: y2 - y1 + 1 };
   const png = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).extract(trim).png().toBuffer();
-  bestScore = subjectScore;
-  best = { ...actor, x: (box.left + x1) / iw * 1000, y: (box.top + y1) / ih * 1000,
+  const subject:SourceSelection = { ...actor, x: (box.left + x1) / iw * 1000, y: (box.top + y1) / ih * 1000,
     width: trim.width / iw * 1000, height: trim.height / ih * 1000,
     artwork: { art: `data:image/png;base64,${png.toString('base64')}`, artMethod: 'sam', artNote: 'Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.' } };
+  candidates.push({subject,score:subjectScore,sparse,context:`${box.left},${box.top},${box.width},${box.height}`,
+    pixels:compactContext ? Uint32Array.from(largest,at=>(box.top+Math.floor(at/info.width))*iw+box.left+at%info.width).sort() : new Uint32Array()});
   }
-  return best ?? actor;
+  // Thin lines are a legitimate subject, not evidence of a broken mask. Admit
+  // sparse figures only when independent context prompts agree on their actual
+  // source pixels. Existing whole-box, neighbor-growth and edge guards still apply.
+  const accepted=candidates.filter(candidate=>!candidate.sparse || candidates.some(other=>
+    other.context!==candidate.context && sourceMaskAgreement(candidate.pixels,other.pixels)>=.9));
+  accepted.sort((a,b)=>b.score-a.score);
+  if(accepted[0]?.sparse)accepted[0].subject.artwork!.artNote+=' Sparse source strokes agreed across distinct context prompts.';
+  return accepted[0]?.subject ?? actor;
+}
+
+/** IoU of sorted unique source-pixel indices, independent of crop coordinates. */
+export function sourceMaskAgreement(a:Uint32Array,b:Uint32Array):number {
+  let i=0,j=0,intersection=0;
+  while(i<a.length&&j<b.length){if(a[i]===b[j]){intersection++;i++;j++;}else if(a[i]<b[j])i++;else j++;}
+  const union=a.length+b.length-intersection;
+  return union ? intersection/union : 0;
 }
 
 /** Keep the component anchored in the recognized actor, plus small detached

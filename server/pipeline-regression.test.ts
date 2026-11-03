@@ -6,7 +6,15 @@ import { modelJSON, InterpretationError } from './model.js';
 import { modelConnection } from './provider.js';
 import type { WorldEntity } from '../shared/world.js';
 
-test('source scenery reconstructs removed actor background without erasing the surrounding source pixels or stationary destination', async () => {
+test('classical source scenery reconstructs removed actor background without erasing surrounding pixels or destination', async (t) => {
+  // This exact-color fixture exercises deterministic inpainting. Installed LaMa
+  // weights use a larger repair halo and are validated with real source images.
+  const previousRepair = process.env.LOCAL_BACKGROUND_REPAIR;
+  process.env.LOCAL_BACKGROUND_REPAIR = 'classical';
+  t.after(() => {
+    if (previousRepair === undefined) delete process.env.LOCAL_BACKGROUND_REPAIR;
+    else process.env.LOCAL_BACKGROUND_REPAIR = previousRepair;
+  });
   const actorPixel = await sharp({create:{width:1,height:1,channels:3,background:{r:210,g:20,b:20}}}).png().toBuffer();
   const source = await sharp({create:{width:10,height:10,channels:3,background:{r:31,g:85,b:127}}}).composite([{input:actorPixel,left:3,top:3}]).png().toBuffer();
   const mask = Buffer.alloc(4 * 4 * 4);
@@ -42,4 +50,13 @@ test('actor mask retains nearby detached appendages while excluding a distant la
   assert.ok(antenna.every(pixel=>selected.has(pixel)));
   assert.ok(foot.every(pixel=>selected.has(pixel)));
   assert.ok(neighbor.every(pixel=>!selected.has(pixel)));
+});
+
+test('sparse mask agreement compares source pixels rather than crop position or density', async () => {
+  const {sourceMaskAgreement}=await import('./actor-grounding.js');
+  const thin=Uint32Array.from([102,202,302,402,502]);
+  assert.equal(sourceMaskAgreement(thin,Uint32Array.from(thin)),1);
+  assert.equal(sourceMaskAgreement(thin,Uint32Array.from([103,203,303,403,503])),0);
+  assert.equal(sourceMaskAgreement(thin,Uint32Array.from([102,202,302,402,502,602])),5/6);
+  assert.equal(sourceMaskAgreement(new Uint32Array(),new Uint32Array()),0);
 });
