@@ -8,18 +8,19 @@ import {
 export function discoveryResolved(
   entity: WorldEntity,
   state: PlayState,
+  awaitingAmendedGoal = false,
 ): boolean {
   return entity.kind === "goal"
-    ? state.completed
+    ? state.completed && !awaitingAmendedGoal
     : entity.kind === "lever"
       ? state.activated.includes(entity.id)
       : state.collected.includes(entity.id);
 }
 
-export function nextDiscoveryClue(world: WorldDefinition, state: PlayState) {
+export function nextDiscoveryClue(world: WorldDefinition, state: PlayState, awaitingAmendedGoal = false) {
   const pending = world.gameplay?.clues?.filter((clue) => {
     const entity = world.entities.find((item) => item.id === clue.entityId);
-    return entity && !discoveryResolved(entity, state);
+    return entity && !discoveryResolved(entity, state, awaitingAmendedGoal);
   });
   // Destination clues never trap unfinished action clues behind them after a
   // creator edit; preserve the authored order among the remaining actions.
@@ -38,6 +39,7 @@ export function canDiscover(
   world: WorldDefinition,
   state: PlayState,
   id: string,
+  awaitingAmendedGoal = false,
 ): boolean {
   if (
     world.gameplay?.movement !== "discover" ||
@@ -48,10 +50,10 @@ export function canDiscover(
   if (
     !entity ||
     !["coin", "lever", "goal"].includes(entity.kind) ||
-    discoveryResolved(entity, state)
+    discoveryResolved(entity, state, awaitingAmendedGoal)
   )
     return false;
-  const next = nextDiscoveryClue(world, state);
+  const next = nextDiscoveryClue(world, state, awaitingAmendedGoal);
   const ordered = world.gameplay.clues?.some((clue) => clue.entityId === id);
   if (next && next.entityId !== id) {
     const nextIsGoal =

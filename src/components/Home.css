@@ -10,7 +10,7 @@
 .home-header a:hover,.home-draw-link:hover,.home-footer a:hover { color:#3e4bc1; }
 .home-hero { max-width:1600px; margin:auto; padding:58px 5% 84px; display:grid; grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr); align-items:center; gap:6%; }
 .home-eyebrow { font-size:10px; letter-spacing:1.8px; font-weight:700; color:#68716d; }
-.home-intro h1 { font-size:clamp(48px,5.1vw,78px); line-height:1.075; letter-spacing:-4.2px; font-weight:650; margin:26px 0; }
+.home-intro h1 { font-size:clamp(42px,4.05vw,64px); line-height:1.12; letter-spacing:-2.8px; font-weight:650; margin:26px 0; }
 .home-intro h1 span { color:#4a56c6; }
 .home-description { font-size:16px; line-height:1.85; color:#606763; letter-spacing:-.15px; }
 .home-cta { display:inline-flex; align-items:center; justify-content:space-between; gap:35px; padding:15px 22px; margin-top:32px; background:#3546bd; color:white; border:1px solid #3546bd; border-radius:5px; font-size:14px; font-weight:650; min-height:52px; box-shadow:0 4px 10px #23359313; }
@@ -21,8 +21,18 @@
 .home-showcase-caption.has-mission { font-size:12px; letter-spacing:0; gap:18px; color:#3d4840; }
 .home-showcase-caption.has-mission > span:first-child { min-width:0; overflow-wrap:anywhere; }
 .home-showcase-caption > span:last-child { white-space:nowrap; }
-.home-live-stage { position:relative; width:100%; aspect-ratio:3/2; background:#e5e4df; border:1px solid #dadbd5; border-radius:7px 7px 0 0; overflow:hidden; isolation:isolate; }
+.home-live-stage { position:relative; width:100%; aspect-ratio:var(--scene-aspect,3/2); background:#e5e4df; border:1px solid #dadbd5; border-radius:7px 7px 0 0; overflow:hidden; isolation:isolate; }
 .home-source { width:100%; height:100%; object-fit:contain; }
+.home-game-layer { position:absolute; inset:0; }
+.home-stage-actions { display:flex; align-items:center; gap:12px; flex-shrink:0; }
+.home-stage-footer .home-original-toggle { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; padding:5px 2px; font-size:11px; text-decoration:underline; text-underline-offset:3px; }
+.home-object-controls { position:relative; display:flex; justify-content:flex-end; margin-top:8px; min-height:0; }
+.home-object-controls[hidden] { display:none; }
+.home-object-controls .object-keyboard-play { position:relative; }
+.home-example-tools { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:12px; }
+.home-example-tools[hidden] { display:none; }
+.home-example-tools .home-object-controls { margin:0; margin-left:auto; }
+.home-invent-button { display:inline-flex; align-items:center; gap:8px; padding:8px 0; font-size:12px; font-weight:650; color:#3546bd; }
 .home-live-stage .world-canvas-shell,.home-live-stage .world-canvas { width:100%;height:100%;position:relative;min-height:0; }
 .home-live-stage .world-canvas canvas { display:block; }
 .home-stage-loading { display:grid; place-items:center; height:100%; color:#5e6662; }
@@ -64,7 +74,9 @@
   .home-intro h1 { margin:20px 0; }
   .home-cta { margin-top:22px; }
   .home-draw-link { margin-top:14px; }
-  .home-live-stage { max-height:calc(100svh - 280px); }
+  /* The source aspect describes the artwork, but short desktop screens
+     need one stable frame with room for the task controls and all examples. */
+  .home-live-stage { aspect-ratio:16/9; max-height:calc(100svh - 330px); }
   .home-scene-picker { margin-top:14px; }
   .home-scene-picker button { grid-template-columns:40px minmax(0,1fr); gap:8px; }
   .home-scene-picker button img { width:40px; height:36px; }

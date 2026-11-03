@@ -47,10 +47,14 @@ export interface GoalRules {
   requiredCollectedIds: string[];
   requiredActivatedIds: string[];
   requiredInteractionIds?: string[];
+  /** Referenced resource objects must be full at the same time. */
+  requiredResourceIds?: string[];
 }
 
 export interface WorldGameplay {
   movement: "platform" | "roam" | "discover";
+  /** Authored platform jump velocity relative to the default; source geometry stays intact. */
+  jumpStrength?: number;
   objectiveTitle: string;
   instructions: string;
   clues?: { entityId: string; text: string }[];
@@ -145,6 +149,7 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
     const g = w.gameplay;
     if (!g || typeof g !== "object" || Array.isArray(g) ||
         !["platform", "roam", "discover"].includes(g.movement) ||
+        (g.jumpStrength !== undefined && (g.movement !== "platform" || !Number.isFinite(g.jumpStrength) || g.jumpStrength < 1 || g.jumpStrength > 1.6)) ||
         typeof g.objectiveTitle !== "string" || !g.objectiveTitle.trim() || g.objectiveTitle.length > 100 ||
         typeof g.instructions !== "string" || !g.instructions.trim() || g.instructions.length > 180 ||
         (g.clues !== undefined && (!Array.isArray(g.clues) || g.clues.length > 24)) ||
@@ -310,7 +315,7 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
     if ([...w.goalRules.requiredCollectedIds, ...w.goalRules.requiredActivatedIds].some(id => !clued.has(id)))
       throw new Error("Add a discovery clue for each required object before applying these rules.");
   }
-  validateInteractions(w);
+  validateInteractions(w, {allowUnpreparedArtwork: options.allowIncomplete});
   return w;
 }
 
@@ -356,12 +361,18 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
   ).filter((id) => !state.activated.includes(id));
   const interactionProgress = interactionState(world, state);
   const missingInteractionIds = (world.goalRules?.requiredInteractionIds ?? []).filter(id => !interactionProgress.completed.includes(id));
+  const missingResourceIds = (world.goalRules?.requiredResourceIds ?? []).filter(id => {
+    const resource = world.interactions?.objects.find(object => object.entityId === id)?.resource;
+    return !resource || (interactionProgress.quantities[id] ?? 0) < resource.capacity;
+  });
   const total =
+    (world.goalRules?.requiredResourceIds?.length ?? 0) +
     (world.goalRules?.requiredInteractionIds?.length ?? 0) +
     (world.goalRules?.requiredCollectedIds.length ?? 0) +
     (world.goalRules?.requiredActivatedIds.length ?? 0);
-  const remaining = missingCollectedIds.length + missingActivatedIds.length + missingInteractionIds.length;
+  const remaining = missingCollectedIds.length + missingActivatedIds.length + missingInteractionIds.length + missingResourceIds.length;
   const actions = [
+    ...missingResourceIds.map(id => `fill ${objectiveObjectLabel(world, id)}`),
     ...missingInteractionIds.map(id => world.interactions?.actions.find(action => action.id === id)?.label ?? id),
     ...missingCollectedIds.map(
       (id) => `collect ${objectiveObjectLabel(world, id)}`,
@@ -386,6 +397,7 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
     missingCollectedIds,
     missingActivatedIds,
     missingInteractionIds,
+    missingResourceIds,
     hint,
   };
 }
@@ -400,7 +412,7 @@ export function retainPlayState(
   const leverIds = new Set(
     world.entities.filter((e) => e.kind === "lever").map((e) => e.id),
   );
-  return {
+  const retained: PlayState = {
     ...state,
     collected: [
       ...new Set(state.collected.filter((id) => collectibleIds.has(id))),
@@ -408,6 +420,8 @@ export function retainPlayState(
     activated: [...new Set(state.activated.filter((id) => leverIds.has(id)))],
     ...(world.interactions ? { interactions: interactionState(world, state) } : state.interactions ? { interactions: undefined } : {}),
   };
+  if (retained.completed && !goalProgress(world, retained).ready) retained.exploring = true;
+  return retained;
 }
 
 /** Continue the earned world without clearing its completed achievement or discoveries. */

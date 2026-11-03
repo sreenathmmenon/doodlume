@@ -6,7 +6,7 @@ import type { SourceSelection } from './creative-adaptation.js';
 /** A box prompt needs context to recover a limb that the language model's box
  * clipped. Use real local SAM pixels to bound the principal connected subject,
  * retaining nearby appendages while excluding distant neighboring objects. */
-export async function groundWholeActor(source: Buffer, actor: SourceSelection, config: LocalSegmentationConfig, signal: AbortSignal, surfaces: SourceSelection[] = [], contextActor: SourceSelection = actor): Promise<SourceSelection> {
+export async function groundWholeActor(source: Buffer, actor: SourceSelection, config: LocalSegmentationConfig, signal: AbortSignal, surfaces: SourceSelection[] = [], contextActor: SourceSelection = actor, compactContext = false): Promise<SourceSelection> {
   const meta = await sharp(source).metadata();
   const iw = meta.width!, ih = meta.height!;
   const support = surfaces.filter(surface => ['terrain','bridge'].includes(surface.kind) &&
@@ -14,7 +14,12 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
     surface.y > actor.y + actor.height * .6 && Math.abs(surface.y - actor.y - actor.height) < 80)
     .sort((a,b) => Math.abs(a.y - actor.y - actor.height) - Math.abs(b.y - actor.y - actor.height))[0];
   const bottomLimit = support ? Math.min(1000, support.y + 6) : 1000;
-  const regions = [actor,contextActor].flatMap((observation, pass) => {
+  const regions = compactContext ? (actor.width*actor.height < 40000
+    ? [...[.08,.18,.3].flatMap(padding=>[0,.3,.6].map(bottom=>({padding,bottom}))), ...[.6,1].map(padding=>({padding,bottom:0}))]
+    : [.08,.18,.3].map(padding=>({padding,bottom:0}))).map(({padding,bottom}) => {
+    const x = Math.max(0,actor.x-actor.width*padding), y = Math.max(0,actor.y-actor.height*padding);
+    return pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+padding))-x,height:Math.min(1000,actor.y+actor.height*(1+padding+bottom))-y},iw,ih);
+  }) : [actor,contextActor].flatMap((observation, pass) => {
     const top = Math.max(0, observation.y - Math.max(pass ? 48 : 16, observation.height * (pass ? .5 : .16)));
     return [[1.2, .4], [.4, 1.2], [.8, .8]].flatMap(([before, after]) => [0, .25, .5].map(extension => {
       const left = Math.max(0, observation.x - Math.max(before * 84, observation.width * before));
@@ -23,6 +28,10 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
       return pixelBox(region, iw, ih);
     }));
   });
+  if (compactContext && actor.width*actor.height < 40000) for (const shift of [-.6,.6]) {
+    const x=Math.max(0,actor.x+actor.width*shift-actor.width*.12), y=Math.max(0,actor.y-actor.height*.12);
+    regions.push(pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+shift+.12))-x,height:Math.min(1000,actor.y+actor.height*1.5)-y},iw,ih));
+  }
   const masks = await localSegmentationArtwork(source, regions.map((box, index) => ({ id: `actor-context-${index}`, left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height })), config, signal, { selectPrincipalComponent: true });
   let best: SourceSelection | undefined, bestScore = -Infinity;
   for (const [index, box] of regions.entries()) {
@@ -52,7 +61,9 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
     Math.max(0, Math.min(box.top + y2 + 1, originalBox.top + originalBox.height) - Math.max(box.top + y1, originalBox.top));
   // Expanded context may contain another larger subject. A candidate must
   // retain substantial overlap with the recognized actor before size matters.
-  if (overlap < Math.min(originalBox.width * originalBox.height, (x2 - x1 + 1) * (y2 - y1 + 1)) * .15) continue;
+  if (overlap < Math.min(originalBox.width * originalBox.height, (x2 - x1 + 1) * (y2 - y1 + 1)) * (compactContext ? .05 : .15)) continue;
+  if (compactContext && (largest.length < (x2-x1+1)*(y2-y1+1)*(actor.width/actor.height>.35 && actor.width/actor.height<2.8 ? .3 : .15) || (x2-x1+1)*(y2-y1+1) < originalBox.width*originalBox.height*.25 || x2-x1+1 < originalBox.width*.35 || y2-y1+1 < originalBox.height*.35)) continue;
+  if (compactContext && (x2-x1+1)*(y2-y1+1)>originalBox.width*originalBox.height*2.5) continue;
   // A subject cut by the expanded context is not verified as whole. Keep the
   // source box for review rather than claiming the mask repaired its outline.
   let paperPixels=0;

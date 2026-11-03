@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { repairSourceBackground } from './source-background.js';
+import { repairSourceBackgroundDetailed } from './source-background.js';
 import { imageData, pixelBox } from './images.js';
 import type { InteractionPlan } from '../shared/interactions.js';
 import type { WorldEntity } from '../shared/world.js';
@@ -9,14 +9,14 @@ export { SOURCE_SCENERY_NOTE } from "../shared/source-scenery.js";
 /** Preserve stationary source pixels; reconstruct only the removed moving
  * silhouette from adjacent source colors. This is deterministic background
  * interpolation, not generated artwork or a claimed model inpainting result. */
-export async function sourceScenery(source: Buffer, entities: WorldEntity[], interactions?: InteractionPlan): Promise<string> {
+export async function sourceScenery(source: Buffer, entities: WorldEntity[], interactions?: InteractionPlan, inspectRepair?: (source:Buffer,mask:Buffer)=>Promise<void>, reportRepair?: (details:{method:"lama"|"classical";dilationPixels:number})=>void): Promise<string> {
   const { data, info } = await sharp(source).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const original = Buffer.from(data);
   const repairMask = Buffer.alloc(info.width * info.height);
-  const interactionGates = new Set((interactions?.actions ?? []).flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === 'openGate' ? [effect.entityId] : [])));
+  const interactionGates = new Set((interactions?.actions ?? []).flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === 'openGate' || effect.kind === 'moveObject' ? [effect.entityId] : [])));
   const carried = new Set((interactions?.objects ?? []).filter(object => object.carryable).map(object => object.entityId));
   for (const entity of entities) {
-    if (!entity.artSource || (!entity.sourceLayer && !carried.has(entity.id) && !['player','gate'].includes(entity.kind))) continue;
+    if (!entity.artSource || (!entity.sourceLayer && !carried.has(entity.id) && !interactionGates.has(entity.id) && !['player','gate'].includes(entity.kind))) continue;
     if (entity.kind === 'gate' && !entity.sourceLayer && !interactionGates.has(entity.id) && !entities.some(other => other.kind === 'lever' && other.targetId === entity.id)) continue;
     let box = pixelBox(entity.artSource, info.width, info.height);
     let mask: Buffer | undefined;
@@ -107,8 +107,9 @@ export async function sourceScenery(source: Buffer, entities: WorldEntity[], int
   if (repairMask.some(value => value > 0)) {
     const pngMask = await sharp(repairMask, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
     const preparedSource = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
-    const repaired = await repairSourceBackground(preparedSource, pngMask);
-    if (repaired) return imageData(await sharp(repaired).ensureAlpha().png().toBuffer());
+    await inspectRepair?.(preparedSource,pngMask);
+    const repaired = await repairSourceBackgroundDetailed(preparedSource, pngMask);
+    if (repaired) { reportRepair?.({method:repaired.method,dilationPixels:repaired.dilationPixels}); return imageData(await sharp(repaired.image).ensureAlpha().png().toBuffer()); }
   }
   return imageData(await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer());
 }

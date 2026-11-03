@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Modal } from "./Modal";
 import "./WorldLibrary.css";
+import { goalProgress } from "../../shared/world";
 import { validateImportArtwork } from "../lib/import-artwork";
 import {
   importWorlds,
@@ -304,9 +305,12 @@ export function WorldLibrary({
                 <span>
                   <strong>{entry.world.name}</strong>
                   <small>
-                    {entry.state.completed
-                      ? "Completed"
-                      : `${entry.state.collected.length} ${entry.state.collected.length === 1 ? "item" : "items"} found`}
+                    {entry.world.interactions
+                      ? (() => {
+                        const progress = goalProgress(entry.world, entry.state);
+                        return progress.total ? progress.ready && entry.state.completed ? "Completed" : `${progress.done}/${progress.total} goals met` : "Free play";
+                      })()
+                      : entry.state.completed ? "Completed" : `${entry.state.collected.length} ${entry.state.collected.length === 1 ? "item" : "items"} found`}
                     {" · "}Version {entry.world.revision}
                   </small>
                   <small className="saved-world-date">

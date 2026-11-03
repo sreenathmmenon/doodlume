@@ -10,6 +10,14 @@
 .object-purpose p { color: #9a342f; font-size: 12px; line-height: 1.5; }
 
 .object-purpose .purpose-new { margin-top: 12px; }
+.object-purpose .purpose-sequence { margin-top: 16px; }
+.object-purpose .purpose-sequence summary { font-size: 12px; color: #475164; }
+.purpose-requirements-heading { margin-top:16px; font-size:11px; font-weight:650; color:#475164; }
+.object-purpose .purpose-sequence label { display: flex; align-items: flex-start; gap: 9px; line-height: 1.5; }
+.object-purpose .purpose-sequence input { width: 16px; min-height: 16px; height: 16px; padding: 0; margin: 2px 0 0; flex-shrink: 0; accent-color: #4459ce; }
+.purpose-destination { display: grid; gap: 8px; }
+.purpose-destination > span { color: #397264; font-size: 12px; }
+.editor-detail-viewport[data-choosing-destination="true"] .editor-canvas { cursor: crosshair; }
 .object-purpose li { position: relative; padding-right: 55px; }
 .object-purpose li .text-button { position: absolute; right: 0; top: 0; font-size: 11px; margin: 0; padding: 8px 0; }
 @media (min-width: 900px) {

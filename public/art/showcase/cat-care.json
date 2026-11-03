@@ -1,0 +1,121 @@
+{
+  "id": "f831af3c-5c0e-46fa-a7b2-d49cc076f169",
+  "name": "Rooftop Fish for the Hungry Cat",
+  "description": "A gentle point-and-click pet-care game on lined notebook paper: serve the fish sitting on the tall rooftop to the smiling cat waiting on the low rooftop.",
+  "theme": "moon",
+  "width": 1440,
+  "height": 960,
+  "source": "meta",
+  "sourceImage": "/art/showcase/cat-care-source.webp",
+  "inputKind": "drawing",
+  "revision": 1,
+  "entities": [
+    {
+      "id": "generated-source-backdrop",
+      "kind": "decoration",
+      "width": 1440,
+      "height": 960,
+      "x": 0,
+      "y": 0,
+      "art": "/art/showcase/cat-care-object-0.webp",
+      "artMethod": "crop",
+      "artSource": {
+        "x": 0,
+        "y": 0,
+        "width": 1000,
+        "height": 1000
+      },
+      "label": "Original image",
+      "artNote": "Original scenery at source coordinates; moving source artwork isolated and background reconstructed locally."
+    },
+    {
+      "id": "cat-1",
+      "kind": "decoration",
+      "x": 146.88,
+      "y": 303.36,
+      "width": 456.48,
+      "height": 302.4,
+      "label": "Cat on left rooftop",
+      "artSource": {
+        "x": 102,
+        "y": 316,
+        "width": 317,
+        "height": 315
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "fish-1",
+      "kind": "decoration",
+      "x": 1045.3125,
+      "y": 227.8125,
+      "width": 215.625,
+      "height": 83.4375,
+      "label": "Fish on right rooftop",
+      "artSource": {
+        "x": 725.9114583333334,
+        "y": 237.3046875,
+        "width": 149.73958333333334,
+        "height": 86.9140625
+      },
+      "artNote": "Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.",
+      "art": "/art/showcase/cat-care-object-2.webp",
+      "artMethod": "sam",
+      "sourceLayer": {
+        "x": 1045.3125,
+        "y": 227.8125,
+        "width": 215.625,
+        "height": 83.4375
+      }
+    }
+  ],
+  "goalRules": {
+    "requiredCollectedIds": [],
+    "requiredActivatedIds": [],
+    "requiredInteractionIds": [
+      "feed-cat"
+    ],
+    "requiredResourceIds": []
+  },
+  "gameplay": {
+    "movement": "discover",
+    "objectiveTitle": "Feed the Cat the Rooftop Fish",
+    "instructions": "Select the Fish, then select the Cat to serve the food.",
+    "clues": []
+  },
+  "interactions": {
+    "version": 1,
+    "objects": [
+      {
+        "entityId": "fish-1",
+        "carryable": true,
+        "resource": {
+          "type": "food",
+          "capacity": 1,
+          "initial": 1
+        }
+      },
+      {
+        "entityId": "cat-1",
+        "carryable": false,
+        "resource": {
+          "type": "food",
+          "capacity": 1,
+          "initial": 0
+        }
+      }
+    ],
+    "actions": [
+      {
+        "id": "feed-cat",
+        "label": "Feed Fish to Cat",
+        "toolId": "fish-1",
+        "targetId": "cat-1",
+        "requires": [],
+        "effects": [],
+        "kind": "transfer",
+        "amount": 1
+      }
+    ]
+  }
+}

@@ -149,3 +149,15 @@ test("discovery keeps required clues synchronized without making optional object
   const malformed=structuredClone(world);malformed.gameplay!.clues![0].entityId="not-an-object";
   assert.throws(()=>validateWorld(malformed,{allowIncomplete:true}),/discovery clue/);
 });
+
+
+test("authored platform jump strength is bounded and keeps legacy defaults", () => {
+  const world = freshExample(EXAMPLES[0].id);
+  world.gameplay = { movement: "platform", objectiveTitle: "Cross the drawing", instructions: "Hold jump to reach the next source ledge." };
+  assert.equal(validateWorld(world).gameplay?.jumpStrength, undefined);
+  world.gameplay.jumpStrength = 1.5;
+  assert.equal(validateWorld(world).gameplay?.jumpStrength, 1.5);
+  for (const strength of [0, 0.99, 1.61, Infinity, NaN])
+    assert.throws(() => validateWorld({ ...world, gameplay: { ...world.gameplay, jumpStrength: strength } }));
+  assert.throws(() => validateWorld({ ...world, gameplay: { ...world.gameplay, movement: "roam" } }));
+});

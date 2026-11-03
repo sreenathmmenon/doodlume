@@ -81,6 +81,12 @@ export function reviewGoalRules(
       issues.push("A required interaction could not be matched to its action. Review the object actions.");
     } else rules.requiredInteractionIds = [...selected];
   }
+  if (input.requiredResourceIds !== undefined) {
+    const selected = input.requiredResourceIds;
+    if (!Array.isArray(selected) || selected.length > 64 || selected.some(id => typeof id !== "string" || !interactions?.objects.some(object => object.entityId === id && object.resource)) || new Set(selected).size !== selected.length) {
+      issues.push("A required resource could not be matched to its object. Review the resource goals.");
+    } else rules.requiredResourceIds = [...selected];
+  }
   if (
     requireDestination &&
     (rules.requiredCollectedIds.length || rules.requiredActivatedIds.length) &&

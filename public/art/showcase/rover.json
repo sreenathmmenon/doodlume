@@ -1,0 +1,305 @@
+{
+  "id": "d3132711-de93-441a-8d1f-7eabd98c3a6e",
+  "name": "Lunar rescue",
+  "description": "Bring the rescue signal back. Choose how to use the crystals, then fit the part you invented.",
+  "theme": "moon",
+  "width": 1458,
+  "height": 820,
+  "source": "meta",
+  "sourceImage": "/art/showcase/rover-source.webp",
+  "inputKind": "drawing",
+  "revision": 3,
+  "entities": [
+    {
+      "id": "generated-source-backdrop",
+      "kind": "decoration",
+      "width": 1457.7777777777778,
+      "height": 820,
+      "x": 0.11111111111108585,
+      "y": 0,
+      "art": "/art/showcase/rover-object-0.webp",
+      "artMethod": "crop",
+      "artSource": {
+        "x": 0,
+        "y": 0,
+        "width": 1000,
+        "height": 1000
+      },
+      "label": "Original image",
+      "artNote": "Original scenery at source coordinates; moving subjects use surrounding source background and stationary details keep game-state cues."
+    },
+    {
+      "id": "crystal-1",
+      "kind": "decoration",
+      "x": 472.9777777777778,
+      "y": 485.62222222222215,
+      "width": 72.88888888888889,
+      "height": 54.66666666666667,
+      "label": "Left crystal",
+      "artSource": {
+        "x": 324.375,
+        "y": 592.2222222222222,
+        "width": 50,
+        "height": 66.66666666666667
+      },
+      "artNote": "Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.",
+      "art": "/art/showcase/rover-object-1.webp",
+      "artMethod": "sam",
+      "sourceLayer": {
+        "x": 472.9777777777778,
+        "y": 485.62222222222215,
+        "width": 72.88888888888889,
+        "height": 54.66666666666667
+      }
+    },
+    {
+      "id": "crystal-2",
+      "kind": "decoration",
+      "x": 893.911111111111,
+      "y": 430.9555555555555,
+      "width": 62.86666666666667,
+      "height": 51.93333333333333,
+      "label": "Middle crystal",
+      "artSource": {
+        "x": 613.125,
+        "y": 525.5555555555555,
+        "width": 43.125,
+        "height": 63.333333333333336
+      },
+      "artNote": "Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.",
+      "art": "/art/showcase/rover-object-2.webp",
+      "artMethod": "sam",
+      "sourceLayer": {
+        "x": 893.911111111111,
+        "y": 430.9555555555555,
+        "width": 62.86666666666667,
+        "height": 51.93333333333333
+      }
+    },
+    {
+      "id": "crystal-3",
+      "kind": "decoration",
+      "x": 1200.0444444444445,
+      "y": 370.82222222222225,
+      "width": 50.111111111111114,
+      "height": 55.57777777777779,
+      "label": "Right crystal",
+      "artSource": {
+        "x": 823.125,
+        "y": 452.22222222222223,
+        "width": 34.375,
+        "height": 67.77777777777779
+      },
+      "artNote": "Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.",
+      "art": "/art/showcase/rover-object-3.webp",
+      "artMethod": "sam",
+      "sourceLayer": {
+        "x": 1200.0444444444445,
+        "y": 370.82222222222225,
+        "width": 50.111111111111114,
+        "height": 55.57777777777779
+      }
+    },
+    {
+      "id": "beacon-tower",
+      "kind": "decoration",
+      "x": 1328.1466666666665,
+      "y": 185.32,
+      "width": 99.1288888888889,
+      "height": 238.62,
+      "label": "Rescue beacon",
+      "artSource": {
+        "x": 911,
+        "y": 226,
+        "width": 68,
+        "height": 291
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "rover-unit",
+      "kind": "decoration",
+      "x": 62.06666666666665,
+      "y": 435.51111111111106,
+      "width": 161.26666666666668,
+      "height": 131.2,
+      "label": "Rover",
+      "artSource": {
+        "x": 42.5,
+        "y": 531.1111111111111,
+        "width": 110.625,
+        "height": 160
+      },
+      "artNote": "Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.",
+      "art": "/art/showcase/rover-object-5.webp",
+      "artMethod": "sam",
+      "sourceLayer": {
+        "x": 62.06666666666665,
+        "y": 435.51111111111106,
+        "width": 161.26666666666668,
+        "height": 131.2
+      }
+    },
+    {
+      "id": "drawn-55ca493d-587b-42eb-b45a-d899204ed123",
+      "kind": "decoration",
+      "x": 679,
+      "y": 320,
+      "width": 100,
+      "height": 180,
+      "label": "Rescue antenna",
+      "art": "/art/showcase/rover-object-6.webp"
+    }
+  ],
+  "goalRules": {
+    "requiredCollectedIds": [],
+    "requiredActivatedIds": [],
+    "requiredInteractionIds": [
+      "action-24d049e3-f765-40e4-bd17-3c83931d91c1"
+    ],
+    "requiredResourceIds": [
+      "beacon-tower",
+      "rover-unit"
+    ]
+  },
+  "gameplay": {
+    "movement": "discover",
+    "objectiveTitle": "Restore the rescue signal",
+    "instructions": "Power the beacon and rover with the crystals. Then fit the rescue antenna.",
+    "clues": []
+  },
+  "interactions": {
+    "version": 1,
+    "objects": [
+      {
+        "entityId": "crystal-1",
+        "carryable": true,
+        "resource": {
+          "type": "charge",
+          "capacity": 1,
+          "initial": 1
+        }
+      },
+      {
+        "entityId": "crystal-2",
+        "carryable": true,
+        "resource": {
+          "type": "charge",
+          "capacity": 1,
+          "initial": 1
+        }
+      },
+      {
+        "entityId": "crystal-3",
+        "carryable": true,
+        "resource": {
+          "type": "charge",
+          "capacity": 1,
+          "initial": 1
+        }
+      },
+      {
+        "entityId": "beacon-tower",
+        "carryable": false,
+        "resource": {
+          "type": "charge",
+          "capacity": 2,
+          "initial": 0
+        }
+      },
+      {
+        "entityId": "rover-unit",
+        "carryable": false,
+        "resource": {
+          "type": "charge",
+          "capacity": 1,
+          "initial": 0
+        }
+      },
+      {
+        "entityId": "drawn-55ca493d-587b-42eb-b45a-d899204ed123",
+        "carryable": true
+      }
+    ],
+    "actions": [
+      {
+        "id": "act-beacon-1",
+        "label": "Power the beacon",
+        "toolId": "crystal-1",
+        "targetId": "beacon-tower",
+        "requires": [],
+        "effects": [],
+        "kind": "transfer",
+        "amount": 1
+      },
+      {
+        "id": "crystal-1-to-rover-unit",
+        "label": "Power the rover",
+        "kind": "transfer",
+        "toolId": "crystal-1",
+        "targetId": "rover-unit",
+        "amount": 1,
+        "requires": []
+      },
+      {
+        "id": "act-beacon-2",
+        "label": "Power the beacon",
+        "toolId": "crystal-2",
+        "targetId": "beacon-tower",
+        "requires": [],
+        "effects": [],
+        "kind": "transfer",
+        "amount": 1
+      },
+      {
+        "id": "crystal-2-to-rover-unit",
+        "label": "Power the rover",
+        "kind": "transfer",
+        "toolId": "crystal-2",
+        "targetId": "rover-unit",
+        "amount": 1,
+        "requires": []
+      },
+      {
+        "id": "crystal-3-to-beacon-tower",
+        "label": "Power the beacon",
+        "kind": "transfer",
+        "toolId": "crystal-3",
+        "targetId": "beacon-tower",
+        "amount": 1,
+        "requires": []
+      },
+      {
+        "id": "act-rover-charge",
+        "label": "Power the rover",
+        "toolId": "crystal-3",
+        "targetId": "rover-unit",
+        "requires": [],
+        "effects": [],
+        "kind": "transfer",
+        "amount": 1
+      },
+      {
+        "id": "action-24d049e3-f765-40e4-bd17-3c83931d91c1",
+        "label": "Fit rescue antenna",
+        "toolId": "drawn-55ca493d-587b-42eb-b45a-d899204ed123",
+        "targetId": "rover-unit",
+        "requires": [],
+        "kind": "attach",
+        "effects": [
+          {
+            "kind": "moveObject",
+            "entityId": "rover-unit",
+            "x": 177,
+            "y": 435,
+            "durationMs": 1600
+          }
+        ],
+        "requiresResourceIds": [
+          "beacon-tower",
+          "rover-unit"
+        ]
+      }
+    ]
+  }
+}

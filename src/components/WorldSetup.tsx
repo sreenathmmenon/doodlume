@@ -3,7 +3,8 @@ import { ArrowUpRight, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { Modal } from "./Modal";
 import { prepareSourceArtwork } from "../lib/source-art";
 import { setupFeedback } from "../../shared/setup";
-import type { RecognitionReview } from "../../shared/recognition-review";
+import { validateRecognitionReview, type RecognitionReview } from "../../shared/recognition-review";
+import { validateWorld } from "../../shared/world";
 import "./WorldSetupRules.css";
 import "./WorldSetup.css";
 import type {
@@ -96,6 +97,7 @@ export function WorldSetup({
   const [tool, setTool] = useState<EntityKind>("player"),
     [selected, setSelected] = useState(
       resume?.entities[0]?.id ||
+        recovery?.issues.find(issue => issue.objectId)?.objectId ||
         recovery?.draft.entities[0]?.id ||
         initial?.entities[0]?.id ||
         "",
@@ -104,6 +106,7 @@ export function WorldSetup({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [sourceAspect, setSourceAspect] = useState(1440 / 820);
+  const [reviewNotes, setReviewNotes] = useState(recovery);
   const [rulesConfirmed, setRulesConfirmed] = useState(
     !recovery?.rulesNeedConfirmation,
   );
@@ -132,9 +135,9 @@ export function WorldSetup({
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  const requiredActionCount = goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length + (goalRules.requiredInteractionIds?.length ?? 0);
+  const requiredActionCount = goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length + (goalRules.requiredInteractionIds?.length ?? 0) + (goalRules.requiredResourceIds?.length ?? 0);
   const hasDestination = world.entities.some((entity) => entity.kind === "goal");
-  function toggleRule(key: "requiredCollectedIds" | "requiredActivatedIds" | "requiredInteractionIds", id: string) {
+  function toggleRule(key: "requiredCollectedIds" | "requiredActivatedIds" | "requiredInteractionIds" | "requiredResourceIds", id: string) {
     setWorld((current) => {
       const rules = current.goalRules ?? {
         requiredCollectedIds: [],
@@ -304,7 +307,28 @@ export function WorldSetup({
     setBusy(true);
     setError("");
     try {
-      const ready = await prepareSourceArtwork(world, controller.signal);
+      let ready: WorldDefinition;
+      if (world.source === "meta" && world.gameplay?.movement === "discover" && world.interactions) {
+        const response = await fetch("/api/source-review", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ world }), signal: controller.signal,
+        });
+        const result = await response.json().catch(() => ({error: "Source preparation could not be reached. Your selections are kept; try again."}));
+        controller.signal.throwIfAborted();
+        if (!response.ok) {
+          if (result.recovery) {
+            const next = validateRecognitionReview(result.recovery);
+            setReviewNotes(next); setWorld(next.draft);
+            if (next.rulesNeedConfirmation) setRulesConfirmed(false);
+            const first = next.issues.find(issue => issue.objectId);
+            if (first?.objectId) setSelected(first.objectId);
+          }
+          throw new Error(result.error || "Adjust the highlighted object and try again.");
+        }
+        ready = validateWorld(result.world);
+      } else {
+        ready = await prepareSourceArtwork(world, controller.signal);
+      }
       if (!controller.signal.aborted) onUse(ready);
     } catch (e) {
       if (!controller.signal.aborted)
@@ -371,13 +395,13 @@ export function WorldSetup({
       <span className="setup-context-note" title={world.source === "manual" ? "Selected and arranged by you" : "Meta interpretation with your adjustments"}>
         {world.source === "manual" ? "Manual" : "Meta interpretation"}
       </span>
-      {recovery && (
+      {reviewNotes && (
         <details className="setup-disclosure setup-recovery">
-          <summary>Recognition notes · {recovery.issues.length} to review</summary>
+          <summary>Recognition notes · {reviewNotes.issues.length} to review</summary>
           <p className="small-note">
-            Original recognition notes. Placement checks update as you edit.
+            Adjust the selections below, then prepare your world again.
           </p>
-          {recovery.issues.map((issue) => (
+          {reviewNotes.issues.map((issue) => (
             <div key={issue.id}>
               <p>
                 <strong>{issue.label}</strong> · {issue.message}
@@ -844,10 +868,10 @@ export function WorldSetup({
         </details>
       </fieldset>
       <details className="setup-disclosure setup-finishing" open={recovery?.rulesNeedConfirmation || undefined}>
-      <summary>Finishing requirements <span>{requiredActionCount} required actions</span></summary>
+      <summary>Finishing requirements <span>{requiredActionCount} requirements</span></summary>
       <fieldset className="setup-rules" disabled={busy}>
         <legend className="sr-only">Finishing requirements</legend>
-        <p>Choose the actions required to finish. Unchecked actions are optional.</p>
+        <p>Choose what must be achieved to finish.</p>
         {recovery?.rulesNeedConfirmation && (
           <p className="setup-rule-attention">
             Meta could not confirm every part of your objective. Check these
@@ -865,12 +889,19 @@ export function WorldSetup({
               <span>{action.label}</span>
             </label>)}
           </fieldset>}
+          {world.interactions?.objects.some(object => object.resource) && <fieldset className="setup-rule-group">
+            <legend>Fill to finish</legend>
+            {world.interactions.objects.filter(object => object.resource).map(object => <label key={object.entityId}>
+              <input type="checkbox" checked={(goalRules.requiredResourceIds ?? []).includes(object.entityId)} onChange={() => toggleRule("requiredResourceIds", object.entityId)} />
+              <span>{world.entities.find(entity => entity.id === object.entityId)?.label || "Object"} · {object.resource!.capacity} {object.resource!.type.replaceAll("-", " ")}</span>
+            </label>)}
+          </fieldset>}
         </div>
         <p className="setup-rule-summary">
           {!hasDestination && !world.interactions
             ? "Explore freely. Add a destination to give this world a finish."
             : requiredActionCount
-            ? `${requiredActionCount} required actions${hasDestination ? ", then reach a destination" : " to finish"}.`
+            ? `${requiredActionCount} requirements${hasDestination ? ", then reach a destination" : " to finish"}.`
             : hasDestination ? "Reach a destination. All actions are optional." : "Explore freely. All actions are optional."}
         </p>
         {recovery?.rulesNeedConfirmation && (

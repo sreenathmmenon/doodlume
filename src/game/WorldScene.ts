@@ -47,6 +47,8 @@ export interface WorldTelemetry {
   playerY: number;
   heldObjectId?: string | null;
   actionLabel?: string;
+  pendingObjectMotion?: boolean;
+  availableObjectActions?: Array<{ id: string; label: string; targetId: string }>;
 }
 export interface WorldControls {
   left: boolean;
@@ -101,6 +103,7 @@ const palettes = {
 
 export class WorldScene extends Phaser.Scene {
   private objectInteractions?: ObjectInteractions;
+  private interactionGoalsWereUnmet = false;
   private appliedInteractionGates = new Set<string>();
   private jumpMultiplier = 1;
   private moveSpeedMultiplier = 1;
@@ -302,6 +305,7 @@ export class WorldScene extends Phaser.Scene {
     this.generatedTerrainPixels = 0;
     this.generatedTerrainPieces = 0;
     this.state = structuredClone(this.initial);
+    this.interactionGoalsWereUnmet = !goalProgress(this.definition, this.state).ready;
     this.sceneCreated = true;
     const missing = this.definition.entities.find(
       (entity) => entity.art && !this.textures.exists(`art-${entity.id}`),
@@ -647,11 +651,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private discoveryResolved(entity: WorldEntity): boolean {
-    return discoveryResolved(entity, this.state);
+    return discoveryResolved(entity, this.state, Boolean(this.state.exploring && this.interactionGoalsWereUnmet));
   }
 
   private nextDiscoveryClue() {
-    return nextDiscoveryClue(this.definition, this.state);
+    return nextDiscoveryClue(this.definition, this.state, Boolean(this.state.exploring && this.interactionGoalsWereUnmet));
   }
 
   revealDiscoveryHint(): void {
@@ -973,7 +977,7 @@ export class WorldScene extends Phaser.Scene {
     const region = this.discoveryRegions.get(id);
     if (!region || this.discoveryResolved(region.entity)) return false;
     const e = region.entity;
-    if (!canDiscover(this.definition, this.state, id)) {
+    if (!canDiscover(this.definition, this.state, id, Boolean(this.state.exploring && this.interactionGoalsWereUnmet))) {
       if (this.time.now - this.lastDiscoveryNotice > 1000) {
         this.lastDiscoveryNotice = this.time.now;
         this.hooks.onMoment("That detail comes later. Follow the current clue.");
@@ -982,12 +986,15 @@ export class WorldScene extends Phaser.Scene {
     }
     const wasCompleted = this.state.completed;
     if (e.kind === "goal") {
+      if (this.objectInteractions?.hasPendingMotion()) return false;
       const progress = goalProgress(this.definition, this.state);
       if (!progress.ready) {
         this.hooks.onMoment(progress.hint);
         return false;
       }
       this.state.completed = true;
+      this.state.exploring = false;
+      this.interactionGoalsWereUnmet = false;
       this.soundtrack.cue("finish");
     } else if (e.kind === "lever") {
       this.state.activated.push(id);
@@ -1005,7 +1012,7 @@ export class WorldScene extends Phaser.Scene {
     );
     // The persistent mission already announces the next clue. Reserve the
     // transient feedback area for a distinct result, not a duplicate sentence.
-    if (wasCompleted) this.hooks.onMoment("Detail found.");
+    if (wasCompleted && this.state.exploring) this.hooks.onMoment("Detail found.");
     else if (this.state.completed) this.hooks.onMoment("World complete.");
     this.report();
     return true;
@@ -1527,7 +1534,7 @@ export class WorldScene extends Phaser.Scene {
     );
     this.physics.add.existing(zone, true);
     this.physics.add.overlap(this.player, zone, () => {
-      if (!this.isPlaying || this.state.completed) return;
+      if (!this.isPlaying || (this.state.completed && (!this.state.exploring || !this.interactionGoalsWereUnmet)) || this.objectInteractions?.hasPendingMotion()) return;
       if (this.definition.gameplay?.movement === "roam" && !this.roamEngaged)
         return;
       const objective = goalProgress(this.definition, this.state);
@@ -1543,6 +1550,8 @@ export class WorldScene extends Phaser.Scene {
         return;
       }
       this.state.completed = true;
+      this.state.exploring = false;
+      this.interactionGoalsWereUnmet = false;
       if (sourceTarget) this.drawSourceCue(e, true);
       this.soundtrack.cue("finish");
       this.ring(this.player.x, this.player.y, 0xffe3a3, 160);
@@ -1902,14 +1911,10 @@ export class WorldScene extends Phaser.Scene {
       change: state => {
         this.state = state;
         this.applyObjectEffects();
-        const progress = goalProgress(this.definition, this.state);
-        if (!this.state.completed && progress.total > 0 && progress.ready &&
-            !this.definition.entities.some(entity => entity.kind === "goal")) {
-          this.state.completed = true;
-          this.soundtrack.cue("finish");
-        }
+        this.completeInteractionObjectives();
         this.report();
       },
+      settled: () => { this.completeInteractionObjectives(); this.report(); },
       player: () => this.player,
       playing: () => this.isPlaying && (!this.state.completed || Boolean(this.state.exploring)),
       approach: point => {
@@ -1922,6 +1927,21 @@ export class WorldScene extends Phaser.Scene {
       feedback: kind => this.soundtrack.cue(kind === "pickup" || kind === "drop" ? "collect" : "gate"),
     }, this.reducedMotion);
     this.applyObjectEffects();
+    this.completeInteractionObjectives();
+  }
+
+  private completeInteractionObjectives() {
+    const progress = goalProgress(this.definition, this.state);
+    if (!progress.ready) this.interactionGoalsWereUnmet = true;
+    if (this.objectInteractions?.hasPendingMotion()) return;
+    const newAchievement = !this.state.completed || (this.state.exploring && this.interactionGoalsWereUnmet);
+    if (newAchievement && progress.total > 0 && progress.ready &&
+        !this.definition.entities.some(entity => entity.kind === "goal")) {
+      this.state.completed = true;
+      this.state.exploring = false;
+      this.interactionGoalsWereUnmet = false;
+      this.soundtrack.cue("finish");
+    }
   }
 
   private applyObjectEffects() {
@@ -1931,7 +1951,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.player?.body) {
       const body = this.player.body as Phaser.Physics.Arcade.Body;
       const roam = this.definition.gameplay?.movement === "roam";
-      body.setMaxVelocity((roam ? 300 : 350) * this.moveSpeedMultiplier, roam ? 300 * this.moveSpeedMultiplier : Math.max(1100, 650 * this.jumpMultiplier));
+      body.setMaxVelocity((roam ? 300 : 350) * this.moveSpeedMultiplier, roam ? 300 * this.moveSpeedMultiplier : Math.max(1100, 650 * (this.definition.gameplay?.jumpStrength ?? 1) * this.jumpMultiplier));
     }
     for (const id of effects.openGateIds) {
       if (this.appliedInteractionGates.has(id)) continue;
@@ -1944,7 +1964,7 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  interactWithObject(id: string) { return this.objectInteractions?.interact(id) ?? false; }
+  interactWithObject(id: string, actionId?: string) { return this.objectInteractions?.interact(id, actionId) ?? false; }
   dropHeldObject() { this.objectInteractions?.putBack(); }
 
   private nearestLever() {
@@ -1980,6 +2000,8 @@ export class WorldScene extends Phaser.Scene {
       nearLever: Boolean(nearby || objectContext?.nearby),
       heldObjectId: objectContext?.heldEntityId,
       actionLabel: objectContext?.label,
+      pendingObjectMotion: this.objectInteractions?.hasPendingMotion() ?? false,
+      availableObjectActions: this.objectInteractions?.availableActions() ?? [],
       interactionHint:
         objectContext?.label || (clue ??
         (nearby
@@ -2257,7 +2279,7 @@ export class WorldScene extends Phaser.Scene {
       body.updateFromGameObject();
     } else if (jumpPressed) this.jumpQueued = time;
     if (time - this.jumpQueued < 120 && time - this.lastGrounded < 100) {
-      body.setVelocityY(-650 * this.jumpMultiplier);
+      body.setVelocityY(-650 * (this.definition.gameplay?.jumpStrength ?? 1) * this.jumpMultiplier);
       this.lastGrounded = -1000;
       this.jumpQueued = -1000;
       this.soundtrack.cue("jump");

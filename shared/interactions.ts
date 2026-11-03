@@ -9,13 +9,22 @@ export interface InteractionObject {
 export type InteractionEffect =
   | { kind: "openGate"; entityId: string }
   | { kind: "jumpBoost"; multiplier: number }
-  | { kind: "moveSpeedBoost"; multiplier: number };
+  | { kind: "moveSpeedBoost"; multiplier: number }
+  | { kind: "moveObject"; entityId: string; x: number; y: number; durationMs?: number };
+export interface ObjectMove {
+  x: number;
+  y: number;
+  durationMs: number;
+  actionId: string;
+}
 interface ActionBase {
   id: string;
   label: string;
   toolId: string;
   targetId: string;
   requires?: string[];
+  /** These resource objects must currently be full, regardless of transfer route. */
+  requiresResourceIds?: string[];
   effects?: InteractionEffect[];
 }
 export type InteractionAction = ActionBase & (
@@ -60,10 +69,10 @@ const keysOnly = (v: object, keys: string[]) => Object.keys(v).every(key => keys
 const quantity = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 10000;
 const fail = (message: string): never => { throw new Error(message); };
 
-export function validateInteractions(world: WorldDefinition): void {
+export function validateInteractions(world: WorldDefinition, options: { allowUnpreparedArtwork?: boolean } = {}): void {
   const p = world.interactions;
   if (p === undefined) {
-    if (world.goalRules?.requiredInteractionIds?.length) fail("A task refers to actions that are not in this world.");
+    if ((world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length)) fail("A task refers to actions that are not in this world.");
     return;
   }
   if (!record(p) || !keysOnly(p, ["version", "objects", "actions"]) || p.version !== 1 ||
@@ -90,14 +99,17 @@ export function validateInteractions(world: WorldDefinition): void {
   }
   const actions = new Map<string, InteractionAction>();
   const attachedTools = new Set<string>();
+  const movementSteps = new Map<string, {actionId: string; x: number; y: number}[]>();
   for (const a of p.actions) {
-    if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
+    if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "requiresResourceIds", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
         !safeId(a.id) || actions.has(a.id) || typeof a.label !== "string" || !a.label.trim() || a.label.length > 80 ||
         !["transfer", "attach", "use"].includes(a.kind) || !safeId(a.toolId) || !safeId(a.targetId) || a.toolId === a.targetId ||
         !objects.get(a.toolId)?.carryable || !objects.has(a.targetId) ||
         (a.requires !== undefined && (!Array.isArray(a.requires) || a.requires.length > 32 || a.requires.some(id => !safeId(id)) || new Set(a.requires).size !== a.requires.length)) ||
         (a.effects !== undefined && (!Array.isArray(a.effects) || a.effects.length > 8)))
       fail("An action needs a carried source, a distinct target and supported effects.");
+    if (a.requiresResourceIds !== undefined && (!Array.isArray(a.requiresResourceIds) || a.requiresResourceIds.length > 32 || new Set(a.requiresResourceIds).size !== a.requiresResourceIds.length || a.requiresResourceIds.some(id => !safeId(id) || !objects.get(id)?.resource)))
+      fail("An action readiness condition needs distinct resource objects from this world.");
     if (a.kind === "transfer") {
       const source = objects.get(a.toolId)!.resource, target = objects.get(a.targetId)!.resource;
       if (!source || !target || source.type !== target.type || !quantity(a.amount) || a.amount <= 0 || a.amount > source.capacity || a.amount > target.capacity)
@@ -112,6 +124,21 @@ export function validateInteractions(world: WorldDefinition): void {
       if (effect.kind === "openGate") {
         if (world.gameplay?.movement === "discover" || !keysOnly(effect, ["kind", "entityId"]) || !safeId(effect.entityId) || entities.get(effect.entityId)?.kind !== "gate")
           fail("An opening effect must reference a real gate in a moving world.");
+      } else if (effect.kind === "moveObject") {
+        const entity = entities.get(effect.entityId);
+        const object = objects.get(effect.entityId);
+        if (!keysOnly(effect, ["kind", "entityId", "x", "y", "durationMs"]) || !safeId(effect.entityId) ||
+            !entity || entity.kind !== "decoration" || !object || object.carryable ||
+            ![effect.x, effect.y].every(Number.isFinite) || effect.x < 0 || effect.y < 0 ||
+            effect.x + entity.width > world.width || effect.y + entity.height > world.height ||
+            (effect.durationMs !== undefined && (!Number.isFinite(effect.durationMs) || effect.durationMs < 150 || effect.durationMs > 4000)))
+          fail("A moving object needs one bounded destination, a stationary source prop and a supported duration.");
+        if (!options.allowUnpreparedArtwork && (!entity!.art || (entity!.artSource && !entity!.sourceLayer)))
+          fail("Prepare the moving object's source artwork and background before giving it a destination.");
+        const steps = movementSteps.get(effect.entityId) ?? [];
+        if (steps.some(step => step.actionId === a.id)) fail("One action cannot give the same object two destinations.");
+        steps.push({actionId:a.id,x:effect.x,y:effect.y});
+        movementSteps.set(effect.entityId, steps);
       } else if (effect.kind === "jumpBoost" || effect.kind === "moveSpeedBoost") {
         const mode = world.gameplay?.movement ?? "platform";
         if (!keysOnly(effect, ["kind", "multiplier"]) || !Number.isFinite(effect.multiplier) || effect.multiplier <= 1 ||
@@ -141,6 +168,7 @@ export function validateInteractions(world: WorldDefinition): void {
       seen.add(current); current = attachmentTargets.get(current);
     }
   }
+  const ancestors = new Map<string, Set<string>>();
   for (const action of p.actions) {
     const dependencies = new Set<string>();
     const collect = (id: string) => {
@@ -149,12 +177,29 @@ export function validateInteractions(world: WorldDefinition): void {
       for (const prior of actions.get(id)!.requires ?? []) collect(prior);
     };
     for (const id of action.requires ?? []) collect(id);
+    ancestors.set(action.id, dependencies);
     if ([...dependencies].some(id => actions.get(id)!.kind === "attach" && actions.get(id)!.toolId === action.toolId))
       fail("A part cannot be used again after a required attachment consumes it.");
+  }
+  for (const [entityId, steps] of movementSteps) {
+    for (let i=0;i<steps.length;i++) for (let j=i+1;j<steps.length;j++) {
+      if (!ancestors.get(steps[i].actionId)!.has(steps[j].actionId) && !ancestors.get(steps[j].actionId)!.has(steps[i].actionId))
+        fail("Successive moves of one object must follow an explicit prerequisite sequence.");
+    }
+    const ordered = [...steps].sort((a,b) => ancestors.get(b.actionId)!.has(a.actionId) ? -1 : 1);
+    let previous = entities.get(entityId)!;
+    for (const step of ordered) {
+      if (Math.hypot(step.x-previous.x,step.y-previous.y)<4)
+        fail("Each movement must lead to a different position from the preceding step.");
+      previous = {...previous,x:step.x,y:step.y};
+    }
   }
   const required = world.goalRules?.requiredInteractionIds;
   if (required !== undefined && (!Array.isArray(required) || required.length > 64 || new Set(required).size !== required.length || required.some(id => !safeId(id) || !actions.has(id))))
     fail("A task refers to a missing or repeated action.");
+  const resourceGoals = world.goalRules?.requiredResourceIds;
+  if (resourceGoals !== undefined && (!Array.isArray(resourceGoals) || resourceGoals.length > 64 || new Set(resourceGoals).size !== resourceGoals.length || resourceGoals.some(id => !safeId(id) || !objects.get(id)?.resource)))
+    fail("A resource task refers to a missing or repeated resource object.");
   validateInteractionFeasibility(world);
 }
 
@@ -162,6 +207,7 @@ export function validateInteractions(world: WorldDefinition): void {
 function signature(action: InteractionAction) {
   return JSON.stringify({ kind: action.kind, toolId: action.toolId, targetId: action.targetId,
     requires: [...(action.requires ?? [])].sort(), effects: action.effects ?? [],
+    ...(action.requiresResourceIds?.length ? {requiresResourceIds:[...action.requiresResourceIds].sort()} : {}),
     ...(action.kind === "transfer" ? { amount: action.amount } : {}) });
 }
 function initialState(world: WorldDefinition): InteractionState {
@@ -174,6 +220,14 @@ function initialState(world: WorldDefinition): InteractionState {
 function blockedReason(world: WorldDefinition, s: InteractionState, action: InteractionAction, checkHeld: boolean): string | undefined {
   if (s.completed.includes(action.id)) return "Already done.";
   if (action.requires?.some(id => !s.completed.includes(id))) return "Complete the earlier step first.";
+  const missingResources = (action.requiresResourceIds ?? []).filter(id => {
+    const resource = world.interactions!.objects.find(object => object.entityId === id)!.resource!;
+    return (s.quantities[id] ?? 0) < resource.capacity;
+  });
+  if (missingResources.length) {
+    const names = missingResources.slice(0,2).map(id => world.entities.find(entity => entity.id === id)?.label?.trim() || "the required object");
+    return `Fill ${names.join(" and ")} first${missingResources.length > 2 ? ", along with the other required objects" : ""}.`;
+  }
   if (checkHeld && s.heldEntityId !== action.toolId) return "Pick up the matching object first.";
   if (s.attachments[action.toolId]) return "That part is already attached.";
   if (action.kind === "transfer") {
@@ -209,12 +263,12 @@ export function interactionState(world: WorldDefinition, state: PlayState): Inte
   return result;
 }
 
-/** Validate only after graph syntax/IDs. Explore real bounded states, permitting
- * optional supporting actions without requiring mutually exclusive choices.
- * This runs during plan/rule validation, never in the per-frame reducer. */
-export function validateInteractionFeasibility(world: WorldDefinition): void {
+/** Search only at validation/action boundaries, never in per-frame affordances.
+ * Final quantities matter: filling a target and then draining it does not win. */
+function completionFeasibility(world: WorldDefinition, start: InteractionState): "possible" | "impossible" | "bounded" {
   const required = new Set(world.goalRules?.requiredInteractionIds ?? []);
-  if (!required.size || !world.interactions) return;
+  const resources = (world.goalRules?.requiredResourceIds ?? []).map(id => world.interactions!.objects.find(o => o.entityId === id)!);
+  if ((!required.size && !resources.length) || !world.interactions) return "possible";
   const actions = world.interactions.actions;
   const needed = new Set(required);
   const visit = (id: string) => {
@@ -228,7 +282,7 @@ export function validateInteractionFeasibility(world: WorldDefinition): void {
   const seen = new Set<string>();
   let bounded = false;
   const search = (state: InteractionState): boolean => {
-    if ([...needed].every(id => state.completed.includes(id))) return true;
+    if ([...needed].every(id => state.completed.includes(id)) && resources.every(object => (state.quantities[object.entityId] ?? 0) >= object.resource!.capacity)) return true;
     const key = [...state.completed].sort().join("|");
     if (seen.has(key)) return false;
     if (seen.size >= 8192) { bounded = true; return false; }
@@ -243,14 +297,51 @@ export function validateInteractionFeasibility(world: WorldDefinition): void {
     }
     return false;
   };
-  if (!search(initialState(world))) fail(bounded
+  return search(start) ? "possible" : bounded ? "bounded" : "impossible";
+}
+
+export function validateInteractionFeasibility(world: WorldDefinition, state?: PlayState): void {
+  const result = completionFeasibility(world, state ? interactionState(world, state) : initialState(world));
+  if (result !== "possible") fail(result === "bounded"
     ? "This action plan is too complex to verify. Simplify the required sequence before applying it."
+    : state ? "Your current supplies and attached parts cannot complete these new requirements. Keep the earlier rules or add a usable supply or part."
     : "The required tasks cannot be completed with these supplies and attachments. Adjust the amounts or required actions.");
 }
 
 export function availableInteractions(world: WorldDefinition, state: PlayState, targetId?: string): InteractionAction[] {
   const s = interactionState(world, state);
   return (world.interactions?.actions ?? []).filter(a => (!targetId || a.targetId === targetId) && !blockedReason(world, s, a, true));
+}
+
+const safeChoiceCache = new WeakMap<WorldDefinition, { fingerprint: string; actions: InteractionAction[] }>();
+
+/** Player-facing availability includes completion safety. The decision fingerprint
+ * excludes position/frame state; repeated renders reuse the same search results.
+ * Plan/rule contents are included so even an in-place authoring change cannot
+ * reuse stale eligibility. Target filtering does not repeat feasibility work. */
+export function safeAvailableInteractions(world: WorldDefinition, state: PlayState, targetId?: string): InteractionAction[] {
+  if (!world.interactions) return [];
+  const fingerprint = JSON.stringify([
+    world.interactions,
+    world.goalRules?.requiredInteractionIds ?? [],
+    world.goalRules?.requiredResourceIds ?? [],
+    state.interactions ?? null,
+  ]);
+  let cached = safeChoiceCache.get(world);
+  if (!cached || cached.fingerprint !== fingerprint) {
+    const normalized = interactionState(world, state);
+    const hasGoals = Boolean(world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length);
+    const actions = world.interactions.actions.filter(action => {
+      if (blockedReason(world, normalized, action, true)) return false;
+      if (!hasGoals) return true;
+      const candidate = structuredClone(normalized);
+      apply(candidate, action);
+      return completionFeasibility(world, candidate) === "possible";
+    });
+    cached = { fingerprint, actions };
+    safeChoiceCache.set(world, cached);
+  }
+  return cached.actions.filter(action => !targetId || action.targetId === targetId);
 }
 
 /** Reachability/proximity is checked by the runtime, not guessed from a saved point here. */
@@ -276,6 +367,10 @@ export function reduceInteraction(world: WorldDefinition, state: PlayState, comm
   const reason = blockedReason(world, s, action, true);
   if (reason) return reject(reason);
   apply(s, action);
+  const feasibility = completionFeasibility(world, s);
+  if (feasibility !== "possible") return reject(feasibility === "bounded"
+    ? "This choice needs a simpler task plan before it can be verified."
+    : "Keep these supplies or parts for the unfinished tasks. This choice would block completion.");
   return { ok: true, state: { ...state, interactions: s }, event: {
     kind: action.kind, actionId: action.id, toolId: action.toolId, targetId: action.targetId,
     ...(action.kind === "transfer" ? { amount: action.amount } : {}),
@@ -283,15 +378,20 @@ export function reduceInteraction(world: WorldDefinition, state: PlayState, comm
 }
 
 export function interactionEffects(world: WorldDefinition, state: PlayState) {
-  const completed = new Set(interactionState(world, state).completed);
+  const completed = interactionState(world, state).completed;
+  const actions = new Map((world.interactions?.actions ?? []).map(action => [action.id, action]));
   const openGateIds = new Set<string>();
+  const objectMoves: Record<string, ObjectMove> = {};
   let jumpMultiplier = 1, moveSpeedMultiplier = 1;
-  for (const action of world.interactions?.actions ?? []) if (completed.has(action.id)) {
+  // Receipts retain execution order even when an author reorders plan entries.
+  for (const id of completed) {
+    const action = actions.get(id)!;
     for (const effect of action.effects ?? []) {
       if (effect.kind === "openGate") openGateIds.add(effect.entityId);
       else if (effect.kind === "jumpBoost") jumpMultiplier = Math.max(jumpMultiplier, effect.multiplier);
       else if (effect.kind === "moveSpeedBoost") moveSpeedMultiplier = Math.max(moveSpeedMultiplier, effect.multiplier);
+      else if (effect.kind === "moveObject") objectMoves[effect.entityId] = {x: effect.x, y: effect.y, durationMs: effect.durationMs ?? 900, actionId: action.id};
     }
   }
-  return { openGateIds: [...openGateIds], jumpMultiplier, moveSpeedMultiplier };
+  return { openGateIds: [...openGateIds], jumpMultiplier, moveSpeedMultiplier, objectMoves };
 }

@@ -1,3 +1,5 @@
+import { applyPlannedInteractions } from "./interaction-planning.js";
+import { prepareMovingSourceArt, MovableArtworkReviewError } from "./moving-source-art.js";
 import { sourceScenery, SOURCE_SCENERY_NOTE } from "./source-scenery.js";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
@@ -177,6 +179,11 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   // test as other interactions. A label never substitutes a reachable target.
   for (const object of options.objects.filter(object => object.kind === "decoration" && behaviorIds.has(object.id) && object.id !== actor.id)) placeObject(object, 70);
   for (const gate of gates) if (behaviorIds.has(gate.id)) anchors.set(gate.id, nearestSurface(center(gate), gate.y + gate.height));
+  for (const action of plan.interactions?.actions ?? []) for (const effect of action.effects ?? []) {
+    if (effect.kind !== "moveObject" || !("destinationId" in effect) || typeof effect.destinationId !== "string") continue;
+    const destination=options.objects.find(object=>object.id===effect.destinationId);
+    if (destination && !entities.some(entity=>entity.id===destination.id)) entities.push(fromSource(destination));
+  }
   anchors.set(hero.id, start);
   const goals = options.objects.filter(object => object.kind === "goal").map(object => {
     const sameSource = coins.find(coin => coin.artSource && Math.abs(coin.artSource.x - object.x) < 2 && Math.abs(coin.artSource.y - object.y) < 2 &&
@@ -205,7 +212,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     requiredActivatedIds: plan.objective === "activate" ? levers.map(lever => lever.id) : [],
     ...(plan.interactions ? { requiredInteractionIds: plan.requiredInteractionIds ?? [] } : {}),
   });
-  if (plan.interactions) goalRules.requiredInteractionIds = [...(plan.requiredInteractionIds ?? [])];
+  if (plan.interactions) { goalRules.requiredInteractionIds = [...(plan.requiredInteractionIds ?? [])]; goalRules.requiredResourceIds = [...(plan.requiredResourceIds ?? [])]; }
   const jump = (a: Surface, b: Surface, closed: Set<string>, extras: Surface[] = [], jumpMultiplier = 1, speedMultiplier = 1) => {
     if (a.id === b.id) return true;
     const rise = a.y - b.y;
@@ -236,7 +243,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   const behaviorWorld: WorldDefinition = { id: "preflight", name: options.name, description: "", theme: options.theme,
     width, height, source: "manual", sourceImage: "/art/preflight.png", entities: [...entities, hero], revision: 1,
     interactions: plan.interactions, gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions } };
-  try { validateInteractions(behaviorWorld); } catch (error) { return reject(error instanceof Error ? error.message : "The source interactions need review."); }
+  try { behaviorWorld.interactions = applyPlannedInteractions(behaviorWorld, plan.interactions, plan.requiredInteractionIds, true).interactions; validateInteractions(behaviorWorld, {allowUnpreparedArtwork:true}); } catch (error) { return reject(error instanceof Error ? error.message : "The source interactions need review."); }
   const requiredActions = new Set(goalRules.requiredInteractionIds ?? []);
   const addDependencies = (id: string) => {
     for (const prior of plan.interactions?.actions.find(action => action.id === id)?.requires ?? []) if (!requiredActions.has(prior)) {
@@ -244,7 +251,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     }
   };
   for (const id of [...requiredActions]) addDependencies(id);
-  const orderedActions = [...(plan.interactions?.actions ?? [])].sort((a, b) => Number(requiredActions.has(b.id)) - Number(requiredActions.has(a.id)));
+  const orderedActions = [...(behaviorWorld.interactions?.actions ?? [])].sort((a, b) => Number(requiredActions.has(b.id)) - Number(requiredActions.has(a.id)));
   const reachable = (origin: Surface = start) => {
     const closed = new Set(gates.map(gate => gate.id));
     let reached = new Set<string>(), changed: boolean;
@@ -317,8 +324,12 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     surfaces.push(connector); entities.push(connector);
   }
   if (missingConnection()) return reject("The original route needs too many added connections to preserve its composition. Adjust the source platforms before playing.");
+  const resourcesComplete = (progress: ReturnType<typeof emptyPlayState>) => (goalRules.requiredResourceIds ?? []).every(id => {
+    const resource=plan.interactions?.objects.find(object=>object.entityId===id)?.resource;
+    return resource && (progress.interactions?.quantities[id] ?? resource.initial)>=resource.capacity;
+  });
   const finalRoute = reachable();
-  if ([...requiredActions].some(id => !finalRoute.progress.interactions?.completed.includes(id)))
+  if (!resourcesComplete(finalRoute.progress) || [...requiredActions].some(id => !finalRoute.progress.interactions?.completed.includes(id)))
     return reject("The required object actions cannot be completed with the reachable resources and parts. Check their quantities, dependencies and access.");
   const spawnCandidates = [...surfaces].sort((a,b) => Math.hypot(center(a)-startPoint.x,a.y-startPoint.y) - Math.hypot(center(b)-startPoint.x,b.y-startPoint.y));
   let spawn: { surface: Surface; x: number } | undefined;
@@ -328,7 +339,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
       .sort((a,b) => Math.abs(a - startPoint.x) - Math.abs(b - startPoint.x));
     if (!positions.length) continue;
     const route = reachable(surface);
-    if (targets.some(entity => !route.reached.has(anchors.get(entity.id)!.id)) || [...requiredActions].some(id => !route.progress.interactions?.completed.includes(id))) continue;
+    if (!resourcesComplete(route.progress) || targets.some(entity => !route.reached.has(anchors.get(entity.id)!.id)) || [...requiredActions].some(id => !route.progress.interactions?.completed.includes(id))) continue;
     spawn = { surface, x: positions[0] }; break;
   }
   if (!spawn) return reject("There is no clear reachable starting position outside collectibles and the destination. Move a nearby source selection before playing.");
@@ -338,12 +349,10 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   entities.push(hero);
   // Stationary objects remain in the backdrop. Moving actors and linked gates
   // are masked out below; a later source-layer edit prepares its own backdrop.
-  for (const object of options.objects.filter(object => object.kind === "decoration" && object.id !== actor.id && !behaviorIds.has(object.id))) entities.push(fromSource(object));
+  for (const object of options.objects.filter(object => object.kind === "decoration" && object.id !== actor.id && !behaviorIds.has(object.id) && !entities.some(entity=>entity.id===object.id))) entities.push(fromSource(object));
   const world: WorldDefinition = { id: randomUUID(), name: options.name.slice(0, 80), description: options.description.slice(0, 500),
     theme: options.theme, width, height, source: "meta", sourceImage: imageData(source), inputKind, revision: 1, entities, goalRules, ...(plan.interactions ? {interactions: plan.interactions} : {}),
     gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues: plan.clues } };
-  const placement = setupFeedback(world);
-  if (placement.errors.length) return reject(placement.errors.join(" "));
   for (const entity of entities) {
     const object = artJobs.get(entity.id); if (!object) continue;
     signal.throwIfAborted();
@@ -352,7 +361,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     catch { signal.throwIfAborted(); entity.art = await cropArtwork(source, object, false); entity.artMethod = "crop";
       entity.artNote = "Original source crop with its background retained; a precise outline was unavailable."; }
   }
-  const movingBehaviorIds = new Set(plan.interactions?.objects.filter(object => object.carryable).map(object => object.entityId) ?? []);
+  const movingBehaviorIds = new Set([...(plan.interactions?.objects.filter(object => object.carryable).map(object => object.entityId) ?? []), ...(plan.interactions?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "moveObject" ? [effect.entityId] : [])) ?? [])]);
   const behaviorGates = new Set(plan.interactions?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" ? [effect.entityId] : [])) ?? []);
   if (options.segmentation.enabled && segmentationConfigured(options.segmentation)) {
     const sourceArt = entities.filter(entity => artJobs.has(entity.id) && !artJobs.get(entity.id)?.artwork &&
@@ -364,9 +373,15 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   for (const entity of entities) if (movingBehaviorIds.has(entity.id) && entity.artSource && entity.art) {
     entity.sourceLayer = { x: entity.x, y: entity.y, width: entity.width, height: entity.height };
   }
+  try { await prepareMovingSourceArt(source, entities.filter(entity => movingBehaviorIds.has(entity.id)), options.segmentation, signal, options.transport, inputKind); }
+  catch(error) { if(error instanceof MovableArtworkReviewError)return reject(error.message); throw error; }
+  world.interactions = applyPlannedInteractions(world, plan.interactions, plan.requiredInteractionIds).interactions;
+  const placement = setupFeedback(world);
+  if (placement.errors.length) return reject(placement.errors.join(" "));
   const backdrop = entities[0];
-  backdrop.art = await sourceScenery(source, entities, plan.interactions);
-  backdrop.artNote = SOURCE_SCENERY_NOTE;
+  let repairNote="";
+  backdrop.art = await sourceScenery(source, entities, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa; source cutouts use Meta SAM." : " Background reconstructed with local classical inpainting.";});
+  backdrop.artNote = SOURCE_SCENERY_NOTE+repairNote;
   signal.throwIfAborted();
   return world;
 }

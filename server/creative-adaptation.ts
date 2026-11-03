@@ -1,6 +1,7 @@
+import { prepareMovingSourceArt, MovableArtworkReviewError } from "./moving-source-art.js";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { cropArtwork, imageData } from "./images.js";
+import { cropArtwork, imageData, normalizeDrawing } from "./images.js";
 import { extractArtwork, segmentationConfigured, type SegmentationConnection } from "./segmentation.js";
 import { InterpretationError } from "./model.js";
 import { emptyPlayState, validateWorld, type GoalRules, type InputKind, type WorldDefinition, type WorldEntity, type WorldGameplay } from "../shared/world.js";
@@ -43,6 +44,7 @@ export interface GameplayPlan {
   obstacleIds: string[];
   interactions?: PlannedInteractions;
   requiredInteractionIds?: string[];
+  requiredResourceIds?: string[];
 }
 
 export const gameplaySchema = {
@@ -54,6 +56,7 @@ export const gameplaySchema = {
     objectiveTitle: { type: "string" },
     instructions: { type: "string" },
     interactions: interactionsSchema,
+    requiredResourceIds: { type: "array", maxItems: 24, items: { type: "string" } },
     requiredInteractionIds: { type: "array", maxItems: 16, items: { type: "string" } },
     clues: {
       type: "array", maxItems: 24,
@@ -78,7 +81,7 @@ export const gameplaySchema = {
       },
     },
   },
-  required: ["mode", "movement", "objectiveTitle", "instructions", "clues", "obstacleIds", "reason", "avatarId", "objective", "objectiveLabel", "destinationLabel", "path", "interactions", "requiredInteractionIds"],
+  required: ["mode", "movement", "objectiveTitle", "instructions", "clues", "obstacleIds", "reason", "avatarId", "objective", "objectiveLabel", "destinationLabel", "path", "interactions", "requiredInteractionIds", "requiredResourceIds"],
 };
 
 export const creativeInstructions = `Your job has TWO separate outputs: honest visual recognition in objects, and an explicit gameplay design in gameplay. Almost any supplied image can inspire a game; it does NOT need to depict a platform game. Never ask the person to draw a player or terrain merely because they are absent. Select only actual visible subjects, parts, shapes and surfaces with tight normalized 0..1000 source boxes. Assign actual fruit, leaves, droplets, gears, details, stars or separable paint marks a coin role when the game asks the person to find them. This is a game-role assignment, not a claim that the original picture was a game. A lever can represent an actual visible button, gear or switch to activate. Keep their source IDs and original source positions.
@@ -102,9 +105,15 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
     objectiveTitle: input.objectiveTitle ?? input.objectiveLabel,
     instructions: input.instructions ?? `Reach ${input.destinationLabel ?? "the destination"}.`,
     clues: input.clues ?? [], obstacleIds: input.obstacleIds ?? [],
-    interactions: readPlannedInteractions(input.interactions), requiredInteractionIds: input.requiredInteractionIds ?? [] } as GameplayPlan;
+    interactions: readPlannedInteractions(input.interactions), requiredInteractionIds: input.requiredInteractionIds ?? [], requiredResourceIds: input.requiredResourceIds ?? [] } as GameplayPlan;
   if (plan.movement === "discover" && typeof plan.destinationLabel === "string" && !plan.destinationLabel.trim() && plan.clues.length)
     plan.destinationLabel = plan.objectiveTitle || plan.objectiveLabel;
+  // Pointer object tasks complete through their real actions/resources. Empty
+  // legacy traversal labels must not invalidate an otherwise complete task.
+  if (plan.movement === "discover" && plan.interactions && typeof plan.objectiveTitle === "string" && plan.objectiveTitle.trim()) {
+    if (typeof plan.objectiveLabel === "string" && !plan.objectiveLabel.trim()) plan.objectiveLabel=plan.objectiveTitle;
+    if (typeof plan.destinationLabel === "string" && !plan.destinationLabel.trim()) plan.destinationLabel=plan.objectiveTitle;
+  }
   const boundedText = (text: unknown, max: number) => typeof text === "string" && text.trim().length > 0 && text.length <= max;
   if (! ["source-layout", "creative"].includes(plan.mode) ||
       !boundedText(plan.reason, 500) ||
@@ -119,6 +128,8 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
       !Array.isArray(plan.obstacleIds) || plan.obstacleIds.length > 12 ||
       new Set(plan.obstacleIds).size !== plan.obstacleIds.length ||
       plan.obstacleIds.some(id => typeof id !== "string" || !/^[\w-]{1,60}$/.test(id)) ||
+      !Array.isArray(plan.requiredResourceIds) || plan.requiredResourceIds.length > 24 || new Set(plan.requiredResourceIds).size !== plan.requiredResourceIds.length ||
+      plan.requiredResourceIds.some(id=>typeof id!=="string" || !/^[\w-]{1,60}$/.test(id)) || (!plan.interactions && plan.requiredResourceIds.length>0) ||
       !Array.isArray(plan.requiredInteractionIds) || plan.requiredInteractionIds.length > 16 ||
       new Set(plan.requiredInteractionIds).size !== plan.requiredInteractionIds.length ||
       plan.requiredInteractionIds.some(id => typeof id !== "string" || !/^[\w-]{1,60}$/.test(id)) ||
@@ -165,7 +176,7 @@ function finishingRequirements(options: AdaptationOptions, entities: WorldEntity
     requiredActivatedIds: explicitSelection ? [...requested.requiredActivatedIds] : [...new Set([
       ...defaults.requiredActivatedIds, ...entities.filter(entity => entity.kind === "lever" && authoredClueTargets.has(entity.id)).map(entity => entity.id),
     ])],
-    ...(options.plan.interactions ? { requiredInteractionIds: [...(options.plan.requiredInteractionIds ?? defaults.requiredInteractionIds ?? [])] } : {}),
+    ...(options.plan.interactions ? { requiredInteractionIds: [...(options.plan.requiredInteractionIds ?? defaults.requiredInteractionIds ?? [])], requiredResourceIds: [...(options.plan.requiredResourceIds ?? [])] } : {}),
   };
   const text = options.intent ?? "";
   const freelyExplore = !/\b(?:except|unless)\b/i.test(text) && /\b(?:everything\s+(?:is\s+)?optional|all (?:actions|activities|requirements)\s+(?:are\s+)?optional|no required actions|no finishing requirements|free exploration|just explore|freely explore)\b/i.test(text);
@@ -185,7 +196,7 @@ function finishingRequirements(options: AdaptationOptions, entities: WorldEntity
 }
 
 function checkedCompiledWorld(world: WorldDefinition, plan?: GameplayPlan): WorldDefinition {
-  if (plan) world = applyPlannedInteractions(world, plan.interactions, plan.requiredInteractionIds);
+  if (plan) world = applyPlannedInteractions({...world, goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],...world.goalRules,requiredResourceIds:plan.requiredResourceIds ?? []}}, plan.interactions, plan.requiredInteractionIds);
   validateWorld(world);
   const placement = setupFeedback(world);
   if (placement.errors.length)
@@ -268,7 +279,7 @@ function checkRoamRoute(width: number, height: number, guide: WorldEntity, entit
     id: "roam-preflight", name: "Source interaction preflight", description: "", theme: "grove",
     width, height, source: "manual", sourceImage: "/art/preflight.png", revision: 1, entities, goalRules: rules,
     gameplay: { movement: "roam", objectiveTitle: "Check access", instructions: "Use the source objects." },
-  }, interactions, rules.requiredInteractionIds) : undefined;
+  }, interactions, rules.requiredInteractionIds, true) : undefined;
   let interactionProgress = emptyPlayState();
   // Reachable switches may open a route through their actual gates, including
   // chained gates. A switch trapped behind its own closed gate cannot count.
@@ -303,7 +314,7 @@ function checkRoamRoute(width: number, height: number, guide: WorldEntity, entit
   } while (opened);
   const blocked = entities.find(entity => required.has(entity.id) && !reachable(entity));
   const goals = entities.filter(entity => entity.kind === "goal");
-  if (behaviorWorld && (rules.requiredInteractionIds ?? []).some(id => !interactionProgress.interactions?.completed.includes(id)))
+  if (behaviorWorld && ((rules.requiredInteractionIds ?? []).some(id => !interactionProgress.interactions?.completed.includes(id)) || (rules.requiredResourceIds ?? []).some(id=>{const r=interactions?.objects.find(o=>o.entityId===id)?.resource; return !r || (interactionProgress.interactions?.quantities[id] ?? r.initial)<r.capacity;})))
     throw new InterpretationError("The required object actions cannot be completed along this route. Check access to the tools, targets and supplies.");
   if (blocked || (goals.length > 0 && !goals.some(reachable)))
     throw new InterpretationError(blocked
@@ -364,7 +375,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
     };
   };
   const behaviorIds = new Set(plan.interactions?.objects.map(object => object.entityId) ?? []);
-  const effectIds = new Set(plan.interactions?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" ? [effect.entityId] : [])) ?? []);
+  const effectIds = new Set(plan.interactions?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" ? [effect.entityId] : effect.kind === "moveObject" ? [effect.entityId, ...("destinationId" in effect && typeof effect.destinationId === "string" ? [effect.destinationId] : [])] : [])) ?? []);
   const selected = options.objects.filter(object => ["coin", "lever", "goal"].includes(object.kind) || behaviorIds.has(object.id) || effectIds.has(object.id));
   // A single real subject can be a discovery target instead of being duplicated
   // as a moving photo rectangle. This retains its actual box and identity.
@@ -446,26 +457,29 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
       id: "interaction-preflight", name: options.name, description: options.description, theme: options.theme,
       width, height, source: "meta", sourceImage: imageData(source), inputKind, revision: 1,
       entities, goalRules: rules, gameplay: { movement: plan.movement, objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues },
-    }, plan.interactions, plan.requiredInteractionIds);
+    }, plan.interactions, plan.requiredInteractionIds, true);
     const movingIds = new Set([
       ...plan.interactions.objects.filter(object => object.carryable).map(object => object.entityId),
-      ...effectIds,
+      ...plan.interactions.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" || effect.kind === "moveObject" ? [effect.entityId] : [])),
     ]);
     const moving = entities.filter(entity => movingIds.has(entity.id) && entity.artSource);
-    for (const entity of moving) {
-      signal.throwIfAborted();
-      entity.art = await cropArtwork(source, entity.artSource!, inputKind !== "picture");
-      entity.artMethod = inputKind === "picture" ? "crop" : "paper";
-      entity.sourceLayer = { x: entity.x, y: entity.y, width: entity.width, height: entity.height };
-      entity.artNote = "Actual source object isolated as a movable layer; its old silhouette is removed from the playable backdrop. The original image is preserved.";
-    }
-    if (moving.length && options.segmentation.enabled && segmentationConfigured(options.segmentation)) {
-      const artwork = await extractArtwork(source, moving.map(entity => ({ id: entity.id, ...entity.artSource! })), options.segmentation, signal, options.transport, inputKind);
-      for (const entity of moving) Object.assign(entity, artwork.get(entity.id));
+    try { await prepareMovingSourceArt(source, moving, options.segmentation, signal, options.transport, inputKind); }
+    catch(error) {
+      if (!(error instanceof MovableArtworkReviewError)) throw error;
+      const draftEntities:WorldEntity[]=await Promise.all(selected.map(async object=>({id:object.id,kind:object.kind,label:object.label.slice(0,80),
+        x:object.x*1.44,y:object.y*.82,width:object.width*1.44,height:object.height*.82,
+        ...(object.targetId?{targetId:object.targetId}:{}),artSource:{x:object.x,y:object.y,width:object.width,height:object.height},
+        art:await cropArtwork(source,object,false),artMethod:"crop" as const,artNote:"Original selection for correction; whole outline is not yet verified."})));
+      const draft=applyPlannedInteractions({id:randomUUID(),name:options.name.slice(0,80),description:options.description.slice(0,500),theme:options.theme,
+        width:1440,height:820,source:"meta",sourceImage:imageData(source),inputKind,revision:1,entities:draftEntities,goalRules:rules,
+        gameplay:{movement:plan.movement,objectiveTitle:plan.objectiveTitle,instructions:plan.instructions,clues}},plan.interactions,plan.requiredInteractionIds,true);
+      throw new RecognitionReviewError(validateRecognitionReview({kind:"recognition-review",version:1,draft,issues:[{
+        id:"source-outline",objectId:error.objectId,label:"Check the whole object",message:error.message}]}));
     }
     if (moving.length) {
-      entities[0].art = await sourceScenery(source, moving, plan.interactions);
-      entities[0].artNote = SOURCE_SCENERY_NOTE;
+      let repairNote="";
+      entities[0].art = await sourceScenery(source, moving, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa; source cutouts use Meta SAM." : " Background reconstructed with local classical inpainting.";});
+      entities[0].artNote = SOURCE_SCENERY_NOTE+repairNote;
     }
   }
   signal.throwIfAborted();
@@ -508,9 +522,9 @@ export async function compileCreativeAdaptation(options: AdaptationOptions): Pro
     })));
     const draft = applyPlannedInteractions({ id: randomUUID(), name: options.name.slice(0, 80), description: options.description.slice(0, 500),
         theme: options.theme, width: 1440, height: 820, source: "meta", sourceImage: imageData(source), inputKind,
-        revision: 1, entities: draftEntities, goalRules: requestedRules,
+        revision: 1, entities: draftEntities, goalRules: {...requestedRules, requiredResourceIds:plan.requiredResourceIds ?? []},
         gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues: plan.clues } },
-      plan.interactions, plan.requiredInteractionIds);
+      plan.interactions, plan.requiredInteractionIds, true);
     throw new RecognitionReviewError(validateRecognitionReview({ kind: "recognition-review", version: 1, draft,
       issues: [{ id: "source-route", label: "Keep the original scene", message: sourceRejection.slice(0, 320) }],
     }));
@@ -752,4 +766,33 @@ export async function compileCreativeAdaptation(options: AdaptationOptions): Pro
     gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions,
       clues: plan.clues.filter(clue => entities.some(entity => entity.id === clue.entityId && ["coin", "lever", "goal"].includes(entity.kind))) },
   });
+}
+
+
+/** Re-extract an explicitly corrected pointer-roleplay review. The recognized
+ * object graph is retained; this operation makes no semantic model request. */
+export async function prepareSourceInteractionReview(value:unknown, segmentation:SegmentationConnection, signal:AbortSignal):Promise<WorldDefinition> {
+  const world=validateWorld(value,{allowIncomplete:true});
+  if (world.source!=="meta" || world.gameplay?.movement!=="discover" || !world.interactions)
+    throw new InterpretationError("Choose the original source-interaction review to prepare.",400);
+  const source=await normalizeDrawing(world.sourceImage);
+  const objects:SourceSelection[]=world.entities.filter(entity=>entity.artSource && !(entity.artSource.width===1000 && entity.artSource.height===1000)).map(entity=>({
+    id:entity.id,kind:entity.kind,label:entity.label ?? "Object",...entity.artSource!,...(entity.targetId?{targetId:entity.targetId}:{})}));
+  if(!objects.length)throw new InterpretationError("Keep at least one source selection before preparing.",400);
+  const size=await sharp(source).metadata(),scale=Math.max(1440/size.width!,820/size.height!);
+  const width=Math.min(12000,Math.max(1440,Math.round(size.width!*scale))),height=Math.min(5000,Math.max(820,Math.round(size.height!*scale)));
+  const interactions:PlannedInteractions={...world.interactions,actions:world.interactions.actions.map(action=>({...action,effects:action.effects?.map(effect=>effect.kind==='moveObject'?{...effect,x:effect.x/world.width*width,y:effect.y/world.height*height}:effect)}))};
+  const plan:GameplayPlan={mode:"creative",movement:"discover",avatarId:null,reason:"Creator corrected the original source selections.",objective:"explore",
+    objectiveTitle:world.gameplay.objectiveTitle,instructions:world.gameplay.instructions,objectiveLabel:world.gameplay.objectiveTitle,destinationLabel:world.gameplay.objectiveTitle,
+    path:Array.from({length:3},(_,index)=>{const object=objects[Math.min(index,objects.length-1)];return{x:object.x+object.width/2,y:object.y+object.height/2,label:object.label};}),
+    clues:world.gameplay.clues??[],obstacleIds:[],interactions,requiredInteractionIds:world.goalRules?.requiredInteractionIds??[],requiredResourceIds:world.goalRules?.requiredResourceIds??[]};
+  try {
+  const rebuilt=await compileImageNative({source,inputKind:world.inputKind??"drawing",name:world.name,description:world.description,theme:world.theme,objects,plan,
+    sourceGoalRules:{requiredCollectedIds:world.goalRules?.requiredCollectedIds??[],requiredActivatedIds:world.goalRules?.requiredActivatedIds??[]},
+    segmentation,signal,transport:fetch});
+  return {...rebuilt,id:world.id,revision:world.revision};
+  } catch(error) {
+    if(error instanceof RecognitionReviewError) {error.recovery.draft.id=world.id;error.recovery.draft.revision=world.revision;}
+    throw error;
+  }
 }

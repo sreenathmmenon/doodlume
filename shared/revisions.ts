@@ -1,4 +1,4 @@
-import { interactionEffects, type InteractionPlan } from "./interactions.js";
+import { interactionEffects, validateInteractionFeasibility, type InteractionPlan } from "./interactions.js";
 import { setupFeedback } from "./setup.js";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit } from "./source-scenery.js";
 import {
@@ -184,6 +184,7 @@ export function applyWorldPatch(
     if (issue) throw new Error(issue);
   }
   const progress = retainPlayState(next, structuredClone(state));
+  validateInteractionFeasibility(next, progress);
   safePlayerPosition(next, progress, world, state);
   return {
     world: next,
@@ -210,6 +211,7 @@ export function undoWorldPatch(
     revision: world.revision + 1,
   });
   const progress = retainPlayState(previous, structuredClone(state));
+  validateInteractionFeasibility(previous, progress);
   safePlayerPosition(previous, progress, world, state);
   return { world: previous, state: progress };
 }

@@ -14,6 +14,8 @@ import { Modal } from "./Modal";
 import { WrappingTextarea } from "./WrappingTextarea";
 import "./GoalRules.css";
 import { objectName } from "../lib/object-name";
+import { interactionState } from "../../shared/interactions";
+import { emptyPlayState } from "../../shared/world";
 
 export function GoalRules({
   world,
@@ -40,12 +42,13 @@ export function GoalRules({
   const hasGoal = world.entities.some((e) => e.kind === "goal");
   const canFinish = hasGoal || Boolean(world.interactions);
   const count =
-    rules.requiredCollectedIds.length + rules.requiredActivatedIds.length + (rules.requiredInteractionIds?.length ?? 0);
+    rules.requiredCollectedIds.length + rules.requiredActivatedIds.length + (rules.requiredInteractionIds?.length ?? 0) + (rules.requiredResourceIds?.length ?? 0);
+  const quantities = interactionState(world, state ?? emptyPlayState()).quantities;
   const original = world.goalRules ?? {
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (["requiredCollectedIds", "requiredActivatedIds", "requiredInteractionIds"] as (keyof Rules)[]).some(
+  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (["requiredCollectedIds", "requiredActivatedIds", "requiredInteractionIds", "requiredResourceIds"] as (keyof Rules)[]).some(
     (key) =>
       (rules[key] ?? []).length !== (original[key] ?? []).length ||
       (rules[key] ?? []).some((id) => !(original[key] ?? []).includes(id)),
@@ -118,7 +121,7 @@ export function GoalRules({
             className="text-button"
             disabled={!count}
             onClick={() =>
-              setRules({ requiredCollectedIds: [], requiredActivatedIds: [], requiredInteractionIds: [] })
+              setRules({ requiredCollectedIds: [], requiredActivatedIds: [], requiredInteractionIds: [], requiredResourceIds: [] })
             }
           >
             Make all optional
@@ -134,7 +137,7 @@ export function GoalRules({
 }>
       <div className="goal-rules">
         <p className="goal-rules-intro">
-          Choose the required actions. Everything else stays optional.
+          Choose what must be achieved to finish.
         </p>
         {!canFinish && (
           <p className="goal-rules-error" role="status">
@@ -150,6 +153,14 @@ export function GoalRules({
             <input type="checkbox" checked={(rules.requiredInteractionIds ?? []).includes(action.id)} onChange={() => toggle("requiredInteractionIds", action.id)} />
             <span><strong>{action.label}</strong></span>
             {state?.interactions?.completed.includes(action.id) && <em>Done</em>}
+          </label>)}
+        </fieldset>}
+        {world.interactions?.objects.some(object => object.resource) && <fieldset className="goal-rules-group" disabled={!canFinish}>
+          <legend>Fill to finish</legend>
+          {world.interactions.objects.filter(object => object.resource).map(object => <label className="goal-rules-choice" key={object.entityId}>
+            <input type="checkbox" checked={(rules.requiredResourceIds ?? []).includes(object.entityId)} onChange={() => toggle("requiredResourceIds", object.entityId)} />
+            <span><strong>{objectName(world, object.entityId, 70)}</strong><small>{object.resource!.capacity} {object.resource!.type.replaceAll("-", " ")}</small></span>
+            {quantities[object.entityId] >= object.resource!.capacity && <em>Full</em>}
           </label>)}
         </fieldset>}
         {isDiscovery && !world.interactions && hasGoal && (
@@ -177,16 +188,16 @@ export function GoalRules({
           <div>
             <strong>
               {world.interactions && !hasGoal
-                ? count ? `${count} required ${count === 1 ? "action" : "actions"}` : "Free play"
+                ? count ? `${count} ${count === 1 ? "requirement" : "requirements"}` : "Free play"
                 : !hasGoal
                 ? "Exploration · no destination"
                 : count
-                  ? `${count} required ${count === 1 ? "action" : "actions"}, then reach a destination`
+                  ? `${count} ${count === 1 ? "requirement" : "requirements"}, then reach a destination`
                   : "Reach a destination"}
             </strong>
             <p>
               {world.interactions && !hasGoal
-                ? count ? "Complete the checked actions to finish." : "All object interactions remain available."
+                ? count ? "Meet the selected goals to finish." : "All object interactions remain available."
                 : !hasGoal
                 ? "Add a destination in Edit world to give this world a finish."
                 : count

@@ -23,7 +23,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import type { InteractionPlan } from "../../shared/interactions";
-import { ObjectBehaviorEditor } from "./ObjectBehaviorEditor";
+import { ObjectBehaviorEditor, clearObjectAbilityDrafts, pendingObjectAbilities, removeObjectAbilityDraft } from "./ObjectBehaviorEditor";
 import { Modal } from "./Modal";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 import { WrappingTextarea } from "./WrappingTextarea";
@@ -108,6 +108,7 @@ type EditorDraft = {
   modified: Record<string, WorldEntity>;
   selected: string | null;
   customArt: string | null;
+  customArtAspect?: number;
   sketchDraft: string | undefined;
   recovery?: EditorRecovery | null;
   interactions?: InteractionPlan;
@@ -192,6 +193,13 @@ function WorldEditorSession({
   const interactionsChanged = JSON.stringify(interactions) !== JSON.stringify(world.interactions);
   const changedCount = Object.keys(modified).length;
   const [tool, setTool] = useState<Tool>("move");
+  const [abilityDraftDirty, setAbilityDraftDirty] = useState(false);
+  const [abilityFormReset, setAbilityFormReset] = useState(0);
+  const [destinationPick, setDestinationPick] = useState<{
+    target: WorldEntity;
+    point: {x: number; y: number};
+    choose: (point: {x: number; y: number}) => void;
+  }>();
   const [selected, setSelected] = useState<string | null>(
     savedDraft ? savedDraft.selected : proposal?.patch.additions[0]?.id ?? initialAdditions?.[0]?.id ?? null,
   );
@@ -209,15 +217,16 @@ function WorldEditorSession({
   const [error, setError] = useState("");
   const [drawing, setDrawing] = useState(false);
   const [customArt, setCustomArt] = useState<string | null>(savedDraft?.customArt ?? null);
+  const [customArtAspect, setCustomArtAspect] = useState(savedDraft?.customArtAspect ?? 1);
   const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
   useEffect(() => {
-    if (!additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
+    if (!additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !abilityDraftDirty && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
       editorDrafts.delete(cacheKey);
       return;
     }
-    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, sketchDraft, recovery, interactions });
+    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, recovery, interactions });
     if (editorDrafts.size > 12) editorDrafts.delete(editorDrafts.keys().next().value!);
-  }, [cacheKey, bounds, additions, modified, selected, customArt, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged]);
+  }, [cacheKey, bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged, abilityDraftDirty]);
   const [preparingArtwork, setPreparingArtwork] = useState(false);
   const artworkRequest = useRef<AbortController | null>(null);
   type PreparedScene = Pick<WorldPatch, "sourceScenery" | "sourceLayers">;
@@ -323,6 +332,7 @@ function WorldEditorSession({
     setPreparingArtwork(false);
   }
   function selectObject(id: string | null) {
+    setDestinationPick(undefined);
     if (id !== selectedNow.current) cancelArtwork();
     selectedNow.current = id;
     setSelected(id);
@@ -458,7 +468,8 @@ function WorldEditorSession({
       } : {}),
       ...(interactionsChanged ? { interactions: interactions ?? null,
         goalRules: { ...(proposal?.patch.goalRules ?? world.goalRules ?? { requiredCollectedIds: [], requiredActivatedIds: [] }),
-          requiredInteractionIds: (proposal?.patch.goalRules?.requiredInteractionIds ?? world.goalRules?.requiredInteractionIds ?? []).filter(id => interactions?.actions.some(action => action.id === id)) } } : {}),
+          requiredInteractionIds: (proposal?.patch.goalRules?.requiredInteractionIds ?? world.goalRules?.requiredInteractionIds ?? []).filter(id => interactions?.actions.some(action => action.id === id)),
+          requiredResourceIds: (proposal?.patch.goalRules?.requiredResourceIds ?? world.goalRules?.requiredResourceIds ?? []).filter(id => interactions?.objects.some(object => object.entityId === id && object.resource)) } } : {}),
     }),
     [
       world.id,
@@ -486,7 +497,7 @@ function WorldEditorSession({
   }).sort();
   const gateLinks = (entities: WorldEntity[], plan?: InteractionPlan) => [...new Set([
     ...entities.filter(entity => entity.kind === "lever" && entity.targetId).map(entity => entity.targetId),
-    ...(plan?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" ? [effect.entityId] : [])) ?? []),
+    ...(plan?.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" || effect.kind === "moveObject" ? [effect.entityId] : [])) ?? []),
   ])].sort();
   const nextLinks = gateLinks([...currentEntities, ...additions], interactions);
   const gateLinksChanged = JSON.stringify(nextLinks) !== JSON.stringify(gateLinks(world.entities, world.interactions));
@@ -533,6 +544,14 @@ function WorldEditorSession({
     }
     const p = point(e);
     if (!p.inside) return;
+    if (destinationPick) {
+      destinationPick.choose({
+        x: Math.round(limit(p.x - destinationPick.target.width / 2, 0, bounds.width - destinationPick.target.width)),
+        y: Math.round(limit(p.y - destinationPick.target.height / 2, 0, bounds.height - destinationPick.target.height)),
+      });
+      setDestinationPick(undefined);
+      return;
+    }
     setError("");
     setReviewed(false);
     const hit = [...editableEntities]
@@ -566,6 +585,14 @@ function WorldEditorSession({
     setDrag({ ...p, currentX: p.x, currentY: p.y });
   }
   function move(e: PointerEvent<SVGSVGElement>) {
+    if (destinationPick && !pan.current) {
+      const p = point(e);
+      setDestinationPick(current => current ? {...current, point: {
+        x: Math.round(limit(p.x - current.target.width / 2, 0, bounds.width - current.target.width)),
+        y: Math.round(limit(p.y - current.target.height / 2, 0, bounds.height - current.target.height)),
+      }} : current);
+      return;
+    }
     if (pan.current) {
       const initial = pan.current;
       const next = editorView(bounds, viewportSize, scale, {
@@ -588,6 +615,12 @@ function WorldEditorSession({
     }
     setDrag({ ...drag, currentX: p.x, currentY: p.y });
   }
+  function placementSize(config: {width: number; height: number}) {
+    if (!customArt) return config;
+    const ratio = Math.max(.04, Math.min(25, customArtAspect));
+    const height = Math.max(12, Math.round(180 / Math.max(1, ratio)));
+    return {width: Math.max(12, Math.round(height * ratio)), height};
+  }
   function up(e: PointerEvent<SVGSVGElement>) {
     if (pan.current) {
       stopPointer();
@@ -597,14 +630,15 @@ function WorldEditorSession({
     const p = point(e);
     if (!drag.id && tool !== "move") {
       const config = editorTools.find((t) => t.kind === tool)!;
+      const size = placementSize(config);
       const isClick = Math.hypot(p.x - drag.x, p.y - drag.y) * scale < 6;
       const width = limit(
-          isClick ? config.width : Math.abs(p.x - drag.x),
+          isClick ? size.width : Math.abs(p.x - drag.x),
           12,
           800,
         ),
         height = limit(
-          isClick ? config.height : Math.abs(p.y - drag.y),
+          isClick ? size.height : Math.abs(p.y - drag.y),
           12,
           300,
         );
@@ -647,25 +681,26 @@ function WorldEditorSession({
   function insertAtCenter() {
     if (tool === "move") return;
     const config = editorTools.find((t) => t.kind === tool)!;
+    const size = placementSize(config);
     const entity: WorldEntity = {
       id: `drawn-${crypto.randomUUID()}`,
       kind: tool,
       x: Math.round(
         limit(
-          view.x + view.width / 2 - config.width / 2,
+          view.x + view.width / 2 - size.width / 2,
           0,
-          bounds.width - config.width,
+          bounds.width - size.width,
         ),
       ),
       y: Math.round(
         limit(
-          view.y + view.height / 2 - config.height / 2,
+          view.y + view.height / 2 - size.height / 2,
           0,
-          bounds.height - config.height,
+          bounds.height - size.height,
         ),
       ),
-      width: config.width,
-      height: config.height,
+      width: size.width,
+      height: size.height,
       label: `New ${config.label.toLowerCase()}`,
       ...(tool === "coin" && mode === "platform"
         ? { art: "/art/seed.svg" }
@@ -683,6 +718,24 @@ function WorldEditorSession({
     requestAnimationFrame(() => canvas.current?.focus());
   }
   function canvasKey(event: KeyboardEvent<SVGSVGElement>) {
+    if (destinationPick) {
+      const shift: Record<string, [number, number]> = {ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1]};
+      const delta = shift[event.key];
+      if (delta) {
+        event.preventDefault();
+        const amount = event.shiftKey ? 1 : 10;
+        setDestinationPick(current => current ? {...current, point: {
+          x: limit(current.point.x + delta[0] * amount, 0, bounds.width - current.target.width),
+          y: limit(current.point.y + delta[1] * amount, 0, bounds.height - current.target.height),
+        }} : current);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation();
+        if (event.key === "Enter") destinationPick.choose(destinationPick.point);
+        setDestinationPick(undefined); return;
+      }
+    }
     if (event.key === " ") {
       event.preventDefault();
       setSpaceHeld(true);
@@ -774,7 +827,8 @@ function WorldEditorSession({
     const index = additions.findIndex(entity => entity.id === id);
     const entity = additions[index];
     if (!entity) return;
-    const linkedAction = interactions?.actions.find(action => action.toolId === id || action.targetId === id || action.effects?.some(effect => effect.kind === "openGate" && effect.entityId === id));
+    if (world.goalRules?.requiredResourceIds?.includes(id)) { setError("Remove this object's completion requirement before deleting it."); return; }
+    const linkedAction = interactions?.actions.find(action => action.toolId === id || action.targetId === id || action.requiresResourceIds?.includes(id) || action.effects?.some(effect => (effect.kind === "openGate" || effect.kind === "moveObject") && effect.entityId === id));
     if (linkedAction) { setError(`Remove the ability “${linkedAction.label}” before deleting ${title(entity)}.`); return; }
     const linked = editableEntities.find(other => other.targetId === id);
     if (linked) {
@@ -785,6 +839,8 @@ function WorldEditorSession({
     setRecovery({ action: "remove", entity, index, interactionsBefore: structuredClone(interactions) });
     setReviewed(false);
     setAdditions(items => items.filter(other => other.id !== id));
+    removeObjectAbilityDraft(world.id, world.revision, id);
+    setAbilityDraftDirty(pendingObjectAbilities(world.id, world.revision).length > 0);
     if (interactions?.objects.some(object => object.entityId === id)) setInteractions(plan => plan ? { ...plan, objects: plan.objects.filter(object => object.entityId !== id) } : undefined);
     if (selected === id) selectObject(null);
     setError("");
@@ -842,7 +898,7 @@ function WorldEditorSession({
           additions: submitted.additions, updates: submitted.updates, bounds: submitted.bounds, interactions: submitted.interactions, goalRules: submitted.goalRules }),
         signal: controller.signal,
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({error: "Artwork preparation could not be reached. Your draft is kept; try applying again."}));
       if (!response.ok) throw new Error(result.error || "The source artwork could not be prepared. Your draft is kept.");
       controller.signal.throwIfAborted();
       const prepared: PreparedScene = { sourceScenery: result.sourceScenery, ...(result.sourceLayers ? { sourceLayers: result.sourceLayers } : {}) };
@@ -875,6 +931,7 @@ function WorldEditorSession({
 
   async function apply() {
     if (preparingArtwork || artworkRequest.current) return;
+    if (abilityDraftDirty) { setError("Add your pending ability before applying, or discard the draft."); return; }
     const submitted = patch;
     try {
       if (revisedImage && !reviewed) throw new Error("Check your additions and connections before applying.");
@@ -885,6 +942,7 @@ function WorldEditorSession({
       applyWorldPatch(world, state, readyPatch);
       onApply(readyPatch);
       editorDrafts.delete(cacheKey);
+      clearObjectAbilityDrafts(world.id, world.revision);
     } catch (error) {
       if (sceneAlive.current && !(error instanceof DOMException && error.name === "AbortError")) setError(error instanceof Error ? error.message : "Your current world is safe. Try adjusting the change.");
     } finally { if (sceneAlive.current) setPreparingArtwork(false); }
@@ -1018,7 +1076,8 @@ function WorldEditorSession({
                   : "I checked the new objects, their placement, and interactions."}
               </label>
             )}
-            {(additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft) && <p className="editor-draft-note">Draft kept when you close. Apply to update your world.</p>}
+            {(additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft || abilityDraftDirty) && <p className="editor-draft-note">{abilityDraftDirty ? "Add your pending ability before applying. Your draft is kept." : "Draft kept when you close. Apply to update your world."}</p>}
+            {abilityDraftDirty && pendingObjectAbilities(world.id, world.revision).filter(id => id !== selected).map(id => <button key={id} className="text-button" onClick={() => selectObject(id)}>Finish ability for {editableEntities.find(entity => entity.id === id)?.label || "object"}</button>)}
             {recovery && <div className="editor-recovery" role="status">
               <span>{recovery.action === "reset" ? "Object changes reset." : "New object deleted."}</span>
               <button className="text-button" onClick={undoObjectAction}><Undo2 size={14} /> Undo</button>
@@ -1031,9 +1090,10 @@ function WorldEditorSession({
               >
                 <Undo2 size={15} /> Remove last addition
               </button>
-              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft}
+              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft && !abilityDraftDirty}
                 onClick={(event) => {
                   cancelArtwork();
+                  clearObjectAbilityDrafts(world.id, world.revision); setAbilityDraftDirty(false); setAbilityFormReset(value => value + 1);
                   setBounds({ width: world.width, height: world.height });
                   setAdditions([]); setModified({}); setInteractions(structuredClone(world.interactions)); setCustomArt(null); setSketchDraft(undefined); setRecovery(null);
                   setReviewed(false); selectObject(null); setError("");
@@ -1045,6 +1105,7 @@ function WorldEditorSession({
                 disabled={
                   (!additions.length && !changedCount && !expanded && !interactionsChanged) ||
                   preparingArtwork ||
+                  abilityDraftDirty ||
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
                 }
@@ -1220,6 +1281,7 @@ function WorldEditorSession({
           <div
             ref={viewport}
             className="editor-detail-viewport"
+            data-choosing-destination={Boolean(destinationPick)}
             data-pan={panMode || spaceHeld}
             data-panning={panning}
           >
@@ -1286,6 +1348,15 @@ function WorldEditorSession({
                   .map((e) => object(e))}
               </g>
               {additions.map((e) => object(e, true))}
+              {destinationPick && <g pointerEvents="none">
+                <line x1={destinationPick.target.x + destinationPick.target.width / 2} y1={destinationPick.target.y + destinationPick.target.height / 2}
+                  x2={destinationPick.point.x + destinationPick.target.width / 2} y2={destinationPick.point.y + destinationPick.target.height / 2}
+                  stroke="#4459ce" strokeWidth={2 / scale} strokeDasharray={`${6 / scale} ${5 / scale}`} />
+                <rect x={destinationPick.point.x} y={destinationPick.point.y} width={destinationPick.target.width} height={destinationPick.target.height}
+                  fill="#4459ce18" stroke="#4459ce" strokeWidth={2 / scale} rx={6 / scale}/>
+                {destinationPick.target.art && <image href={destinationPick.target.art} x={destinationPick.point.x} y={destinationPick.point.y}
+                  width={destinationPick.target.width} height={destinationPick.target.height} opacity=".55" preserveAspectRatio="xMidYMid meet" />}
+              </g>}
               {drag && !drag.id && (
                 <rect
                   x={Math.min(drag.x, drag.currentX)}
@@ -1306,7 +1377,9 @@ function WorldEditorSession({
             </span>
           </div>
           <span className="editor-canvas-caption">
-            {panMode
+            {destinationPick
+              ? "Choose a destination · Arrows to position · Enter to confirm · Esc to cancel"
+              : panMode
               ? "Drag to explore the world, or focus the canvas and use arrow keys. Fit world restores the overview."
               : item
                 ? "Arrows move · Shift for precision · Space to pan · F to focus"
@@ -1392,7 +1465,13 @@ function WorldEditorSession({
                     onChange={(e) => update({ label: e.target.value })}
                   />
                 </label>
-                <ObjectBehaviorEditor key={item.id} world={{...world, entities: [...currentEntities, ...additions]}} item={item} plan={interactions} onChange={setInteractions} onDraw={!existingSelected ? () => setDrawing(true) : undefined} />
+                <ObjectBehaviorEditor key={`${item.id}:${abilityFormReset}`} world={{...world, ...bounds, entities: [...currentEntities, ...additions]}} item={item} plan={interactions} onChange={setInteractions} onDraw={!existingSelected ? () => setDrawing(true) : undefined}
+                  onDraftChange={setAbilityDraftDirty} onCancelDestination={() => setDestinationPick(undefined)}
+                  onPickDestination={(target, choose) => {
+                    setPanMode(false); setTool("move"); setDrag(null);
+                    setDestinationPick({target, choose, point: {x: limit(target.x + target.width * 1.5, 0, bounds.width - target.width), y: target.y}});
+                    requestAnimationFrame(() => canvas.current?.focus({preventScroll: true}));
+                  }} />
                 {item.kind === "player" && <p className="editor-scope">Starting position · current run unchanged</p>}
                 <details className="editor-precision" key={item.id}>
                   <summary>Position &amp; size</summary>
@@ -1541,6 +1620,7 @@ function WorldEditorSession({
       </Modal>
       {drawing && (
         <SketchPad
+          title="Draw an object"
           resumeImage={sketchDraft}
           onPause={setSketchDraft}
           onClose={() => setDrawing(false)}
@@ -1549,11 +1629,11 @@ function WorldEditorSession({
               .then((ink) => {
                 if (item)
                   update({
-                    art: ink,
+                    art: ink.art,
                     artMethod: undefined,
                     artNote: undefined,
                   });
-                else { setCustomArt(ink); setTool("decoration"); }
+                else { setCustomArt(ink.art); setCustomArtAspect(ink.aspectRatio); setTool("decoration"); }
                 setSketchDraft(undefined);
                 setDrawing(false);
               })

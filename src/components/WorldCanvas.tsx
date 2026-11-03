@@ -22,6 +22,7 @@ import {
 } from "../../shared/world";
 import "./world-canvas-controls.css";
 import { objectName } from "../lib/object-name";
+import { safeAvailableInteractions } from "../../shared/interactions";
 import {
   diagnosticsEnabled,
   recordGameCreated,
@@ -36,7 +37,7 @@ export interface WorldCanvasHandle {
   explore: () => PlayState | undefined;
   touch: (key: keyof WorldControls, value: boolean) => void;
   selectDiscovery: (entityId: string) => boolean;
-  interactWithObject: (entityId: string) => boolean;
+  interactWithObject: (entityId: string, actionId?: string) => boolean;
   dropHeldObject: () => void;
   interactAt: (point: { x: number; y: number }) => boolean;
 }
@@ -66,6 +67,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       props.initial ?? emptyPlayState(),
     );
     const [selectedDiscovery, setSelectedDiscovery] = useState("");
+    const [selectedObjectAction, setSelectedObjectAction] = useState("");
     const mode = movementMode(props.world);
     const scene = useRef<WorldScene | undefined>(undefined);
     const startupFailed = useRef(false);
@@ -86,7 +88,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       () => ({
         selectDiscovery: (entityId) =>
           scene.current?.selectDiscovery(entityId) ?? false,
-        interactWithObject: (entityId) => scene.current?.interactWithObject(entityId) ?? false,
+        interactWithObject: (entityId, actionId) => scene.current?.interactWithObject(entityId, actionId) ?? false,
         dropHeldObject: () => scene.current?.dropHeldObject(),
         interactAt: (point) => scene.current?.interactAt(point) ?? false,
         snapshot: () =>
@@ -132,6 +134,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       let lastState = structuredClone(initial ?? emptyPlayState());
       setDiscoveryProgress(lastState);
       setSelectedDiscovery("");
+      setSelectedObjectAction("");
       function clearStartupWait() {
         clearTimeout(readyTimeout);
         clearTimeout(openingFeedback);
@@ -474,17 +477,25 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
             </details>
           </div>
         );
+    const objectActions = selectedDiscovery ? safeAvailableInteractions(props.world, discoveryProgress, selectedDiscovery) : [];
+    const chosenObjectAction = objectActions.length === 1 ? objectActions[0] : objectActions.find(action => action.id === selectedObjectAction);
     const objectControls = props.world.interactions && ready && !failed && (
       <details className="object-keyboard-play">
         <summary>Object controls</summary>
         <div>
           <label>Choose an object
-            <select aria-label="Choose interactive object" value={selectedDiscovery} onChange={event => setSelectedDiscovery(event.target.value)}>
+            <select aria-label="Choose interactive object" value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); }}>
               <option value="">Choose an object…</option>
               {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
             </select>
           </label>
-          <button disabled={!props.playing || !selectedDiscovery || (discoveryProgress.completed && !discoveryProgress.exploring)} onClick={() => scene.current?.interactWithObject(selectedDiscovery)}>Use object</button>
+          {objectActions.length > 1 && <label>Choose an action
+            <select aria-label="Choose object action" value={chosenObjectAction?.id ?? ""} onChange={event => setSelectedObjectAction(event.target.value)}>
+              <option value="">Choose an action…</option>
+              {objectActions.map(action => <option key={action.id} value={action.id}>{action.label}</option>)}
+            </select>
+          </label>}
+          <button disabled={!props.playing || !selectedDiscovery || (objectActions.length > 1 && !chosenObjectAction) || (discoveryProgress.completed && !discoveryProgress.exploring)} onClick={() => scene.current?.interactWithObject(selectedDiscovery, chosenObjectAction?.id)}>{chosenObjectAction?.label ?? "Use object"}</button>
           <button disabled={!props.playing || !discoveryProgress.interactions?.heldEntityId} onClick={() => scene.current?.dropHeldObject()}>Put back</button>
         </div>
       </details>

@@ -1,11 +1,14 @@
 import Phaser from "phaser";
-import { availableInteractions, interactionState, reduceInteraction } from "../../shared/interactions";
+import { objectName } from "../lib/object-name";
+import type { InteractionAction } from "../../shared/interactions";
+import { safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
 import type { PlayState, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 
 interface InteractionHost {
   state(): PlayState;
   change(state: PlayState): void;
+  settled(): void;
   player(): { x: number; y: number; flipX?: boolean } | undefined;
   playing(): boolean;
   approach(point: { x: number; y: number }): void;
@@ -23,10 +26,17 @@ export class ObjectInteractions {
   private e?: Phaser.Input.Keyboard.Key;
   private q?: Phaser.Input.Keyboard.Key;
   private pending = "";
+  private pendingActionId?: string;
   private queuedUse = false;
   private queuedReturn = false;
   private hover = "";
   private lastNotice = -10000;
+  private displayedQuantities = new Map<string, number>();
+  private movedObjects = new Map<string, { x: number; y: number; actionId: string }>();
+  private lastRenderTime = 0;
+  private pendingMotions = 0;
+  private actionMenu?: Phaser.GameObjects.Container;
+  private menuTarget = "";
   private tap?: { x: number; y: number; id: number };
 
   constructor(
@@ -85,8 +95,10 @@ export class ObjectInteractions {
       const point = pointer.positionToCamera(scene.cameras.main) as Phaser.Math.Vector2;
       const entity = this.objectAt(point);
       if (entity) this.interact(entity.id);
+      else this.closeChoices();
     });
     scene.input.on(Phaser.Input.Events.GAME_OUT, () => { this.hover = ""; this.tap = undefined; });
+    this.syncMoves(false);
     this.render();
   }
 
@@ -107,8 +119,13 @@ export class ObjectInteractions {
     return Math.hypot(Math.max(0, Math.abs(player.x - point.x) - size.width / 2), Math.max(0, Math.abs(player.y - point.y) - size.height / 2));
   }
   private objectAt(point: { x: number; y: number }) {
+    const state = interactionState(this.world, this.host.state());
+    const actions = safeAvailableInteractions(this.world, this.host.state());
     return (this.world.interactions?.objects ?? [])
       .map(o => this.entity(o.entityId)).filter((e): e is WorldEntity => Boolean(e))
+      // A fitted part must not block selecting the machine beneath it. Parts
+      // remain independently selectable when they are themselves usable targets.
+      .filter(e => !state.attachments[e.id] || actions.some(action => action.targetId === e.id))
       .filter(e => {
         const p = this.point(e), size = this.size(e);
         return Math.abs(point.x - p.x) <= size.width / 2 + 12 && Math.abs(point.y - p.y) <= size.height / 2 + 12;
@@ -119,58 +136,93 @@ export class ObjectInteractions {
   private choice(
     entity: WorldEntity,
     state = interactionState(this.world, this.host.state()),
-    actions = availableInteractions(this.world, this.host.state()),
+    actions = safeAvailableInteractions(this.world, this.host.state()),
   ) {
     const action = actions.find(action => action.targetId === entity.id);
     if (action) return { entity, action, label: action.label };
     const object = this.world.interactions?.objects.find(o => o.entityId === entity.id);
-    if (object?.carryable && !state.heldEntityId && !state.attachments[entity.id])
-      return { entity, action: undefined, label: `Take ${entity.label || "object"}` };
+    const toolHasActionHere = state.heldEntityId && this.world.interactions?.actions.some(candidate =>
+      candidate.toolId === state.heldEntityId && candidate.targetId === entity.id);
+    if (object?.carryable && state.heldEntityId !== entity.id && !state.attachments[entity.id] && !toolHasActionHere)
+      return { entity, action: undefined, label: `Take ${objectName(this.world, entity.id, 28)}` };
     return undefined;
   }
 
   context() {
     const state = interactionState(this.world, this.host.state());
-    const actions = availableInteractions(this.world, this.host.state());
+    if (this.hasPendingMotion() || (this.host.state().completed && !this.host.state().exploring)) return { heldEntityId: state.heldEntityId, label: "", nearby: undefined };
+    const actions = safeAvailableInteractions(this.world, this.host.state());
     const nearby = (this.world.interactions?.objects ?? [])
       .map(o => this.entity(o.entityId)).filter((e): e is WorldEntity => Boolean(e))
       .filter(e => this.distance(e) <= 100)
       .map(e => this.choice(e, state, actions)).filter((c): c is NonNullable<typeof c> => Boolean(c))
-      .sort((a, b) => Number(Boolean(b.action)) - Number(Boolean(a.action)) || this.distance(a.entity) - this.distance(b.entity))[0];
-    return { heldEntityId: state.heldEntityId, label: nearby?.label ?? "", nearby };
+      .sort((a, b) => Number(b.entity.id === this.hover) - Number(a.entity.id === this.hover) || Number(Boolean(b.action)) - Number(Boolean(a.action)) || this.distance(a.entity) - this.distance(b.entity))[0];
+    const count = nearby ? actions.filter(action => action.targetId === nearby.entity.id).length : 0;
+    return { heldEntityId: state.heldEntityId, label: count > 1 ? "Choose action" : nearby?.label ?? "", nearby };
   }
 
-  interact(id: string) {
-    if (!this.host.playing()) return false;
+  availableActions() {
+    if (this.hasPendingMotion()) return [];
+    return safeAvailableInteractions(this.world, this.host.state()).map(({ id, label, targetId }) => ({ id, label, targetId }));
+  }
+
+  interact(id: string, actionId?: string) {
+    if (!this.host.playing() || this.hasPendingMotion()) return false;
     const entity = this.entity(id);
     if (!entity || !this.world.interactions?.objects.some(o => o.entityId === id)) return false;
     if (this.distance(entity) > 100) {
       if (this.world.gameplay?.movement === "roam") {
         this.pending = id;
+        this.pendingActionId = actionId;
         this.host.approach(this.point(entity));
       } else this.notice("Move closer.");
       return true;
     }
     this.pending = "";
-    const choice = this.choice(entity);
+    this.pendingActionId = undefined;
+    const alternatives = safeAvailableInteractions(this.world, this.host.state()).filter(action => action.targetId === id);
+    if (!actionId && alternatives.length > 1) {
+      this.showChoices(entity, alternatives);
+      return true;
+    }
+    const selected = actionId ? alternatives.find(action => action.id === actionId) : undefined;
+    if (actionId && !selected) { this.notice("That action is not available now."); return true; }
+    this.closeChoices();
+    const choice = selected ? { entity, action: selected, label: selected.label } : this.choice(entity);
     if (!choice) {
       const held = interactionState(this.world, this.host.state()).heldEntityId;
       const action = this.world.interactions.actions.find(a => a.toolId === held && a.targetId === id);
       if (action) {
         const attempt = reduceInteraction(this.world, this.host.state(), { type: "perform", actionId: action.id });
-        this.notice(attempt.reason || "Already done.");
-      } else this.notice(held ? "Try another object. Q puts this one back." : "Find something you can use here.");
+        const prerequisite = action.requires?.find(required => !interactionState(this.world, this.host.state()).completed.includes(required));
+        const previous = this.world.interactions.actions.find(candidate => candidate.id === prerequisite);
+        this.notice(previous ? `First: ${previous.label}` : attempt.reason || "Already done.");
+      } else {
+        const state = interactionState(this.world, this.host.state());
+        const next = this.world.interactions.actions.find(candidate => candidate.targetId === id && !state.completed.includes(candidate.id));
+        const tool = next && this.entity(next.toolId);
+        this.notice(tool ? `Use ${objectName(this.world, tool.id, 28)} here.` : held ? "Q puts this object back." : "This object is ready.");
+      }
       return true;
     }
-    const result = reduceInteraction(this.world, this.host.state(), choice.action
+    const current = this.host.state();
+    const held = interactionState(this.world, current).heldEntityId;
+    // A deliberate click on another loose tool switches hands in one state
+    // change. Both commands validate before publishing; neither consumes stock.
+    const dropping = !choice.action && held && held !== id
+      ? reduceInteraction(this.world, current, { type: "drop" }) : undefined;
+    if (dropping && !dropping.ok) { this.notice(dropping.reason || "Try another object."); return true; }
+    const result = reduceInteraction(this.world, dropping?.state ?? current, choice.action
       ? { type: "perform", actionId: choice.action.id }
       : { type: "pickup", entityId: id });
     if (!result.ok) { this.notice(result.reason || "Try another object."); return true; }
+    this.syncMoves(true, result.state);
     this.host.change(result.state);
     if (result.event) {
       this.host.feedback(result.event.kind);
       if (choice.action) {
         this.pulse(entity);
+        if (result.event.toolId) this.toolGesture(result.event.toolId, result.event.kind);
         if (result.event.kind === "transfer" && result.event.toolId) this.transferTrail(result.event.toolId, entity);
         this.notice(`${choice.action.label} — done`, true);
       }
@@ -180,12 +232,54 @@ export class ObjectInteractions {
   }
 
   putBack() {
+    if (this.hasPendingMotion()) return;
     const result = reduceInteraction(this.world, this.host.state(), { type: "drop" });
     if (!result.ok || !this.host.playing()) return;
     this.pending = "";
+    this.pendingActionId = undefined;
+    this.closeChoices();
     this.host.change(result.state);
     this.host.feedback("drop");
     this.render();
+  }
+
+  private closeChoices() {
+    this.actionMenu?.destroy(true);
+    this.actionMenu = undefined;
+    this.menuTarget = "";
+  }
+
+  private showChoices(entity: WorldEntity, actions: InteractionAction[], page = 0) {
+    this.closeChoices();
+    this.menuTarget = entity.id;
+    const camera = this.scene.cameras.main, unit = 1 / Math.max(0.1, camera.zoom);
+    const container = this.scene.add.container(0, 0).setDepth(45).setScale(unit);
+    this.actionMenu = container;
+    const backdrop = this.scene.add.graphics();
+    container.add(backdrop);
+    let y = 10;
+    const addButton = (label: string, action: () => void) => {
+      const text = this.scene.add.text(12, y, label, { fontFamily: "Manrope, sans-serif", fontSize: "14px", color: "#ffffff", wordWrap: { width: 240 }, padding: { x: 6, y: 9 } })
+        .setInteractive({ useHandCursor: true });
+      text.setFixedSize(252, text.height);
+      text.on("pointerdown", (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => { this.tap = undefined; event.stopPropagation(); });
+      text.on("pointerup", (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => { this.tap = undefined; event.stopPropagation(); action(); });
+      text.on("pointerover", () => text.setColor("#8ae3ce"));
+      text.on("pointerout", () => text.setColor("#ffffff"));
+      container.add(text);
+      y += text.height + 3;
+    };
+    for (const action of actions.slice(page * 4, page * 4 + 4)) addButton(action.label, () => this.interact(entity.id, action.id));
+    if (page > 0) addButton("‹ Previous", () => this.showChoices(entity, actions, page - 1));
+    if ((page + 1) * 4 < actions.length) addButton("More ›", () => this.showChoices(entity, actions, page + 1));
+    addButton("Cancel", () => this.closeChoices());
+    backdrop.fillStyle(0x20323f, 0.98).fillRoundedRect(0, 0, 276, y + 6, 12);
+    backdrop.lineStyle(1, 0x698491, 0.7).strokeRoundedRect(0, 0, 276, y + 6, 12);
+    const p = this.point(entity);
+    container.setPosition(
+      Phaser.Math.Clamp(p.x - 138 * unit, camera.worldView.left + 12 * unit, camera.worldView.right - 288 * unit),
+      Phaser.Math.Clamp(p.y - (y + 20) * unit, camera.worldView.top + 12 * unit, camera.worldView.bottom - (y + 18) * unit));
+    this.prompt.setVisible(false);
   }
 
   private notice(message: string, force = false) {
@@ -201,15 +295,60 @@ export class ObjectInteractions {
     this.scene.tweens.add({ targets: circle, alpha: 0, scale: this.reducedMotion ? 1 : 1.25,
       duration: 420, onComplete: () => circle.destroy() });
   }
+  private toolGesture(toolId: string, kind: string) {
+    const art = this.art.get(toolId);
+    if (!art || this.reducedMotion || kind === "attach") return;
+    this.scene.tweens.killTweensOf(art);
+    art.setRotation(0);
+    this.scene.tweens.add({ targets: art, angle: kind === "transfer" ? -24 : 12,
+      duration: 160, yoyo: true, ease: "Sine.easeInOut" });
+  }
+
+  /** Receipts determine destination; animation is presentation, never saved state. */
+  hasPendingMotion() { return this.pendingMotions > 0; }
+
+  private syncMoves(animate: boolean, state = this.host.state()) {
+    const moves = interactionEffects(this.world, state).objectMoves;
+    for (const [id, move] of Object.entries(moves)) {
+      if (this.movedObjects.get(id)?.actionId === move.actionId) continue;
+      const entity = this.entity(id), art = this.art.get(id);
+      if (!entity || !art) continue;
+      const home = art.getData("home") as { x: number; y: number };
+      const position = { x: art.x, y: art.y, actionId: move.actionId };
+      const destination = { x: home.x + move.x - entity.x, y: home.y + move.y - entity.y };
+      this.movedObjects.set(id, position);
+      if (!animate || this.reducedMotion) Object.assign(position, destination);
+      else {
+        this.pendingMotions++;
+        this.scene.tweens.add({ targets: position, ...destination,
+          duration: move.durationMs ?? 900, ease: "Sine.easeInOut",
+          onComplete: () => {
+            this.pendingMotions--;
+            this.render();
+            this.pulse(entity);
+            if (!this.hasPendingMotion()) this.host.settled();
+          } });
+      }
+    }
+  }
+
   private transferTrail(toolId: string, target: WorldEntity) {
     if (this.reducedMotion) return;
     const tool = this.entity(toolId);
     if (!tool) return;
     const from = this.point(tool), to = this.point(target);
-    for (let i = 0; i < 4; i++) {
-      const dot = this.scene.add.circle(from.x, from.y, 4, 0x42bca4).setDepth(29);
-      this.scene.tweens.add({ targets: dot, x: to.x, y: to.y, alpha: 0.3,
-        delay: i * 65, duration: 360, ease: "Sine.easeInOut", onComplete: () => dot.destroy() });
+    const unit = 1 / Math.max(0.1, this.scene.cameras.main.zoom);
+    // Curved droplets make the direction readable without painting over the art.
+    for (let i = 0; i < 6; i++) {
+      const dot = this.scene.add.circle(from.x, from.y, 3 * unit, 0x239d88).setDepth(29);
+      const travel = { progress: 0 };
+      this.scene.tweens.add({ targets: travel, progress: 1,
+        delay: i * 45, duration: 380, ease: "Sine.easeInOut",
+        onUpdate: () => {
+          const t = travel.progress;
+          dot.setPosition(Phaser.Math.Linear(from.x, to.x, t), Phaser.Math.Linear(from.y, to.y, t) - Math.sin(t * Math.PI) * 22 * unit);
+          dot.setAlpha(1 - Math.max(0, t - 0.75) * 3);
+        }, onComplete: () => dot.destroy() });
     }
   }
 
@@ -227,7 +366,7 @@ export class ObjectInteractions {
     }
     if (this.pending) {
       const pending = this.entity(this.pending);
-      if (pending && this.distance(pending) <= 100) this.interact(pending.id);
+      if (pending && this.distance(pending) <= 100) this.interact(pending.id, this.pendingActionId);
     }
   }
 
@@ -236,6 +375,8 @@ export class ObjectInteractions {
     const player = this.host.player();
     const camera = this.scene.cameras.main;
     const unit = 1 / Math.max(0.1, camera.zoom);
+    const delta = Math.min(64, Math.max(0, this.scene.time.now - this.lastRenderTime));
+    this.lastRenderTime = this.scene.time.now;
     for (const [id, art] of this.art) {
       const home = art.getData("home") as { x: number; y: number; width: number; height: number };
       if (state.heldEntityId === id) {
@@ -244,12 +385,28 @@ export class ObjectInteractions {
         if (player) art.setPosition(player.x + (player.flipX ? -1 : 1) * 42, player.y - 34);
         else art.setPosition(camera.worldView.centerX, camera.worldView.bottom - 58 * unit);
       } else if (state.attachments[id]) {
-        const target = this.entity(state.attachments[id]);
-        if (!target) continue;
-        const point = target.kind === "player" && player ? player : this.point(target);
-        const scale = Math.min(1, Math.max(target.width, target.height) * 0.5 / Math.max(home.width, home.height));
-        art.setDisplaySize(home.width * scale, home.height * scale).setPosition(point.x + target.width * 0.25, point.y + target.height * 0.2).setDepth(23);
-      } else art.setPosition(home.x, home.y).setDisplaySize(home.width, home.height).setDepth(16);
+        // Attached art is placed after all moving targets have updated below.
+        continue;
+      } else {
+        const position = this.movedObjects.get(id) ?? home;
+        art.setPosition(position.x, position.y).setDisplaySize(home.width, home.height).setDepth(16);
+      }
+    }
+    for (const [id, targetId] of Object.entries(state.attachments)) {
+      const art = this.art.get(id), target = this.entity(targetId);
+      if (!art || !target) continue;
+      const home = art.getData("home") as { width: number; height: number };
+      const point = this.point(target);
+      const scale = Math.min(1, Math.max(target.width, target.height) * 0.5 / Math.max(home.width, home.height));
+      const targetSize = this.size(target);
+      const attachedHeight = home.height * scale;
+      // Keep equipment on the player; mount independent inventions above the
+      // receiving object's silhouette so thin original ink remains legible.
+      art.setDisplaySize(home.width * scale, attachedHeight)
+        .setPosition(point.x + targetSize.width * 0.15,
+          target.kind === "player" ? point.y + target.height * 0.2
+            : point.y - attachedHeight / 2)
+        .setDepth(23);
     }
     this.marks.clear();
     this.focus.clear();
@@ -258,27 +415,91 @@ export class ObjectInteractions {
       const entity = this.entity(object.entityId);
       if (!entity) continue;
       const point = this.point(entity), width = 40 * unit, height = 5 * unit;
-      const x = point.x - width / 2, y = point.y + Math.min(entity.height / 2, 52) + 10 * unit;
+      const x = point.x - width / 2, y = point.y + Math.min(this.size(entity).height / 2, 52 * unit) + 10 * unit;
       this.marks.fillStyle(0x1d3041, 0.85).fillRoundedRect(x - 2 * unit, y - 2 * unit, width + 4 * unit, height + 4 * unit, 4 * unit);
-      const fraction = Math.max(0, Math.min(1, (state.quantities[entity.id] ?? 0) / object.resource.capacity));
+      const actual = state.quantities[entity.id] ?? 0;
+      const previous = this.displayedQuantities.get(entity.id) ?? actual;
+      const displayed = this.reducedMotion || Math.abs(actual - previous) < 0.01 ? actual
+        : Phaser.Math.Linear(previous, actual, 1 - Math.exp(-delta / 105));
+      this.displayedQuantities.set(entity.id, displayed);
+      const fraction = Math.max(0, Math.min(1, displayed / object.resource.capacity));
       this.marks.fillStyle(0x5bd6bb, 1).fillRoundedRect(x, y, width * fraction, height, 2 * unit);
     }
-    if (!this.host.playing()) { this.prompt.setVisible(false); return; }
+    // A check means the target's required work is done, not merely that one
+    // transfer occurred. Partial receivers retain only their honest fill meter.
+    const actions = this.world.interactions?.actions ?? [];
+    const requiredActions = new Set(this.world.goalRules?.requiredInteractionIds ?? []);
+    const completedTargets = new Set(actions
+      .filter(action => state.completed.includes(action.id))
+      .map(action => action.targetId)
+      .filter(id => {
+        const resource = this.world.interactions?.objects.find(object => object.entityId === id)?.resource;
+        if (resource && (state.quantities[id] ?? 0) < resource.capacity) return false;
+        return actions.filter(action => action.targetId === id && requiredActions.has(action.id))
+          .every(action => state.completed.includes(action.id));
+      }));
+    for (const id of completedTargets) {
+      const entity = this.entity(id);
+      if (!entity) continue;
+      const p = this.point(entity), size = this.size(entity);
+      const x = p.x + Math.min(size.width / 2, 50 * unit), y = p.y - Math.min(size.height / 2, 50 * unit);
+      this.marks.fillStyle(0xeffaf5, 0.96).fillCircle(x, y, 7 * unit);
+      this.marks.lineStyle(1.8 * unit, 0x23846e, 1).beginPath()
+        .moveTo(x - 3 * unit, y).lineTo(x - unit, y + 2 * unit).lineTo(x + 3 * unit, y - 2 * unit).strokePath();
+    }
+    if (!this.host.playing()) { this.prompt.setVisible(false); this.closeChoices(); return; }
+    if (this.actionMenu) {
+      const target = this.entity(this.menuTarget);
+      if (!target || this.distance(target) > 100) this.closeChoices();
+      else { this.prompt.setVisible(false); return; }
+    }
+    if (this.hasPendingMotion()) { this.prompt.setVisible(false); return; }
+    if (this.hover) {
+      const pointer = this.scene.input.activePointer;
+      const point = pointer.positionToCamera(camera) as Phaser.Math.Vector2;
+      this.hover = this.objectAt(point)?.id ?? "";
+    }
     const context = this.context();
+    const available = safeAvailableInteractions(this.world, this.host.state());
+    // Held tools reveal only targets that can really accept them now.
+    for (const id of new Set(available.map(action => action.targetId))) {
+      const entity = this.entity(id);
+      if (!entity) continue;
+      this.targetCorners(entity, unit, 0x218b77, 0.8);
+    }
     const focused = (this.hover !== state.heldEntityId ? this.entity(this.hover) : undefined) ?? context.nearby?.entity;
-    if (focused) {
-      const point = this.point(focused);
-      const size = this.size(focused);
-      const radius = Math.max(16 * unit, Math.min(90, Math.max(size.width, size.height) / 2 + 8));
-      this.focus.lineStyle(2 * unit, 0x254552, 0.8).strokeCircle(point.x, point.y, radius);
-      this.focus.lineStyle(1 * unit, 0xf1faf5, 0.9).strokeCircle(point.x, point.y, radius + 2 * unit);
+    if (focused && !available.some(action => action.targetId === focused.id)) {
+      this.targetCorners(focused, unit, 0x355b69, 0.8);
     }
     if (context.nearby) {
       const point = this.point(context.nearby.entity);
-      this.prompt.setText(`E  ${context.label}`).setScale(unit).setPosition(
-        Phaser.Math.Clamp(point.x, camera.worldView.left + 100 * unit, camera.worldView.right - 100 * unit),
-        Math.max(camera.worldView.top + 45 * unit, point.y - Math.min(70, context.nearby.entity.height / 2) - 12 * unit),
+      this.prompt.setText(`E  ${context.label}`).setScale(unit);
+      const half = Math.min(camera.worldView.width / 2, (this.prompt.width / 2 + 12) * unit);
+      this.prompt.setPosition(
+        Phaser.Math.Clamp(point.x, camera.worldView.left + half, camera.worldView.right - half),
+        Math.max(camera.worldView.top + (this.prompt.height + 12) * unit,
+          point.y - this.size(context.nearby.entity).height / 2 - 12 * unit),
       ).setVisible(true);
+    } else if (state.heldEntityId && !available.length) {
+      const tool = this.entity(state.heldEntityId);
+      if (tool) {
+        const point = this.point(tool);
+        this.prompt.setText("Q  Put back").setScale(unit).setPosition(
+          Phaser.Math.Clamp(point.x, camera.worldView.left + 75 * unit, camera.worldView.right - 75 * unit),
+          Math.max(camera.worldView.top + 45 * unit, point.y - 55 * unit)).setVisible(true);
+      }
     } else this.prompt.setVisible(false);
+  }
+
+  private targetCorners(entity: WorldEntity, unit: number, color: number, alpha: number) {
+    const point = this.point(entity), size = this.size(entity);
+    const w = Math.max(20 * unit, size.width / 2 + 7 * unit);
+    const h = Math.max(20 * unit, size.height / 2 + 7 * unit);
+    const length = 9 * unit;
+    this.focus.lineStyle(2 * unit, color, alpha);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const x = point.x + sx * w, y = point.y + sy * h;
+      this.focus.beginPath().moveTo(x - sx * length, y).lineTo(x, y).lineTo(x, y - sy * length).strokePath();
+    }
   }
 }

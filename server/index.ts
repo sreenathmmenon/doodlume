@@ -14,7 +14,8 @@ import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
 import { loadLocalProviderKeys } from "./credentials.js";
 import { segmentationConnection, segmentationConfigured } from "./segmentation.js";
-import { closeLocalSegmentationWorkers } from "./local-segmentation.js";
+import { prepareSourceInteractionReview } from "./creative-adaptation.js";
+import { closeLocalSegmentationWorkers, localSegmentationConfig } from "./local-segmentation.js";
 import { installStudioFallback } from "./static-routing.js";
 import { installSourceScenery } from "./source-scenery-route.js";
 
@@ -170,6 +171,20 @@ for (const action of ["interpret", "amend"] as const)
       inFlight = false;
     }
   });
+app.post<{Body:{world?:unknown}}>("/api/source-review",async(request,reply)=>{
+  if(inFlight)return reply.code(429).send({error:"Another image is being prepared. Your review is still here."});
+  const local=localSegmentationConfig(process.env);
+  if(!local.configured)return reply.code(503).send({error:"Local source cutouts are unavailable. Your corrected selections are still here."});
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),120000);
+  const onClose=()=>{if(!reply.raw.writableFinished)controller.abort();};
+  reply.raw.on("close",onClose);inFlight=true;
+  try{return {world:await prepareSourceInteractionReview(request.body?.world,{enabled:true,apiKey:"",provider:"local-sam2",local},controller.signal)};}
+  catch(error){
+    if(error instanceof RecognitionReviewError)return reply.code(422).send({error:error.message,recovery:error.recovery});
+    if(error instanceof InterpretationError)return reply.code(error.status).send({error:error.message});
+    return reply.code(controller.signal.aborted?504:422).send({error:"The corrected source could not be prepared. Your selections and game rules are still here."});
+  }finally{clearTimeout(timeout);reply.raw.off("close",onClose);inFlight=false;}
+});
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof CaptureError)
     return reply.code(error.status).send({ error: error.message });

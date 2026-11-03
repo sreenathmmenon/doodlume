@@ -18,6 +18,8 @@ export function WorldRulesSummary({
   const destinations = world.entities.filter(
     (entity) => entity.kind === "goal",
   );
+  const resourceGoals = world.goalRules?.requiredResourceIds ?? [];
+  const requiredCount = required.size + resourceGoals.length;
   const describe = (id: string) =>
     world.interactions?.actions.find((action) => action.id === id)?.label ??
     `${world.entities.find((entity) => entity.id === id)?.kind === "lever" ? "Use" : "Collect"} ${objectiveObjectLabel(world, id)}`;
@@ -41,20 +43,20 @@ export function WorldRulesSummary({
           <dt>Finish</dt>
           <dd>
             {destinations.length
-              ? `Reach ${destinations.map((entity, index) => entity.label?.trim() || `Destination ${index + 1}`).join(" or ")}${required.size ? " after the required actions." : "."}`
-              : required.size && world.interactions ? "Complete the required actions." : "Explore freely. Add a destination to give this world a finish."}
+              ? `Reach ${destinations.map((entity, index) => entity.label?.trim() || `Destination ${index + 1}`).join(" or ")}${requiredCount ? " after meeting the requirements." : "."}`
+              : requiredCount && world.interactions ? "Meet the requirements below." : "Explore freely. Add a destination to give this world a finish."}
           </dd>
         </div>
         <div>
           <dt>Required</dt>
           <dd>
-            {required.size
-              ? <ul className="required-object-list">{[...required].map((id) => <li key={id}>{describe(id)}</li>)}</ul>
+            {requiredCount
+              ? <ul className="required-object-list">{[...required].map((id) => <li key={`action-${id}`}>{describe(id)}</li>)}{resourceGoals.map(id => <li key={`resource-${id}`}>Fill {objectiveObjectLabel(world, id)} · {world.interactions?.objects.find(object => object.entityId === id)?.resource?.capacity} {world.interactions?.objects.find(object => object.entityId === id)?.resource?.type.replaceAll("-", " ")}</li>)}</ul>
               : "All actions are optional."}
           </dd>
         </div>
         {optional.length > 0 && <div>
-          <dt>Optional</dt>
+          <dt>{resourceGoals.length ? "Available actions" : "Optional"}</dt>
           <dd>{optional.join(" · ")}</dd>
         </div>}
       </dl>

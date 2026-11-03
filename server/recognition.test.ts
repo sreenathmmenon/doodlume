@@ -132,7 +132,7 @@ test("image-native discovery and exploration preserve source geometry, aspect an
           } });
       }, "picture");
     assert.equal(calls, 1);
-    assert.deepEqual(world.goalRules, { requiredCollectedIds: ["red"], requiredActivatedIds: ["button"] });
+    assert.deepEqual(world.goalRules, { requiredCollectedIds: ["red"], requiredActivatedIds: ["button"], requiredResourceIds: [] });
     assert.equal(world.gameplay?.movement, movement);
     assert.equal(world.width / world.height, .5);
     assert.deepEqual(setupFeedback(world).errors, []);
@@ -217,7 +217,7 @@ test("source platform assembly keeps actual surfaces and causal source links wit
   }
   assert.equal(world.entities.filter(entity => entity.kind === "player").length, 1);
   assert.equal(world.entities.find(entity => entity.id === "switch")!.targetId, "gate");
-  assert.deepEqual(world.goalRules, { requiredCollectedIds: ["star"], requiredActivatedIds: ["switch"] });
+  assert.deepEqual(world.goalRules, { requiredCollectedIds: ["star"], requiredActivatedIds: ["switch"], requiredResourceIds: [] });
   assert.ok(world.entities.find(entity => entity.id === "star")!.art);
   const finish = world.entities.find(entity => entity.id === "star-finish")!;
   assert.equal(finish.art, undefined);

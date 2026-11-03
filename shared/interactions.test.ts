@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyPlayState, goalProgress, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "./world.js";
-import { availableInteractions, interactionEffects, interactionState, reduceInteraction, type InteractionCommand } from "./interactions.js";
+import { availableInteractions, safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction, type InteractionCommand } from "./interactions.js";
 import { applyWorldPatch, undoWorldPatch } from "./revisions.js";
 import { validSavedWorlds } from "../src/lib/library.js";
 
@@ -48,6 +48,11 @@ test("transfer conserves resources, enforces possession/capacity, and rejects at
     assert.equal(result.ok, false);
     assert.equal(result.state, s);
   }
+  const held = step(w, start, {type: "pickup", entityId: "supply"});
+  const trapped = reduceInteraction(w, held, {type: "perform", actionId: "extra"});
+  assert.equal(trapped.ok, false, "An optional transfer must not spend the required supply.");
+  assert.equal(trapped.state, held);
+  assert.match(trapped.reason!, /block completion/);
   assert.deepEqual(start, emptyPlayState());
   assert.equal(availableInteractions(w, s).length, 0);
 });
@@ -138,4 +143,124 @@ test("malformed plans, cycles, false capabilities and incompatible resources are
   assert.equal(playing.completed, false);
   assert.equal(goalProgress(free, playing).total, 0);
   assert.equal(playing.interactions!.heldEntityId, "supply");
+});
+
+test("a newly drawn part moves the original prop after earned tasks and survives save/undo without rewriting its source", () => {
+  const episode = world();
+  const vehicle = episode.entities.find(e => e.id === "receiver")!;
+  vehicle.art = "/art/seed.svg"; // Fixture artwork; no inference or real repair is claimed.
+  const attachment = episode.interactions!.actions.find(a => a.id === "fit")!;
+  attachment.effects = [{kind: "moveObject", entityId: "receiver", x: 700, y: 180, durationMs: 900}];
+  validateWorld(episode);
+  const base = structuredClone(episode);
+  base.entities = base.entities.filter(e => e.id !== "part");
+  base.interactions!.objects = base.interactions!.objects.filter(o => o.entityId !== "part");
+  base.interactions!.actions = base.interactions!.actions.filter(a => a.id !== "fit");
+  base.goalRules!.requiredInteractionIds = ["fill"];
+  const earned = {...filled(base), completed: true};
+  const revised = applyWorldPatch(base, earned, {id: "invention",worldId:base.id,baseRevision:base.revision,origin:"manual",
+    additions:[episode.entities.find(e=>e.id==="part")!],interactions:episode.interactions,goalRules:episode.goalRules});
+  assert.deepEqual(revised.state.interactions!.completed,["fill"]);
+  assert.equal(revised.state.completed, true, "Earlier completion remains earned.");
+  assert.equal(revised.state.exploring, true, "New required invention remains playable after completion.");
+  assert.deepEqual(interactionEffects(revised.world,revised.state).objectMoves,{});
+  const invalid = reduceInteraction(revised.world,revised.state,{type:"perform",actionId:"fit"});
+  assert.equal(invalid.ok,false);
+  assert.equal(invalid.state,revised.state);
+  let state = step(revised.world,revised.state,{type:"drop"});
+  state = step(revised.world,state,{type:"pickup",entityId:"part"});
+  state = step(revised.world,state,{type:"perform",actionId:"fit"});
+  assert.deepEqual(interactionEffects(revised.world,state).objectMoves,{receiver:{x:700,y:180,durationMs:900,actionId:"fit"}});
+  assert.equal(goalProgress(revised.world,state).ready,true);
+  assert.deepEqual(revised.world.entities.find(e=>e.id==="receiver"),vehicle);
+  const restored=validSavedWorlds(JSON.parse(JSON.stringify([{world:revised.world,state,savedAt:new Date().toISOString()}])))[0];
+  assert.deepEqual(interactionEffects(restored.world,restored.state).objectMoves,interactionEffects(revised.world,state).objectMoves);
+  const continuation = structuredClone(revised.world.interactions!);
+  continuation.objects.push({entityId:"return-part",carryable:true});
+  // Deliberately put the later action first: receipt order, not array order, wins.
+  continuation.actions.unshift({id:"return",kind:"attach",label:"Return home",toolId:"return-part",targetId:"receiver",requires:["fit"],effects:[{kind:"moveObject",entityId:"receiver",x:vehicle.x,y:vehicle.y}]});
+  const extended=applyWorldPatch(revised.world,state,{id:"next-invention",worldId:revised.world.id,baseRevision:revised.world.revision,origin:"manual",
+    additions:[{id:"return-part",kind:"decoration",x:900,y:200,width:35,height:35,art:"/art/seed.svg"}],interactions:continuation,
+    goalRules:{...revised.world.goalRules!,requiredInteractionIds:["fill","fit","return"]}});
+  let continued=step(extended.world,extended.state,{type:"pickup",entityId:"return-part"});
+  continued=step(extended.world,continued,{type:"perform",actionId:"return"});
+  assert.deepEqual(interactionEffects(extended.world,continued).objectMoves.receiver,{x:vehicle.x,y:vehicle.y,durationMs:900,actionId:"return"});
+  const reopened=validSavedWorlds(JSON.parse(JSON.stringify([{world:extended.world,state:continued,savedAt:new Date().toISOString()}])))[0];
+  assert.equal(interactionEffects(reopened.world,reopened.state).objectMoves.receiver.actionId,"return");
+  const previousTrip=undoWorldPatch(extended.world,continued,extended.checkpoint);
+  assert.equal(interactionEffects(previousTrip.world,previousTrip.state).objectMoves.receiver.actionId,"fit");
+  for(const change of [
+    (w:WorldDefinition)=>{w.interactions!.actions[0].requires=[];},
+    (w:WorldDefinition)=>{w.interactions!.actions[0].effects=[{kind:"moveObject",entityId:"receiver",x:700,y:180}];},
+    (w:WorldDefinition)=>{w.interactions!.actions[0].effects!.push({kind:"moveObject",entityId:"receiver",x:600,y:180});},
+  ]){const invalid=structuredClone(extended.world);change(invalid);assert.throws(()=>validateWorld(invalid));}
+  const undone=undoWorldPatch(revised.world,state,revised.checkpoint);
+  assert.deepEqual(interactionEffects(undone.world,undone.state).objectMoves,{});
+  assert.deepEqual(undone.state.interactions!.quantities,{supply:4,receiver:6});
+  for (const change of [
+    (w:WorldDefinition)=>{w.entities.find(e=>e.id==="receiver")!.art=undefined;},
+    (w:WorldDefinition)=>{w.interactions!.objects.find(o=>o.entityId==="receiver")!.carryable=true;},
+    (w:WorldDefinition)=>{w.interactions!.actions.find(a=>a.id==="fit")!.effects=[{kind:"moveObject",entityId:"receiver",x:1430,y:180}];},
+  ]) {const invalid=structuredClone(episode);change(invalid);assert.throws(()=>validateWorld(invalid));}
+});
+
+
+test("resource goals accept either ordering but prevent optional depletion and require simultaneous final levels", () => {
+  const w = world();
+  w.goalRules!.requiredInteractionIds = [];
+  w.goalRules!.requiredResourceIds = ["receiver"];
+  w.interactions!.objects.find(o => o.entityId === "receiver")!.carryable = true;
+  w.interactions!.objects.find(o => o.entityId === "part")!.resource = {type:"charge",capacity:10,initial:0};
+  w.interactions!.actions = [
+    {id:"six",kind:"transfer",label:"Transfer six",toolId:"supply",targetId:"receiver",amount:6},
+    {id:"four",kind:"transfer",label:"Transfer four",toolId:"supply",targetId:"receiver",amount:4},
+    {id:"waste",kind:"transfer",label:"Optional transfer",toolId:"supply",targetId:"part",amount:1},
+    {id:"drain",kind:"transfer",label:"Take one back",toolId:"receiver",targetId:"supply",amount:1},
+  ];
+  validateWorld(w);
+  for (const order of [["six","four"],["four","six"]]) {
+    let state = step(w,emptyPlayState(),{type:"pickup",entityId:"supply"});
+    assert.equal(reduceInteraction(w,state,{type:"perform",actionId:"waste"}).ok,false);
+    assert.deepEqual(safeAvailableInteractions(w,state).map(action=>action.id),["six","four"]);
+    assert.deepEqual(safeAvailableInteractions(w,{...state,player:{x:99,y:99}},"part"),[],"Movement cannot expose an unsafe target.");
+    assert.equal(goalProgress(w,state).ready,false);
+    for (const actionId of order) state=step(w,state,{type:"perform",actionId});
+    assert.equal(goalProgress(w,state).ready,true);
+    assert.equal(goalProgress(w,state).total,1);
+    state=step(w,step(w,state,{type:"drop"}),{type:"pickup",entityId:"receiver"});
+    assert.equal(reduceInteraction(w,state,{type:"perform",actionId:"drain"}).ok,false);
+  }
+  const optional=structuredClone(w); optional.goalRules!.requiredResourceIds=[];
+  const holding=step(optional,emptyPlayState(),{type:"pickup",entityId:"supply"});
+  assert.equal(safeAvailableInteractions(optional,holding).some(action=>action.id==="waste"),true);
+  optional.goalRules!.requiredResourceIds=["receiver"];
+  assert.equal(safeAvailableInteractions(optional,holding).some(action=>action.id==="waste"),false,"Edited goals invalidate eligibility cache.");
+  optional.goalRules!.requiredResourceIds=[];
+  const spent=step(optional,step(optional,emptyPlayState(),{type:"pickup",entityId:"supply"}),{type:"perform",actionId:"waste"});
+  assert.throws(()=>applyWorldPatch(optional,spent,{id:"new-goal",worldId:optional.id,baseRevision:optional.revision,origin:"manual",additions:[],goalRules:w.goalRules}),/current supplies/);
+  assert.deepEqual(spent.interactions!.completed,["waste"]);
+  const readiness=structuredClone(w);
+  readiness.goalRules!.requiredInteractionIds=["finish"];
+  readiness.interactions!.actions.push({id:"finish",kind:"attach",label:"Fit the charged mechanism",toolId:"part",targetId:"receiver",requiresResourceIds:["receiver"],effects:[{kind:"openGate",entityId:"barrier"}]});
+  validateWorld(readiness);
+  let waiting=step(readiness,emptyPlayState(),{type:"pickup",entityId:"part"});
+  const premature=reduceInteraction(readiness,waiting,{type:"perform",actionId:"finish"});
+  assert.equal(premature.ok,false);
+  assert.equal(premature.state,waiting);
+  assert.match(premature.reason!,/Fill/);
+  assert.equal(safeAvailableInteractions(readiness,waiting).length,0);
+  waiting=step(readiness,step(readiness,waiting,{type:"drop"}),{type:"pickup",entityId:"supply"});
+  waiting=step(readiness,waiting,{type:"perform",actionId:"four"});
+  waiting=step(readiness,waiting,{type:"perform",actionId:"six"});
+  waiting=step(readiness,step(readiness,waiting,{type:"drop"}),{type:"pickup",entityId:"part"});
+  assert.deepEqual(safeAvailableInteractions(readiness,waiting).map(action=>action.id),["finish"]);
+  waiting=step(readiness,waiting,{type:"perform",actionId:"finish"});
+  assert.equal(goalProgress(readiness,waiting).ready,true);
+  assert.deepEqual(interactionEffects(readiness,waiting).openGateIds,["barrier"]);
+  const invalidReadiness=structuredClone(readiness);invalidReadiness.interactions!.actions.at(-1)!.requiresResourceIds=["unknown"];
+  assert.throws(()=>validateWorld(invalidReadiness),/readiness condition/);
+  const invalid=structuredClone(w); invalid.goalRules!.requiredResourceIds=["receiver","part"];
+  assert.throws(()=>validateWorld(invalid),/cannot be completed/);
+  invalid.goalRules!.requiredResourceIds=["unknown"];
+  assert.throws(()=>validateWorld(invalid),/resource task/);
 });

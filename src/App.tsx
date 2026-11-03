@@ -981,7 +981,7 @@ export default function App({ active = true }: { active?: boolean }) {
         : creationStyle === "roam"
           ? "Make an Explore game: a character moves freely in all directions through this scene. "
           : creationStyle === "discover"
-            ? "Make a Discover game: interactive clues in the original image, without a separate avatar. "
+            ? "Use direct point-and-click play in the original image, without a separate avatar. Let objects support the requested actions. "
             : "";
     return prefix + intent.trim();
   }
@@ -1001,6 +1001,7 @@ export default function App({ active = true }: { active?: boolean }) {
   ).length;
   const destination = world.entities.find((entity) => entity.kind === "goal");
   const finalClueRemaining = mode === "discover" && !world.interactions && objective.ready && !metrics.completed && Boolean(destination);
+  const nextRequiredAction = world.interactions?.actions.find(action => world.goalRules?.requiredInteractionIds?.includes(action.id) && !latestState.current.interactions?.completed.includes(action.id));
   const completionTitle = objective.ready ? `${world.name} complete` : "Earlier completion retained";
   const completionDetail = objective.ready
     ? destination
@@ -1010,11 +1011,13 @@ export default function App({ active = true }: { active?: boolean }) {
   const missionText =
     metrics.completed && !metrics.exploring
       ? completionTitle
-      : metrics.exploring
+      : metrics.exploring && objective.ready
         ? "Explore freely or keep creating"
+        : metrics.exploring && nextRequiredAction
+          ? nextRequiredAction.label
         : finalClueRemaining && destination
           ? `Find ${objectName(world, destination.id, 70)}`
-        : mode === "discover" && started
+        : mode === "discover" && started && !world.interactions
           ? metrics.interactionHint ||
             metrics.goalHint ||
             world.gameplay?.objectiveTitle ||
@@ -1175,7 +1178,7 @@ export default function App({ active = true }: { active?: boolean }) {
           <Sparkles size={15} aria-hidden="true" />
         </div>
         <details className="creation-gameplay-options">
-          <summary>Gameplay <span>{creationStyle === "auto" ? "Auto" : creationStyle === "platform" ? "Adventure" : creationStyle === "roam" ? "Explore" : "Discover"}</span></summary>
+          <summary>Gameplay <span>{creationStyle === "auto" ? "Auto" : creationStyle === "platform" ? "Adventure" : creationStyle === "roam" ? "Explore" : "Hands-on"}</span></summary>
         <fieldset className="creation-modes" disabled={busy} aria-describedby="creation-mode-description">
           <legend>Gameplay</legend>
           <div>
@@ -1184,7 +1187,7 @@ export default function App({ active = true }: { active?: boolean }) {
                 ["auto", "Auto"],
                 ["platform", "Adventure"],
                 ["roam", "Explore"],
-                ["discover", "Discover"],
+                ["discover", "Hands-on"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -1204,7 +1207,7 @@ export default function App({ active = true }: { active?: boolean }) {
                 ? "Move, jump, and reach a destination."
                 : creationStyle === "roam"
                   ? "Explore the scene freely with a character."
-                  : "Find clues in the image, without a character."}
+                  : "Interact with objects directly, without steering a character."}
           </p>
         </fieldset>
         </details>
@@ -1493,7 +1496,7 @@ export default function App({ active = true }: { active?: boolean }) {
                         className="play-orb"
                         onClick={start}
                         aria-label={
-                          metrics.exploring
+                          metrics.exploring && objective.ready
                             ? "Continue exploring"
                             : started
                               ? `Resume ${modeLabel.toLowerCase()}`
@@ -1501,7 +1504,7 @@ export default function App({ active = true }: { active?: boolean }) {
                         }
                       >
                         <Play size={20} fill="currentColor" />
-                        {metrics.exploring ? "Continue exploring" : started ? "Resume" : "Play world"}
+                        {metrics.exploring && objective.ready ? "Continue exploring" : started ? "Resume" : "Play world"}
                       </button>
                       {!started && !metrics.exploring && (
                         <span className="play-subcaption">{world.gameplay?.instructions || world.description}</span>

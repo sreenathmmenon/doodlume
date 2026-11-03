@@ -67,4 +67,10 @@ test("discovery keeps optional details free while enforcing ordered clues, activ
   state.collected = state.collected.filter((id) => id !== "optional");
   assert.equal(canDiscover(world, state, "optional"), true);
   assert.equal(canDiscover(world, state, "missing"), false);
+  assert.equal(canDiscover(world, state, "home"), false, "Keep exploring does not re-finish an already earned destination");
+  state.collected = state.collected.filter(id => id !== "blue");
+  assert.equal(canDiscover(world, state, "home", true), false, "amended destination still waits for newly unmet goals");
+  state.collected.push("blue");
+  assert.equal(nextDiscoveryClue(world, state, true)?.entityId, "home");
+  assert.equal(canDiscover(world, state, "home", true), true, "an old achievement does not block the amended destination");
 });

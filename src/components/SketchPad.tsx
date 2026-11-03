@@ -15,12 +15,16 @@ export function SketchPad({
   initialImage,
   resumeImage,
   onPause,
+  title,
+  useLabel = "Use this drawing",
 }: {
   onUse: (image: string, mark?: InkMark) => void;
   onClose: () => void;
   initialImage?: string;
   resumeImage?: string;
   onPause?: (image: string | undefined) => void;
+  title?: string;
+  useLabel?: string;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
@@ -172,11 +176,11 @@ export function SketchPad({
   return (
     <Modal
       title={
-        initialImage
+        title ?? (initialImage
           ? "Draw on your image"
           : resumeImage
             ? "Continue your drawing"
-            : "Draw your world"
+            : "Draw your world")
       }
       onClose={() => {
         if (onPause && ready) {
@@ -202,7 +206,7 @@ export function SketchPad({
             disabled={!hasInk || !ready}
             onClick={useDrawing}
           >
-            Use this drawing <ArrowUpRight size={18} />
+            {useLabel} <ArrowUpRight size={18} />
           </button>
         </div>
       }

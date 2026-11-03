@@ -66,12 +66,13 @@ export function extractInkLayer(canvas: HTMLCanvasElement): InkMark {
     height: (result.height / canvas.height) * 1000,
   };
 }
-export async function extractSketchInk(image: string): Promise<string> {
+export async function extractSketchInk(image: string): Promise<{art: string; aspectRatio: number}> {
   const bitmap = await createImageBitmap(await (await fetch(image)).blob());
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
   canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
   bitmap.close();
-  return extractInkLayer(canvas).art;
+  const ink = extractInkLayer(canvas);
+  return {art: ink.art, aspectRatio: ink.width * canvas.width / (ink.height * canvas.height)};
 }
