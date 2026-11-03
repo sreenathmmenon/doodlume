@@ -56,24 +56,29 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     ids.add(id); return id;
   };
   const fromSource = (object: SourceSelection): WorldEntity => {
+    const visual = object.visualBounds ?? object;
     const entity: WorldEntity = {
       id: object.id, kind: object.kind, x: object.x * sx, y: object.y * sy,
       width: Math.max(4, object.width * sx), height: Math.max(4, object.height * sy), label: object.label,
       ...(object.targetId ? { targetId: object.targetId } : {}),
-      artSource: { x: object.x, y: object.y, width: object.width, height: object.height },
+      artSource: { x: visual.x, y: visual.y, width: visual.width, height: visual.height },
       artNote: "Actual source artwork assembled into the playable scene; source selection remains available in the original image.",
     };
-    artJobs.set(entity.id, object); return entity;
+    artJobs.set(entity.id, { ...object, x:visual.x, y:visual.y, width:visual.width, height:visual.height }); return entity;
   };
   entities.push({ id: introducedId("source-atmosphere"), kind: "decoration", x: 0, y: 0, width, height,
     art: imageData(source), artMethod: "crop", artSource: { x: 0, y: 0, width: 1000, height: 1000 },
     label: "Original image", artNote: "Full original image used as the world backdrop; generated gameplay is separate." });
   const surfaces = sourceSurfaces.map(object => fromSource(object) as Surface).filter(surface => surface.width >= 70 && surface.height >= 8);
   if (surfaces.length < 2) return reject("The recognized surfaces are too narrow for the character to land on.");
-  // Source ledges use a one-way landing lip. Their painted undersides remain
-  // in the scenery, rather than becoming tall rectangular walls that block
-  // upward jumps and force unnecessary connector stairs.
-  for (const surface of surfaces) surface.height = Math.min(surface.height, 24);
+  // Source ledges use a one-way landing lip. Keep the complete painted object
+  // separate from that collision shape, so editing later moves its underside
+  // too without turning it into a tall wall that blocks upward jumps.
+  for (const surface of surfaces) {
+    surface.height = Math.min(surface.height, 24);
+    if (artJobs.get(surface.id)?.visualBounds)
+      surface.sourcePlacement = { x:surface.x, y:surface.y, width:surface.width, height:surface.height };
+  }
   entities.push(...surfaces);
   const gates = options.objects.filter(object => object.kind === "gate").map(fromSource);
   entities.push(...gates);
@@ -275,8 +280,8 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   hero.y = spawn.surface.y - hero.height * .93 - 2;
   hero.artNote = "Actual source subject scaled proportionally and started on a real source surface; this assembled stage preserves the original separately.";
   entities.push(hero);
-  // Retain scene identity without restoring a duplicate static player. Source
-  // scenery crops are honest layers, not reconstructed or inpainted material.
+  // Stationary objects remain in the backdrop. Moving actors and linked gates
+  // are masked out below; a later source-layer edit prepares its own backdrop.
   for (const object of options.objects.filter(object => object.kind === "decoration" && object.id !== actor.id)) entities.push(fromSource(object));
   const world: WorldDefinition = { id: randomUUID(), name: options.name.slice(0, 80), description: options.description.slice(0, 500),
     theme: options.theme, width, height, source: "meta", sourceImage: imageData(source), inputKind, revision: 1, entities, goalRules,
@@ -292,7 +297,9 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
       entity.artNote = "Original source crop with its background retained; a precise outline was unavailable."; }
   }
   if (options.segmentation.enabled && segmentationConfigured(options.segmentation)) {
-    const sourceArt = entities.filter(entity => artJobs.has(entity.id) && !artJobs.get(entity.id)?.artwork && (entity.kind === "player" || entity.kind === "gate" && entities.some(other => other.kind === "lever" && other.targetId === entity.id)));
+    const sourceArt = entities.filter(entity => artJobs.has(entity.id) && !artJobs.get(entity.id)?.artwork &&
+      (entity.kind === "player" || entity.kind === "terrain" || entity.kind === "bridge" ||
+        entity.kind === "gate" && entities.some(other => other.kind === "lever" && other.targetId === entity.id)));
     const artwork = await extractArtwork(source, sourceArt.map(entity => ({ id: entity.id, ...entity.artSource! })), options.segmentation, signal, options.transport, inputKind);
     for (const entity of sourceArt) Object.assign(entity, artwork.get(entity.id));
   }

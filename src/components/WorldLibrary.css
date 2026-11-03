@@ -40,3 +40,29 @@
 }
 .modal.world-library-modal .saved-world-backup:focus-visible { outline-offset: -3px; }
 .modal.world-library-modal .empty-worlds .primary-button { margin-top: 14px; }
+
+/* Cards share a bottom action line even when world names wrap. */
+.modal.world-library-modal .saved-worlds .saved-world-row {
+  display: flex;
+  flex-direction: column;
+}
+.modal.world-library-modal .saved-worlds .saved-world-row .saved-world-open {
+  flex: 1;
+}
+.modal.world-library-modal .saved-worlds .saved-world-open img {
+  flex: 0 0 180px;
+}
+.modal.world-library-modal .saved-worlds .saved-world-open > span {
+  flex: 1;
+}
+.modal.world-library-modal .saved-worlds .saved-world-open strong {
+  min-height: 2.8em;
+  line-height: 1.4;
+}
+.modal.world-library-modal .saved-worlds .saved-world-open .saved-world-open-label {
+  flex: 0 0 auto;
+  margin-top: auto;
+}
+.modal.world-library-modal .saved-worlds .saved-world-row .saved-world-backup {
+  flex: 0 0 auto;
+}

@@ -17,6 +17,9 @@ export interface SourceSelection {
   y: number;
   width: number;
   height: number;
+  /** Full visible object in normalized image coordinates; x/y/width/height
+   * remain its walkable ledge when the object is a platform. */
+  visualBounds?: { x: number; y: number; width: number; height: number };
   label: string;
   targetId?: string | null;
   artwork?: Pick<WorldEntity, "art" | "artMethod" | "artNote">;

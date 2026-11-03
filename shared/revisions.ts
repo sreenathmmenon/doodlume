@@ -1,5 +1,5 @@
 import { setupFeedback } from "./setup.js";
-import { isSourceBackdrop, isSourceAlignedScenery } from "./source-scenery.js";
+import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit } from "./source-scenery.js";
 import {
   retainPlayState,
   movementMode,
@@ -31,6 +31,7 @@ export interface WorldPatch {
   updates?: WorldEntityUpdate[];
   sourceImage?: string;
   sourceScenery?: { id: string; art: string };
+  sourceLayers?: (Required<Pick<WorldEntity, "id" | "art" | "artSource">> & Pick<WorldEntity, "artMethod" | "artNote" | "sourceLayer">)[];
   bounds?: { width: number; height: number };
   goalRules?: GoalRules;
   gameplay?: WorldGameplay;
@@ -97,7 +98,7 @@ export function applyWorldPatch(
   const derivedBackdrops = world.entities.filter(isSourceAlignedScenery);
   if (patch.sourceImage && derivedBackdrops.length && !patch.sourceScenery)
     throw new Error("The revised image needs a refreshed scenery preview. Review the image update again before applying.");
-  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || !patch.sourceImage ||
+  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || (!patch.sourceImage && !patch.updates?.length && !patch.additions.length) ||
       derivedBackdrops.length !== 1 || patch.sourceScenery.id !== derivedBackdrops[0].id || typeof patch.sourceScenery.art !== "string"))
     throw new Error("The scenery update does not match this image review. Review the image update again before applying.");
   const changes = new Map<string, WorldEntityUpdate>();
@@ -117,6 +118,26 @@ export function applyWorldPatch(
       if (update.targetId !== undefined && update.targetId !== null && typeof update.targetId !== "string")
         throw new Error("Choose a valid gate connection.");
       changes.set(update.id, update);
+    }
+  }
+  for (const entity of world.entities) {
+    const update = changes.get(entity.id);
+    if (update && !entity.sourceLayer && sourceLayerForEdit(world, entity, update)) {
+      if (!entity.art) throw new Error("This source object needs its original artwork before it can move. Your draft is kept.");
+      if (!patch.sourceScenery) throw new Error("Prepare the edited object's source background before applying. Your draft is kept.");
+    }
+  }
+  const sourceLayers = new Map<string, NonNullable<WorldPatch["sourceLayers"]>[number]>();
+  if (patch.sourceLayers !== undefined) {
+    if (!Array.isArray(patch.sourceLayers) || patch.origin !== "manual" || !patch.sourceScenery)
+      throw new Error("Source artwork needs its matching prepared background.");
+    for (const layer of patch.sourceLayers) {
+      const entity = world.entities.find(item => item.id === layer?.id), update = entity && changes.get(entity.id);
+      if (!entity || !update || entity.sourceLayer || !sourceLayerForEdit(world, entity, update) || sourceLayers.has(entity.id) ||
+          Object.keys(layer).some(key => !["id", "art", "artSource", "artMethod", "artNote", "sourceLayer"].includes(key)) ||
+          typeof layer.art !== "string" || !layer.artSource)
+        throw new Error("A source cutout does not match this object's edit.");
+      sourceLayers.set(entity.id, layer);
     }
   }
   if (patch.additions.some((e) => e.kind === "player"))
@@ -143,6 +164,8 @@ export function applyWorldPatch(
       ...structuredClone(world.entities).map(entity => {
         const update = changes.get(entity.id);
         const changed = update ? { ...entity, ...structuredClone(update),
+          ...(sourceLayerForEdit(world, entity, update) ? { sourceLayer: sourceLayerForEdit(world, entity, update) } : {}),
+          ...(sourceLayers.get(entity.id) ? structuredClone(sourceLayers.get(entity.id)) : {}),
           ...(Object.hasOwn(update, "targetId") ? { targetId: update.targetId || undefined } : {}) } : entity;
         if (patch.sourceScenery?.id === entity.id) return { ...changed, art: patch.sourceScenery.art };
         return patch.sourceImage && entity.artNote === "Full original image used as the world backdrop; generated gameplay is separate."

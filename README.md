@@ -2,6 +2,12 @@
 
 Turn your own drawings and photographs into playable worlds. Doodlume uses Meta Muse Spark Open to recognize actual image details and design a game around them. The original image remains visible and inspectable, and creators can keep editing the same world without losing earned progress.
 
+## Review the product
+
+After starting the app, open the **homepage at `/`** or the **creation studio at `/#studio`**. The homepage's playable examples are previously generated worlds, labelled as examples; opening one does not make a fresh model request. Use **Make a game** with your own image to exercise creation.
+
+[Submission package](docs/SUBMISSION-PACKAGE.md) documents actual model/partner roles, event-period contributions and the planned 2:58 demonstration. The demonstrated model path is **Meta Muse Spark Open via Fireworks AI**, with **local Meta SAM 2.1 tiny** for supported cutouts. Baseten and direct Meta adapters are available options; Modal is not in the demonstrated runtime. Public deployment and the final film remain separate release gates.
+
 The engine supports three play styles:
 
 - **Adventure:** move and jump through source-based or clearly introduced geometry, collect objects, activate linked switches and reach a destination.

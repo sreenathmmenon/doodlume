@@ -285,6 +285,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               backgroundColor: "#f1f0df",
               transparent: false,
               antialias: true,
+              // Only the focused game owns its controls. Global listeners can
+              // intercept editor typing or pre-cancel a newly mounted game's keys.
+              input: { keyboard: { target: host.current! } },
               physics: {
                 default: "arcade",
                 arcade: { gravity: { x: 0, y: 1450 }, debug: false },
@@ -513,6 +516,10 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           onPointerDown={(event) =>
             event.currentTarget.focus({ preventScroll: true })
           }
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              scene.current?.releaseControls();
+          }}
         >
           {mode === "discover" && (
             <span id={canvasInstructions} className="sr-only">

@@ -540,6 +540,7 @@ body {
 .studio-v2 .completion-overlay h2 {
   margin: 12px 0;
   max-width: 85%;
+  overflow-wrap: anywhere;
   font:
     650 28px/36px Manrope,
     sans-serif;
@@ -547,6 +548,8 @@ body {
   color: var(--stage-ink);
 }
 .studio-v2 .completion-overlay p {
+  max-width: min(640px, 85%);
+  overflow-wrap: anywhere;
   color: var(--stage-muted);
   font-size: 14px;
   line-height: 20px;
@@ -2547,7 +2550,7 @@ select:focus-visible {
 .modal.world-library-modal { width: 960px; max-width: min(960px, 94vw); }
 .modal.world-library-modal.library-single { width: 420px; }
 .modal.world-library-modal.library-pair { width: 680px; }
-.library-meta { color: var(--muted); font-size: 13px; margin: -8px 0 20px; }
+.library-meta { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
 .library-utilities { margin: 0 0 20px; }
 .library-utilities > summary { display: flex; align-items: center; gap: 8px; width: fit-content; cursor: pointer; list-style: none; font-size: 13px; color: var(--ink); }
 .library-utilities > summary::-webkit-details-marker { display: none; }

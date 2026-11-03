@@ -14,7 +14,7 @@ import { PageAlignment } from "./PageAlignment";
 import { SketchPad } from "./SketchPad";
 import { readDrawingFile } from "../lib/drawing-file";
 import type { InkMark } from "../lib/ink";
-import type { EntityKind, WorldDefinition } from "../../shared/world";
+import { movementMode, type EntityKind, type WorldDefinition } from "../../shared/world";
 import type { PaperProposal } from "../../shared/amendments";
 type PaperDraft = { initialImage?: string; image: string; mark?: InkMark; kind: EntityKind; intent: string; sketch?: string; error: string };
 const paperDrafts = new Map<string, PaperDraft>();
@@ -85,7 +85,7 @@ function PaperUpdateSession({
       const context = {
         ...world,
         entities: world.entities.map(({ art, ...entity }) =>
-          entity.kind === "player" || (entity.kind === "gate" && world.entities.some(other => other.kind === "lever" && other.targetId === entity.id))
+          entity.sourceLayer || entity.kind === "player" || (entity.kind === "gate" && world.entities.some(other => other.kind === "lever" && other.targetId === entity.id))
             ? { ...entity, art } : entity),
       };
       const response = await fetch("/api/amend", {
@@ -260,18 +260,26 @@ function PaperUpdateSession({
               setIntent(e.target.value);
               onIntentChange?.(e.target.value);
             }}
-            placeholder="A bridge across the gap, and a lever for the left gate…"
+            placeholder={movementMode(world) === "discover"
+              ? "A new clue to find in the image…"
+              : world.inputKind === "picture" || movementMode(world) === "roam"
+                ? "A new object or destination to explore…"
+                : "A new crossing, collectible, or destination…"}
             disabled={busy}
           />
         </label>
         <p className="small-note">
-          Draft kept when you close. Review additions before applying.
+          Draft kept in this tab. Review additions before applying.
         </p>
         {!available && (
           <p className="paper-connection">
             {world.source === "example"
               ? "Use manual placement for this example."
-              : `${provider} needs a working key for automatic comparison. You can place your new additions manually now.`}
+              : world.inputKind === "picture"
+                ? "Use manual placement for photo updates."
+                : !configured
+                  ? `${provider} needs a working key for automatic comparison. Place additions manually for now.`
+                  : "Use manual placement to update this world."}
           </p>
         )}
         {error && (

@@ -23,7 +23,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { Modal } from "./Modal";
-import { isSourceBackdrop, isSourceAlignedScenery } from "../../shared/source-scenery";
+import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 import { WrappingTextarea } from "./WrappingTextarea";
 import { ZoomPercent } from "./ZoomPercent";
 import "./editor-viewport.css";
@@ -97,6 +97,8 @@ const limit = (v: number, low: number, high: number) =>
 const title = (e: WorldEntity) =>
   e.label || `${e.kind} · ${Math.round(e.x)}, ${Math.round(e.y)}`;
 
+type EditorRecovery = { action: "reset" | "remove"; entity: WorldEntity; index?: number };
+
 type EditorDraft = {
   bounds: { width: number; height: number };
   additions: WorldEntity[];
@@ -104,6 +106,7 @@ type EditorDraft = {
   selected: string | null;
   customArt: string | null;
   sketchDraft: string | undefined;
+  recovery?: EditorRecovery | null;
 };
 // Session drafts never cross a world revision or a proposed image update.
 const editorDrafts = new Map<string, EditorDraft>();
@@ -186,6 +189,7 @@ function WorldEditorSession({
   const [selected, setSelected] = useState<string | null>(
     savedDraft ? savedDraft.selected : proposal?.patch.additions[0]?.id ?? initialAdditions?.[0]?.id ?? null,
   );
+  const [recovery, setRecovery] = useState<EditorRecovery | null>(savedDraft?.recovery ?? null);
   const [reviewed, setReviewed] = useState(false);
   const [paperVisible, setPaperVisible] = useState(Boolean(revisedImage));
   const [drag, setDrag] = useState<{
@@ -201,15 +205,22 @@ function WorldEditorSession({
   const [customArt, setCustomArt] = useState<string | null>(savedDraft?.customArt ?? null);
   const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
   useEffect(() => {
-    if (!additions.length && !Object.keys(modified).length && !expanded && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage) {
+    if (!additions.length && !Object.keys(modified).length && !expanded && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
       editorDrafts.delete(cacheKey);
       return;
     }
-    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, sketchDraft });
+    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, sketchDraft, recovery });
     if (editorDrafts.size > 12) editorDrafts.delete(editorDrafts.keys().next().value!);
-  }, [cacheKey, bounds, additions, modified, selected, customArt, sketchDraft, expanded, proposal, initialAdditions, revisedImage]);
+  }, [cacheKey, bounds, additions, modified, selected, customArt, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery]);
   const [preparingArtwork, setPreparingArtwork] = useState(false);
   const artworkRequest = useRef<AbortController | null>(null);
+  type PreparedScene = Pick<WorldPatch, "sourceScenery" | "sourceLayers">;
+  const preparedScenes = useRef(new Map<string, PreparedScene>());
+  const sceneRequest = useRef<{ key: string; promise: Promise<PreparedScene>; controller: AbortController } | null>(null);
+  const [scenePreparing, setScenePreparing] = useState(false);
+  const [, setSceneVersion] = useState(0);
+  const sceneAlive = useRef(true);
+  useEffect(() => { sceneAlive.current = true; return () => { sceneAlive.current = false; sceneRequest.current?.controller.abort(); }; }, []);
   const selectedNow = useRef(selected);
   selectedNow.current = selected;
   const pageNow = useRef({
@@ -293,6 +304,8 @@ function WorldEditorSession({
   const item = editableEntities.find((e) => e.id === selected);
   const existingSelected = Boolean(item && world.entities.some(entity => entity.id === item.id));
   function changeEntity(id: string, change: Partial<WorldEntity>) {
+    // Reset recovery must never overwrite a newer edit to the same object.
+    setRecovery(previous => previous?.action === "reset" && previous.entity.id === id ? null : previous);
     const original = world.entities.find(entity => entity.id === id);
     if (original) {
       setModified(items => ({...items, [id]: {...(items[id] ?? original), ...change, id: original.id, kind: original.kind}}));
@@ -448,12 +461,22 @@ function WorldEditorSession({
   const patchNow = useRef(patch);
   patchNow.current = patch;
   const derivedScenery = isSourceAlignedScenery(sourceBackdrop);
+  const detachedIds = (patch.updates ?? []).flatMap(update => {
+    const original = world.entities.find(entity => entity.id === update.id);
+    return original && !original.sourceLayer && sourceLayerForEdit(world, original, update) ? [original.id] : [];
+  }).sort();
+  const gateLinks = (entities: WorldEntity[]) => [...new Set(entities.filter(entity => entity.kind === "lever" && entity.targetId).map(entity => entity.targetId))].sort();
+  const nextLinks = gateLinks([...currentEntities, ...additions]);
+  const gateLinksChanged = JSON.stringify(nextLinks) !== JSON.stringify(gateLinks(world.entities));
+  const needsSourceScene = derivedScenery && Boolean(revisedImage || detachedIds.length || gateLinksChanged);
+  const sceneKey = needsSourceScene ? JSON.stringify([detachedIds, nextLinks]) : "";
+  const preparedScene = sceneKey ? preparedScenes.current.get(sceneKey) : undefined;
   let problem = "";
   if (additions.length || changedCount || expanded) {
     try {
       // Validate placement locally; the actual image update gets freshly
       // reconstructed scenery before it can be committed below.
-      const validationPatch = revisedImage && derivedScenery && sourceBackdrop
+      const validationPatch = needsSourceScene && sourceBackdrop
         ? { ...patch, sourceScenery: { id: sourceBackdrop.id, art: sourceBackdrop.art ?? world.sourceImage } } : patch;
       applyWorldPatch(world, state, validationPatch);
     } catch (e) {
@@ -718,62 +741,142 @@ function WorldEditorSession({
     }
   }
   function removeSelected() {
+    if (!item) return;
+    if (existingSelected) {
+      setError("Existing objects stay in this world. Use Reset changes to undo your edits.");
+      return;
+    }
+    removeAddition(item.id);
+  }
+  function removeAddition(id: string) {
+    const index = additions.findIndex(entity => entity.id === id);
+    const entity = additions[index];
+    if (!entity) return;
+    const linked = editableEntities.find(other => other.targetId === id);
+    if (linked) {
+      setError(`Disconnect ${title(linked)} before deleting ${title(entity)}.`);
+      return;
+    }
+    cancelArtwork();
+    setRecovery({ action: "remove", entity, index });
     setReviewed(false);
-    if (existingSelected && selected) {
-      setModified(items => { const next = {...items}; delete next[selected]; return next; });
-    } else { setAdditions(items => items.filter(entity => entity.id !== selected)); selectObject(null); }
+    setAdditions(items => items.filter(other => other.id !== id));
+    if (selected === id) selectObject(null);
     setError("");
   }
-  async function apply() {
-    if (preparingArtwork || artworkRequest.current) return;
-    const submitted = patch;
-    let controller: AbortController | undefined;
-    try {
-      if (revisedImage && !reviewed)
-        throw new Error("Check your additions and connections before applying.");
-      let readyPatch = submitted;
-      if (revisedImage && derivedScenery) {
-        controller = new AbortController();
-        artworkRequest.current = controller;
-        setPreparingArtwork(true); setError("");
-        const linkedGates = new Set([...currentEntities, ...submitted.additions].filter(entity => entity.kind === "lever").map(entity => entity.targetId));
-        const context = { ...world, entities: currentEntities.map(entity => {
-          if (entity.kind === "player" || entity.kind === "gate" && linkedGates.has(entity.id)) return entity;
-          const { art, ...rest } = entity;
-          return rest;
-        }) };
-        const response = await fetch("/api/source-scenery", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ world: context, image: revisedImage, additions: submitted.additions }),
-          signal: controller.signal,
-        });
-        const result = await response.json();
-        if (controller.signal.aborted || artworkRequest.current !== controller) return;
-        if (!response.ok) throw new Error(result.error || "The revised scenery could not be prepared. Your draft is kept.");
-        if (patchNow.current !== submitted)
-          throw new Error("Your draft changed while the image was being prepared. Apply again to include your latest changes.");
-        readyPatch = { ...submitted, sourceScenery: result.sourceScenery };
-      }
-      applyWorldPatch(world, state, readyPatch);
-      onApply(readyPatch);
-      editorDrafts.delete(cacheKey);
-    } catch (e) {
-      if (!controller?.signal.aborted) setError(e instanceof Error ? e.message : "Your current world is safe. Try adjusting the change.");
-    } finally {
-      if (controller && artworkRequest.current === controller) {
-        artworkRequest.current = null;
-        setPreparingArtwork(false);
+  function resetSelected() {
+    if (!selected || !modified[selected]) return;
+    cancelArtwork();
+    setRecovery({ action: "reset", entity: modified[selected] });
+    setModified(items => { const next = { ...items }; delete next[selected]; return next; });
+    setReviewed(false);
+    setError("");
+  }
+  function undoObjectAction() {
+    if (!recovery) return;
+    cancelArtwork();
+    if (recovery.action === "reset") {
+      setModified(items => ({ ...items, [recovery.entity.id]: recovery.entity }));
+    } else {
+      setAdditions(items => {
+        if (items.some(entity => entity.id === recovery.entity.id)) return items;
+        const next = [...items];
+        next.splice(Math.min(recovery.index ?? next.length, next.length), 0, recovery.entity);
+        return next;
+      });
+    }
+    selectObject(recovery.entity.id);
+    setRecovery(null);
+    setReviewed(false);
+    setError("");
+  }
+  async function prepareScene(key: string, submitted: WorldPatch): Promise<PreparedScene> {
+    const cached = preparedScenes.current.get(key);
+    if (cached) return cached;
+    const previous = sceneRequest.current;
+    if (previous?.key === key) return previous.promise;
+    if (previous) { try { await previous.promise; } catch { /* A changed draft can prepare independently. */ } }
+    const completed = preparedScenes.current.get(key);
+    if (completed) return completed;
+    if (sceneRequest.current && sceneRequest.current !== previous)
+      return prepareScene(key, submitted);
+    if (!sceneAlive.current) throw new DOMException("Editor closed", "AbortError");
+    const controller = new AbortController();
+    const promise = (async () => {
+      setScenePreparing(true);
+      const context = { ...world, entities: world.entities.map(entity => {
+        const update = submitted.updates?.find(item => item.id === entity.id);
+        if (entity.kind === "player" || entity.kind === "gate" || entity.sourceLayer ||
+            update && sourceLayerForEdit(world, entity, update)) return entity;
+        const { art, ...rest } = entity; return rest;
+      }) };
+      const response = await fetch("/api/source-scenery", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ world: context, image: revisedImage || world.sourceImage,
+          additions: submitted.additions, updates: submitted.updates, bounds: submitted.bounds }),
+        signal: controller.signal,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The source artwork could not be prepared. Your draft is kept.");
+      controller.signal.throwIfAborted();
+      const prepared: PreparedScene = { sourceScenery: result.sourceScenery, ...(result.sourceLayers ? { sourceLayers: result.sourceLayers } : {}) };
+      applyWorldPatch(world, state, { ...submitted, ...prepared });
+      preparedScenes.current.set(key, prepared);
+      if (preparedScenes.current.size > 6) preparedScenes.current.delete(preparedScenes.current.keys().next().value!);
+      if (sceneAlive.current) { setSceneVersion(version => version + 1); setError(""); }
+      return prepared;
+    })();
+    sceneRequest.current = { key, promise, controller };
+    try { return await promise; }
+    finally {
+      if (sceneRequest.current?.controller === controller) {
+        sceneRequest.current = null;
+        if (sceneAlive.current) setScenePreparing(false);
       }
     }
   }
-  const colors =
-    world.theme === "moon"
-      ? ["#ede9f3", "#c6b9d7", "#9a8baa"]
-      : world.theme === "sunset"
-        ? ["#f7ebdf", "#dfc2a7", "#b48d73"]
-        : ["#f0f1e3", "#c4d0b1", "#8f9f7a"];
+  // A source mask depends on which objects leave the page, not each drag pixel.
+  // Prepare once after a gesture, then reuse it for preview, further edits and Apply.
+  useEffect(() => {
+    if (!sceneKey || preparedScenes.current.has(sceneKey) || drag || problem || preparingArtwork) return;
+    const timer = window.setTimeout(() => {
+      void prepareScene(sceneKey, patchNow.current).catch(error => {
+        if (sceneAlive.current && error?.name !== "AbortError") setError(error instanceof Error ? error.message : "The source artwork could not be prepared. Your draft is kept.");
+      });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [sceneKey, Boolean(drag), Boolean(problem), preparingArtwork]);
+
+  async function apply() {
+    if (preparingArtwork || artworkRequest.current) return;
+    const submitted = patch;
+    try {
+      if (revisedImage && !reviewed) throw new Error("Check your additions and connections before applying.");
+      setPreparingArtwork(true); setError("");
+      const prepared = needsSourceScene ? await prepareScene(sceneKey, submitted) : {};
+      if (patchNow.current !== submitted) throw new Error("Your draft changed while the image was being prepared. Apply again to include your latest changes.");
+      const readyPatch = { ...submitted, ...prepared };
+      applyWorldPatch(world, state, readyPatch);
+      onApply(readyPatch);
+      editorDrafts.delete(cacheKey);
+    } catch (error) {
+      if (sceneAlive.current && !(error instanceof DOMException && error.name === "AbortError")) setError(error instanceof Error ? error.message : "Your current world is safe. Try adjusting the change.");
+    } finally { if (sceneAlive.current) setPreparingArtwork(false); }
+  }
+
+  const colors = world.theme === "moon" ? ["#ede9f3", "#c6b9d7", "#9a8baa"]
+    : world.theme === "sunset" ? ["#f7ebdf", "#dfc2a7", "#b48d73"]
+      : ["#f0f1e3", "#c4d0b1", "#8f9f7a"];
 
   function object(e: WorldEntity, isNew = false) {
+    const original = world.entities.find(entity => entity.id === e.id);
+    const layer = preparedScene?.sourceLayers?.find(entity => entity.id === e.id);
+    const baseline = e.sourceLayer ?? (original ? sourceLayerForEdit(world, original, e) : undefined);
+    const previewEntity = { ...e, ...(baseline ? { sourceLayer: baseline } : {}), ...layer };
+    const artBox = derivedScenery && sourceBackdrop && previewEntity.sourceLayer
+      ? sourceLayerArtworkBounds(previewEntity, sourceBackdrop) : undefined;
+    const sourceStationary = derivedScenery && e.artSource && !isSourceBackdrop(e) && e.kind !== "player" && e.kind !== "gate";
+    const awaitingLayer = Boolean(baseline && !e.sourceLayer && !preparedScene);
     const x = e.x, y = e.y;
     const hidden =
       (e.kind === "coin" && state.collected.includes(e.id)) ||
@@ -781,7 +884,6 @@ function WorldEditorSession({
     return (
       <g
         key={e.id}
-        opacity={hidden ? 0.14 : 1}
         transform={`translate(${x} ${y})`}
         className={isNew ? "editor-new-object" : ""}
       >
@@ -789,6 +891,7 @@ function WorldEditorSession({
           {isNew ? "New: " : ""}
           {title(e)}
         </title>
+        <g opacity={hidden ? 0.14 : 1}>
         {paperVisible && revisedImage ? (
           <rect width={e.width} height={e.height} rx="2" fill="#2457e6" fillOpacity={isNew ? .1 : .025}
             stroke="#2457e6" strokeWidth={isNew || e.id === selected ? 2 : 1} strokeDasharray={isNew ? "6 3" : undefined}
@@ -804,11 +907,13 @@ function WorldEditorSession({
             strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
           />
-        ) : e.art ? (
+        ) : sourceStationary && (!artBox || awaitingLayer) ? null : e.art ? (
           <image
-            href={e.art}
-            width={e.width}
-            height={e.height}
+            href={isSourceBackdrop(e) && preparedScene?.sourceScenery ? preparedScene.sourceScenery.art : previewEntity.art}
+            x={artBox ? artBox.x - e.x : 0}
+            y={artBox ? artBox.y - e.y : 0}
+            width={artBox?.width ?? e.width}
+            height={artBox?.height ?? e.height}
             preserveAspectRatio="none"
           />
         ) : e.kind === "lever" ? (
@@ -844,7 +949,10 @@ function WorldEditorSession({
             strokeWidth="3"
           />
         )}
+        </g>
         {(isNew || e.id === selected) && (
+          <g pointerEvents="none">
+          {e.id === selected && <rect x="-5" y="-5" width={e.width + 10} height={e.height + 10} rx="6" fill="none" stroke="#fff" strokeWidth="5" vectorEffect="non-scaling-stroke" />}
           <rect
             x="-5"
             y="-5"
@@ -857,6 +965,8 @@ function WorldEditorSession({
             vectorEffect="non-scaling-stroke"
             strokeDasharray={e.id === selected ? undefined : "8 5"}
           />
+          {e.id === selected && <rect x="-8" y="-8" width="6" height="6" fill="var(--selection)" stroke="#fff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />}
+          </g>
         )}
       </g>
     );
@@ -883,16 +993,15 @@ function WorldEditorSession({
               </label>
             )}
             {(additions.length > 0 || changedCount > 0 || expanded || sketchDraft) && <p className="editor-draft-note">Draft kept when you close. Apply to update your world.</p>}
+            {recovery && <div className="editor-recovery" role="status">
+              <span>{recovery.action === "reset" ? "Object changes reset." : "New object deleted."}</span>
+              <button className="text-button" onClick={undoObjectAction}><Undo2 size={14} /> Undo</button>
+            </div>}
             <div className="editor-apply-actions">
               <button
                 className="text-button"
                 disabled={!additions.length}
-                onClick={() => {
-                  setReviewed(false);
-                  setAdditions((items) => items.slice(0, -1));
-                  selectObject(null);
-                  setError("");
-                }}
+                onClick={() => { const last = additions.at(-1); if (last) removeAddition(last.id); }}
               >
                 <Undo2 size={15} /> Remove last addition
               </button>
@@ -900,7 +1009,7 @@ function WorldEditorSession({
                 onClick={(event) => {
                   cancelArtwork();
                   setBounds({ width: world.width, height: world.height });
-                  setAdditions([]); setModified({}); setCustomArt(null); setSketchDraft(undefined);
+                  setAdditions([]); setModified({}); setCustomArt(null); setSketchDraft(undefined); setRecovery(null);
                   setReviewed(false); selectObject(null); setError("");
                   editorDrafts.delete(cacheKey);
                   event.currentTarget.closest("dialog")?.querySelector<HTMLSelectElement>('select[aria-label="Select an object"]')?.focus({ preventScroll: true });
@@ -915,7 +1024,7 @@ function WorldEditorSession({
                 }
                 onClick={() => void apply()}
               >
-                {preparingArtwork ? <>Preparing artwork <LoaderCircle size={17} className="spin" /></> : <>Apply changes <ArrowUpRight size={17} /></>}
+                {preparingArtwork || scenePreparing ? <>Preparing artwork <LoaderCircle size={17} className="spin" /></> : <>Apply changes <ArrowUpRight size={17} /></>}
               </button>
             </div>
 </div>}>
@@ -1095,7 +1204,7 @@ function WorldEditorSession({
               className="editor-canvas"
               viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
               preserveAspectRatio="none"
-              aria-label="World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes it. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Object identities and earned progress are kept."
+              aria-label="World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes a new object; existing objects are kept. Reset changes is available in object settings. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Object identities and earned progress are kept."
               onKeyDown={canvasKey}
               onKeyUp={(e) => {
                 if (e.key === " ") setSpaceHeld(false);
@@ -1192,11 +1301,12 @@ function WorldEditorSession({
                     {item.kind === "player" ? "Character" : editorTools.find((t) => t.kind === item.kind)?.label ?? item.kind}
                   </strong>
                   <button
-                    className="icon-button"
-                    aria-label={existingSelected ? "Reset selected object changes" : "Remove selected object"}
-                    onClick={removeSelected}
+                    className="text-button editor-object-action"
+                    disabled={preparingArtwork || (existingSelected && !modified[item.id])}
+                    aria-label={existingSelected ? "Reset selected object changes" : "Delete selected new object"}
+                    onClick={existingSelected ? resetSelected : removeSelected}
                   >
-                    {existingSelected ? <Undo2 size={16} /> : <Trash2 size={16} />}
+                    {existingSelected ? <><Undo2 size={15} /> Reset changes</> : <><Trash2 size={15} /> Delete</>}
                   </button>
                 </div>
                 {item.art && mode !== "discover" && (

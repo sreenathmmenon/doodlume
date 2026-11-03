@@ -1,0 +1,26 @@
+.demo-recorder {
+  position: fixed;
+  z-index: 10000;
+  right: 16px;
+  bottom: 16px;
+  width: 300px;
+  color: #18222d;
+  background: #fff;
+  border: 1px solid #c8cfd6;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px #17202b26;
+  font: 12px/1.5 system-ui, sans-serif;
+}
+.demo-recorder--collapsed { width: auto; }
+.demo-recorder__bar { display: flex; align-items: center; gap: 12px; padding: 8px 10px; }
+.demo-recorder__bar strong { display: flex; align-items: center; gap: 6px; margin-right: auto; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.demo-recorder__body { padding: 0 12px 12px; }
+.demo-recorder__body p { margin: 0 0 8px; font: inherit; color: inherit; }
+.demo-recorder button { min-height: 30px; padding: 5px 9px; border: 1px solid #bbc4ce; border-radius: 6px; background: #f7f8fa; color: #18222d; font: inherit; cursor: pointer; white-space: nowrap; }
+.demo-recorder button:hover { background: #e9eef5; }
+.demo-recorder button:focus-visible, .demo-recorder a:focus-visible { outline: 2px solid #2157ce; outline-offset: 2px; }
+.demo-recorder .demo-recorder__toggle { min-width: 28px; padding: 2px 6px; }
+.demo-recorder__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.demo-recorder__dot { width: 7px; height: 7px; border-radius: 50%; background: #bb2727; }
+.demo-recorder__body .demo-recorder__error { color: #9b2722; }
+.demo-recorder a { color: #194eae; text-decoration: underline; }

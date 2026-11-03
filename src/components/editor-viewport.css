@@ -141,3 +141,21 @@
 .modal.world-editor-modal .editor-zoom-control .zoom-percent { display: flex; align-items: center; gap: 2px; color: var(--ink); font-size: 13px; flex: 0 0 auto; }
 .modal.world-editor-modal .editor-zoom-control .zoom-percent input { width: 54px; min-width: 0; min-height: 36px; padding: 6px 4px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; appearance: textfield; }
 .modal.world-editor-modal .zoom-percent input::-webkit-inner-spin-button { appearance: none; }
+
+.modal.world-editor-modal .editor-recovery {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.modal.world-editor-modal .editor-recovery .text-button,
+.modal.world-editor-modal .editor-object-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  font-size: 13px;
+  white-space: nowrap;
+}

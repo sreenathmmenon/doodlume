@@ -13,12 +13,22 @@ export async function sourceScenery(source: Buffer, entities: WorldEntity[]): Pr
   const original = Buffer.from(data);
   const repairMask = Buffer.alloc(info.width * info.height);
   for (const entity of entities) {
-    if (!entity.artSource || !['player','gate'].includes(entity.kind)) continue;
-    if (entity.kind === 'gate' && !entities.some(other => other.kind === 'lever' && other.targetId === entity.id)) continue;
-    const box = pixelBox(entity.artSource, info.width, info.height);
+    if (!entity.artSource || (!entity.sourceLayer && !['player','gate'].includes(entity.kind))) continue;
+    if (entity.kind === 'gate' && !entity.sourceLayer && !entities.some(other => other.kind === 'lever' && other.targetId === entity.id)) continue;
+    let box = pixelBox(entity.artSource, info.width, info.height);
     let mask: Buffer | undefined;
     if (entity.art && entity.artMethod !== 'crop' && entity.art.startsWith('data:image/png;base64,'))
       mask = await sharp(Buffer.from(entity.art.split(',')[1], 'base64')).ensureAlpha().resize(box.width, box.height, { fit: 'fill' }).raw().toBuffer();
+    if (entity.sourceLayer && mask) {
+      // Include the antialiased edge just outside a tight SAM crop when the
+      // paper-mask dilation below removes an edited object from its old place.
+      const padding = { left: Math.min(3, box.left), top: Math.min(3, box.top),
+        right: Math.min(3, info.width - box.left - box.width), bottom: Math.min(3, info.height - box.top - box.height) };
+      mask = await sharp(mask, { raw: { width: box.width, height: box.height, channels: 4 } })
+        .extend({ ...padding, background: { r: 0, g: 0, b: 0, alpha: 0 } }).raw().toBuffer();
+      box = { left: box.left - padding.left, top: box.top - padding.top,
+        width: box.width + padding.left + padding.right, height: box.height + padding.top + padding.bottom };
+    }
     const paperSamples: number[][] = [];
     let perimeterSamples = 0;
     const samplePaper = (x: number, y: number) => {

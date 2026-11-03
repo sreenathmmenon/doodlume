@@ -32,6 +32,10 @@ export interface WorldEntity {
   artMethod?: "sam" | "paper" | "crop";
   artNote?: string;
   artSource?: ArtworkBox;
+  /** Original collider placement before a source object became an editable layer. */
+  sourceLayer?: ArtworkBox;
+  /** Original collision bounds, independent from the complete source artwork. */
+  sourcePlacement?: ArtworkBox;
   artShape?: "box" | "ellipse";
   targetId?: string;
   label?: string;
@@ -228,6 +232,12 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
         throw new Error(
           "An artwork selection falls outside the source picture.",
         );
+    }
+    for (const b of [entity.sourceLayer, entity.sourcePlacement].filter(Boolean) as ArtworkBox[]) {
+      if (!entity.artSource || (entity.sourceLayer && !entity.art) || ![b.x, b.y, b.width, b.height].every(Number.isFinite) ||
+          b.x < -20 || b.y < -20 || b.x > w.width || b.y > w.height || b.width < 4 || b.height < 4 ||
+          b.width > w.width + 20 || b.height > w.height + 20)
+        throw new Error("This edited source object has no valid original artwork placement.");
     }
     if (
       entity.artShape !== undefined &&

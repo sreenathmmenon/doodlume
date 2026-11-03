@@ -1,4 +1,4 @@
-import { isSourceAlignedScenery, isSourceBackdrop } from "../../shared/source-scenery";
+import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 import Phaser from "phaser";
 import { createAtmosphere } from "./atmosphere";
 import { Soundscape } from "./soundscape";
@@ -332,6 +332,17 @@ export class WorldScene extends Phaser.Scene {
       : sourceStage
         ? this.createSourceAtmosphere()
         : createAtmosphere(this, this.definition.theme, this.reducedMotion);
+    // Geometry edits detach actual source pixels from the prepared backdrop.
+    // Artwork and collision use the same transform, while a ledge's original
+    // painted underside retains its full height rather than becoming a 24px strip.
+    if (sourceAlignedScenery && sourceBackdrop) {
+      for (const entity of this.definition.entities) {
+        if (!entity.sourceLayer || !entity.art || entity.kind === "gate") continue;
+        const box = sourceLayerArtworkBounds(entity, sourceBackdrop);
+        this.add.image(box.x, box.y, `art-${entity.id}`)
+          .setOrigin(0).setDisplaySize(box.width, box.height).setDepth(10);
+      }
+    }
     if (this.definition.gameplay?.movement === "discover") {
       this.createDiscovery();
       return;
@@ -499,13 +510,6 @@ export class WorldScene extends Phaser.Scene {
       string,
       Phaser.Input.Keyboard.Key
     >;
-    this.input.keyboard!.removeCapture([
-      Phaser.Input.Keyboard.KeyCodes.SPACE,
-      Phaser.Input.Keyboard.KeyCodes.UP,
-      Phaser.Input.Keyboard.KeyCodes.DOWN,
-      Phaser.Input.Keyboard.KeyCodes.LEFT,
-      Phaser.Input.Keyboard.KeyCodes.RIGHT,
-    ]);
     this.hint = this.add
       .text(0, 0, "", {
         fontFamily: "Manrope, sans-serif",
@@ -1182,7 +1186,7 @@ export class WorldScene extends Phaser.Scene {
     const art = this.add.container(e.x, e.y).setDepth(14);
     const g = this.add.graphics();
     const sourceGate =
-      e.artSource && (this.sourceAlignedArtwork && !this.definition.entities.some(other => other.kind === "lever" && other.targetId === e.id) || this.definition.gameplay?.movement === "roam" && !e.art);
+      e.artSource && !e.sourceLayer && (this.sourceAlignedArtwork && !this.definition.entities.some(other => other.kind === "lever" && other.targetId === e.id) || this.definition.gameplay?.movement === "roam" && !e.art);
     if (this.creativeArtwork) {
       g.fillStyle(this.direction.matte, 0.92);
       g.fillRoundedRect(0, 0, e.width, e.height, 2);
@@ -1349,7 +1353,7 @@ export class WorldScene extends Phaser.Scene {
         .setDepth(35);
       this.tweens.add({
         targets: reward,
-        y: reward.y - 60,
+        y: reward.y - (this.reducedMotion ? 0 : 60),
         alpha: 0,
         duration: 850,
         onComplete: () => reward.destroy(),
@@ -1606,21 +1610,22 @@ export class WorldScene extends Phaser.Scene {
     this.report();
   }
 
-  /** Source-coordinate interactions stay on the original visible object. These
-   * restrained corner marks never paint a replacement coin or lever over it. */
+  /** Source-coordinate interactions stay on the original visible object. A
+   * collected detail keeps its art and gains a small, persistent completion mark. */
   private drawSourceCue(e: WorldEntity, found: boolean) {
     let g = this.sourceCues.get(e.id);
     if (!g) {
       g = this.add.graphics().setDepth(14);
       this.sourceCues.set(e.id, g);
     }
-    g.clear().setAlpha(found ? 0.42 : 0.85);
+    g.clear().setAlpha(1);
+    const cueAlpha = found ? 0.42 : 0.85;
     const length = Math.min(14, e.width / 4, e.height / 4);
     for (const [lineWidth, color, opacity] of [
       [4, this.direction.ink, 0.9],
       [1.5, this.direction.accent, 1],
     ]) {
-      g.lineStyle(lineWidth, color, opacity);
+      g.lineStyle(lineWidth, color, opacity * cueAlpha);
       for (const [x, y, dx, dy] of [
         [e.x, e.y, 1, 1],
         [e.x + e.width, e.y, -1, 1],
@@ -1630,6 +1635,27 @@ export class WorldScene extends Phaser.Scene {
         g.lineBetween(x, y + dy * length, x, y);
         g.lineBetween(x, y, x + dx * length, y);
       }
+    }
+    if (found && e.kind === "coin") {
+      const unit = 1 / Math.max(0.25, this.cameras.main.zoom);
+      const radius = 7 * unit;
+      // Prefer beside the source bounds so the identifying pixels stay visible.
+      // At a world edge, move to the other side before falling back to its corner.
+      const right = e.x + e.width + radius + 2 * unit;
+      const left = e.x - radius - 2 * unit;
+      const x = Phaser.Math.Clamp(
+        right + radius < this.definition.width ? right : left - radius > 0 ? left : e.x + e.width,
+        radius,
+        this.definition.width - radius,
+      );
+      const y = Phaser.Math.Clamp(e.y + radius, radius, this.definition.height - radius);
+      g.fillStyle(this.direction.ink, 0.94);
+      g.fillCircle(x, y, radius);
+      g.lineStyle(1 * unit, this.direction.surface, 0.9);
+      g.strokeCircle(x, y, radius);
+      g.lineStyle(1.7 * unit, this.direction.surface, 1);
+      g.lineBetween(x - 3.2 * unit, y, x - 0.8 * unit, y + 2.4 * unit);
+      g.lineBetween(x - 0.8 * unit, y + 2.4 * unit, x + 3.6 * unit, y - 2.5 * unit);
     }
   }
 
@@ -1767,6 +1793,16 @@ export class WorldScene extends Phaser.Scene {
       this.updateRoamVisuals(0);
   }
 
+  releaseControls() {
+    for (const key of Object.keys(this.controls) as (keyof WorldControls)[])
+      this.controls[key] = false;
+    this.input?.keyboard?.resetKeys();
+    this.jumpQueued = -1000;
+    this.jumpHeld = false;
+    this.previousTouchJump = false;
+    this.previousTouchInteract = false;
+  }
+
   setPlaying(playing: boolean) {
     if (this.resourcesReleased) return;
     if (this.artworkFailed) {
@@ -1795,15 +1831,7 @@ export class WorldScene extends Phaser.Scene {
     );
     if (!this.physics?.world) return;
     playing ? this.physics.world.resume() : this.physics.world.pause();
-    if (!playing) {
-      for (const key of Object.keys(this.controls) as (keyof WorldControls)[])
-        this.controls[key] = false;
-      this.input?.keyboard?.resetKeys();
-      this.jumpQueued = -1000;
-      this.jumpHeld = false;
-      this.previousTouchJump = false;
-      this.previousTouchInteract = false;
-    }
+    if (!playing) this.releaseControls();
     if (!playing && this.player?.body)
       if (this.definition.gameplay?.movement === "roam")
         (this.player.body as Phaser.Physics.Arcade.Body)

@@ -313,7 +313,7 @@ export async function interpretAmendment(
       "A new lever needs a drawn gate to control. Add a gate or clarify the page.",
     );
   const sourceBackdrop = world.entities.find(isSourceAlignedScenery);
-  const movingSourceEntities = world.entities.filter(entity => entity.artSource && (entity.kind === "player" ||
+  const movingSourceEntities = world.entities.filter(entity => entity.artSource && (entity.sourceLayer || entity.kind === "player" ||
     (entity.kind === "gate" && [...world.entities,...additions].some(other => other.kind === "lever" && other.targetId === entity.id))));
   if (sourceBackdrop && movingSourceEntities.some(entity => !entity.art))
     throw new InterpretationError("The moving artwork is missing from this preview. Reopen Update image and compare again; your world is unchanged.");

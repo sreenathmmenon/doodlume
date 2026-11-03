@@ -108,6 +108,7 @@ type Dialog =
   | "rules"
   | "draft-rules"
   | "discard-creation"
+  | "unsaved-world"
   | "review"
   | "sketch"
   | "worlds"
@@ -159,7 +160,7 @@ const initialMetrics: WorldTelemetry = {
   playerY: 0,
 };
 
-export default function App() {
+export default function App({ active = true }: { active?: boolean }) {
   const [boot] = useState(() => {
     const entries = savedWorlds();
     return { entries, returning: returningWorld(entries, rememberedWorldId()) };
@@ -212,7 +213,19 @@ export default function App() {
   );
   const [dialog, setDialog] = useState<Dialog>(null);
   const [saved, setSaved] = useState(boot.entries);
+  const savedNow = useRef(saved);
+  savedNow.current = saved;
   const [saving, setSaving] = useState(false);
+  const savingNow = useRef(false);
+  const [unsavedWorld, setUnsavedWorld] = useState(false);
+  const unsavedWorldNow = useRef(false);
+  const worldSession = useRef(0);
+  const [saveError, setSaveError] = useState("");
+  const pendingWorldOpen = useRef<{ open: () => void; returnTo: Dialog } | null>(null);
+  function markUnsaved(value: boolean) {
+    unsavedWorldNow.current = value;
+    setUnsavedWorld(value);
+  }
   const [libraryError, setLibraryError] = useState("");
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -310,6 +323,33 @@ export default function App() {
     setDialog(entry === "sketch" ? "sketch" : "create");
     if (entry === "upload") file.current?.click();
   }
+  useEffect(() => {
+    if (!active) {
+      // A background response must not reopen a modal over the homepage.
+      // Keep the creator's source/idea, but cancel the in-flight interpretation.
+      sourceVersion.current++;
+      if (request.current) recordRecognitionReturned("cancelled");
+      request.current?.abort();
+      request.current = null;
+      setBusy(false);
+      setPlaying(false);
+      previousPlaying.current = false;
+      pendingWorldOpen.current = null;
+      setDialog(null);
+    }
+  }, [active]);
+  useEffect(() => {
+    if (libraryLoading || !active) return;
+    const enterCreation = () => {
+      const entry = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("create");
+      if (!window.location.hash.startsWith("#studio") || (entry !== "upload" && entry !== "sketch")) return;
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#studio`);
+      openCreation(entry);
+    };
+    enterCreation();
+    window.addEventListener("hashchange", enterCreation);
+    return () => window.removeEventListener("hashchange", enterCreation);
+  }, [libraryLoading, active]);
   function openDraftSetup() {
     // A prepared/paused result keeps the intent that produced it. Editing the
     // input field does not retroactively recompile that result's requirements.
@@ -372,7 +412,7 @@ export default function App() {
           allowStartupRestore.current = false;
           const returning = returningWorld(entries, rememberedWorldId());
           if (returning) {
-            loadWorld(returning.world, returning.state, returning.history);
+            loadWorld(returning.world, returning.state, returning.history, true);
             setStarted(true);
             rememberWorld(returning.world);
           }
@@ -407,14 +447,6 @@ export default function App() {
         e.target.closest('input,textarea,[contenteditable="true"]')
       )
         return;
-      if (
-        ["ArrowLeft", "ArrowRight", "ArrowUp", " ", "ArrowDown"].includes(
-          e.key,
-        ) &&
-        playing &&
-        !dialog
-      )
-        e.preventDefault();
       if (e.key === "Escape" && !dialog) {
         setPlaying(false);
         setFocusedPlay(false);
@@ -444,7 +476,10 @@ export default function App() {
     next: WorldDefinition,
     state = emptyPlayState(),
     checkpoints: RevisionCheckpoint[] = [],
+    persisted = false,
   ) {
+    worldSession.current++;
+    markUnsaved(!persisted && next.source !== "example");
     allowStartupRestore.current = false;
     if (saved.some((entry) => entry.world.id === next.id)) rememberWorld(next);
     sourceVersion.current++;
@@ -475,6 +510,39 @@ export default function App() {
     setError("");
     previousPlaying.current = false;
   }
+  function requestWorldOpen(open: () => void) {
+    if (!unsavedWorldNow.current) {
+      open();
+      return;
+    }
+    pendingWorldOpen.current = { open, returnTo: dialog };
+    setSaveError("");
+    setDialog("unsaved-world");
+  }
+  function stayInWorld() {
+    if (savingNow.current) return;
+    const returnTo = pendingWorldOpen.current?.returnTo ?? null;
+    pendingWorldOpen.current = null;
+    setSaveError("");
+    setDialog(returnTo);
+  }
+  async function saveAndOpenWorld() {
+    const pending = pendingWorldOpen.current;
+    if (!pending || savingNow.current) return;
+    const persisted = await save();
+    if (!persisted || pendingWorldOpen.current !== pending) return;
+    pendingWorldOpen.current = null;
+    pending.open();
+  }
+  function renameWorld(name: string) {
+    if (name === worldNow.current.name) return;
+    allowStartupRestore.current = false;
+    worldSession.current++;
+    const next = { ...worldNow.current, name };
+    worldNow.current = next;
+    setWorld(next);
+    markUnsaved(true);
+  }
   function editableState() {
     const state = canvas.current?.snapshot() ?? latestState.current;
     if (!state.completed || state.exploring) return state;
@@ -493,6 +561,7 @@ export default function App() {
   function beginPersonalEdit(state: PlayState) {
     const personal = copyExample(worldNow.current, history);
     if (personal.world !== worldNow.current) {
+      worldSession.current++;
       setWorld(personal.world); worldNow.current = personal.world;
       setHistory(personal.history);
       setInitial(state); latestState.current = state;
@@ -510,6 +579,8 @@ export default function App() {
     setDialog("paper");
   }
   function keepRevision(next: WorldDefinition, state: PlayState) {
+    worldSession.current++;
+    markUnsaved(true);
     paperDrafts.current.delete(paperDraftKey(worldNow.current));
     setPaperIntent(""); setPaperProposal(undefined); setRevisedPage(undefined); setTracedAdditions([]);
     setWorldError("");
@@ -601,6 +672,11 @@ export default function App() {
       ?.querySelector<HTMLElement>(".world-canvas")
       ?.focus({ preventScroll: true });
   }
+  function focusGameControls() {
+    requestAnimationFrame(() => {
+      stage.current?.querySelector<HTMLElement>(".world-canvas")?.focus({ preventScroll: true });
+    });
+  }
   function restart() {
     allowStartupRestore.current = false;
     setWorldError("");
@@ -613,12 +689,16 @@ export default function App() {
     setRun((n) => n + 1);
     setStarted(true);
     setPlaying(true);
+    focusGameControls();
     tell("Replay started.");
   }
-  async function save() {
-    if (saving) return;
+  async function save(): Promise<boolean> {
+    if (savingNow.current) return false;
+    savingNow.current = true;
+    setSaving(true);
     allowStartupRestore.current = false;
     const savingWorld = worldNow.current;
+    const savingSession = worldSession.current;
     const personal = copyExample(savingWorld, history);
     const entry: SavedWorld = {
       world: personal.world,
@@ -626,27 +706,36 @@ export default function App() {
       history: personal.history,
       savedAt: new Date().toISOString(),
     };
-    setSaving(true);
     setError("");
+    setSaveError("");
     try {
-      const next = await updateLibrary(saved, entry);
+      const next = await updateLibrary(savedNow.current, entry);
+      savedNow.current = next;
       setSaved(next);
-      // Saving must never replace a world opened or edited while storage was busy.
-      if (worldNow.current === savingWorld) {
-        rememberWorld(personal.world);
-        if (personal.world !== savingWorld) {
-          const currentState = canvas.current?.snapshot() ?? latestState.current;
-          setInitial(currentState); latestState.current = currentState;
-          setWorld(personal.world); worldNow.current = personal.world;
-          setHistory(personal.history);
-        }
+      // A completed write belongs only to the world/revision captured above.
+      // In particular, it must not authorize navigation away from a newer edit.
+      if (worldNow.current !== savingWorld || worldSession.current !== savingSession) {
+        setSaveError("An earlier version was saved. Save your latest changes before opening another world.");
+        tell(`Saved an earlier version of ${personal.world.name}.`);
+        return false;
       }
+      rememberWorld(personal.world);
+      if (personal.world !== savingWorld) {
+        const currentState = canvas.current?.snapshot() ?? latestState.current;
+        setInitial(currentState); latestState.current = currentState;
+        setWorld(personal.world); worldNow.current = personal.world;
+        setHistory(personal.history);
+      }
+      markUnsaved(false);
       tell(`Saved ${personal.world.name}.`);
+      return true;
     } catch {
-      setError(
-        "This browser could not save the world. Your open world and earlier saves are unchanged.",
-      );
+      const message = "Couldn’t save. Your changes are still open. Try again or back up this world from My worlds.";
+      setSaveError(message);
+      setError(message);
+      return false;
     } finally {
+      savingNow.current = false;
       setSaving(false);
     }
   }
@@ -791,6 +880,7 @@ export default function App() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
       else await stage.current?.closest<HTMLElement>(".world-panel")?.requestFullscreen();
+      focusGameControls();
     } catch {
       tell("Your browser does not support full screen here.");
     }
@@ -898,11 +988,20 @@ export default function App() {
     ).includes(entity.id),
   ).length;
   const destination = world.entities.find((entity) => entity.kind === "goal");
+  const finalClueRemaining = mode === "discover" && objective.ready && !metrics.completed && Boolean(destination);
+  const completionTitle = objective.ready ? `${world.name} complete` : "Earlier completion retained";
+  const completionDetail = objective.ready
+    ? destination
+      ? `${mode === "discover" ? "Final clue found" : "Destination reached"}: ${objectName(world, destination.id, 80)}`
+      : "Your world's objective is complete."
+    : "Your achievement stays with this world after its rules change.";
   const missionText =
     metrics.completed && !metrics.exploring
-      ? "Achievement earned"
+      ? completionTitle
       : metrics.exploring
         ? "Explore freely or keep creating"
+        : finalClueRemaining && destination
+          ? `Find ${objectName(world, destination.id, 70)}`
         : mode === "discover" && started
           ? metrics.interactionHint ||
             metrics.goalHint ||
@@ -926,7 +1025,7 @@ export default function App() {
         <button
           className="primary-button"
           disabled={Boolean(draftFeedback?.errors.length) || Boolean(error)}
-          onClick={() => {
+          onClick={() => requestWorldOpen(() => {
             recordReviewAccepted();
             loadWorld(draft);
             resetCreation();
@@ -940,7 +1039,7 @@ export default function App() {
                 ?.querySelector<HTMLElement>(".world-canvas")
                 ?.focus({ preventScroll: true });
             });
-          }}
+          })}
         >
           <Play size={16} fill="currentColor" /> Play this world
         </button>
@@ -1065,7 +1164,7 @@ export default function App() {
         </div>
         <details className="creation-gameplay-options">
           <summary>Gameplay <span>{creationStyle === "auto" ? "Auto" : creationStyle === "platform" ? "Adventure" : creationStyle === "roam" ? "Explore" : "Discover"}</span></summary>
-        <fieldset className="creation-modes" disabled={busy}>
+        <fieldset className="creation-modes" disabled={busy} aria-describedby="creation-mode-description">
           <legend>Gameplay</legend>
           <div>
             {(
@@ -1086,6 +1185,15 @@ export default function App() {
               </button>
             ))}
           </div>
+          <p id="creation-mode-description" className="small-note" aria-live="polite">
+            {creationStyle === "auto"
+              ? "Choose gameplay to suit your image automatically."
+              : creationStyle === "platform"
+                ? "Move, jump, and reach a destination."
+                : creationStyle === "roam"
+                  ? "Explore the scene freely with a character."
+                  : "Find clues in the image, without a character."}
+          </p>
         </fieldset>
         </details>
         {busy && <div className="creation-progress" role="status">
@@ -1237,16 +1345,9 @@ export default function App() {
                     title={world.name}
                     value={world.name}
                     maxLength={80}
-                    onChange={(e) => {
-                      allowStartupRestore.current = false;
-                      setWorld((w) => ({ ...w, name: e.target.value }));
-                    }}
+                    onChange={(e) => renameWorld(e.target.value)}
                     onBlur={() => {
-                      if (!world.name.trim())
-                        setWorld((w) => ({
-                          ...w,
-                          name: "Untitled world",
-                        }));
+                      if (!worldNow.current.name.trim()) renameWorld("Untitled world");
                     }}
                   />
                   <Pencil size={13} aria-hidden="true" />
@@ -1280,12 +1381,12 @@ export default function App() {
                 </button>
                 <button
                   className="secondary-button save-button"
-                  aria-label={world.source === "example" ? "Save a copy on this device" : "Save world on this device"}
+                  aria-label={world.source === "example" ? "Save a copy on this device" : unsavedWorld ? "Save unsaved world changes on this device" : "Save world on this device"}
                   onClick={() => void save()}
                   disabled={saving}
                   aria-busy={saving}
                 >
-                  <Save size={18} /><span>{world.source === "example" ? "Save a copy" : "Save"}</span>
+                  <Save size={18} /><span>{saving ? "Saving…" : world.source === "example" ? "Save a copy" : unsavedWorld ? "Save changes" : "Save"}</span>
                 </button>
                 <button className="icon-button" aria-label="More world options" title="More" onClick={() => setDialog("world-options")}>
                   <Ellipsis size={20} />
@@ -1326,16 +1427,13 @@ export default function App() {
                   {objective.total > 0 && (
                     <button
                       className="required-progress"
-                      aria-label={`View requirements: ${objective.done} of ${objective.total} ${mode === "discover" ? "found" : "done"}`}
+                      aria-label={finalClueRemaining ? "View requirements: final clue remaining" : `View requirements: ${objective.done} of ${objective.total} ${mode === "discover" ? "found" : "done"}`}
                       onClick={() => {
                         setEditorState(canvas.current?.snapshot() ?? latestState.current);
                         setDialog("rules");
                       }}
                     >
-                      <b>
-                        {objective.done}/{objective.total}
-                      </b>{" "}
-                      {mode === "discover" ? "found" : "done"}
+                      {finalClueRemaining ? "Final clue remaining" : <><b>{objective.done}/{objective.total}</b>{" "}{mode === "discover" ? "found" : "done"}</>}
                     </button>
                   )}
                   {optionalObjects.length > 0 && (
@@ -1363,7 +1461,7 @@ export default function App() {
                   controlsHost={gameControlsHost}
                   overview={mapView}
                   initial={initial}
-                  playing={playing && !dialog && !busy}
+                  playing={active && playing && !dialog && !busy}
                   muted={muted}
                   run={run}
                   onUpdate={(s, m) => {
@@ -1403,8 +1501,8 @@ export default function App() {
                     <div className="completion-icon">
                       <Sparkles size={25} />
                     </div>
-                    <h2>World complete</h2>
-                    {!objective.ready && <p>Achievement from an earlier version retained.</p>}
+                    <h2>{completionTitle}</h2>
+                    <p>{completionDetail}</p>
                     <div>
                       <button
                         className="primary-button"
@@ -1479,7 +1577,7 @@ export default function App() {
                   aria-label={muted ? "Turn sound on" : "Mute sound"}
                   title={muted ? "Turn sound on" : "Mute sound"}
                   aria-pressed={!muted}
-                  onClick={() => setMuted(!muted)}
+                  onClick={() => { setMuted(!muted); focusGameControls(); }}
                 >
                   {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
@@ -1492,7 +1590,7 @@ export default function App() {
                     aria-label={mapView ? "Follow character" : "Show whole world"}
                     title={mapView ? "Follow character" : "Show whole world"}
                     aria-pressed={mapView}
-                    onClick={() => setMapView((value) => !value)}
+                    onClick={() => { setMapView((value) => !value); focusGameControls(); }}
                   >
                     <Map size={17} />
                   </button>
@@ -1660,10 +1758,13 @@ export default function App() {
                 onClick={(event) => {
                   const examples = event.currentTarget.closest("details");
                   if (examples) examples.open = false;
-                  loadWorld(freshExample(example.id));
-                  requestAnimationFrame(() => {
-                    framePlaySurface(false, true);
-                    stage.current?.querySelector<HTMLElement>(".world-canvas")?.focus({ preventScroll: true });
+                  requestWorldOpen(() => {
+                    loadWorld(freshExample(example.id));
+                    setDialog(null);
+                    requestAnimationFrame(() => {
+                      framePlaySurface(false, true);
+                      stage.current?.querySelector<HTMLElement>(".world-canvas")?.focus({ preventScroll: true });
+                    });
                   });
                 }}
               >
@@ -1796,6 +1897,29 @@ export default function App() {
           }}
         >
           {sourcePanel}
+        </Modal>
+      )}
+      {dialog === "unsaved-world" && (
+        <Modal
+          title="Save your changes?"
+          onClose={stayInWorld}
+          footer={
+            <div className="review-actions">
+              <button className="text-button" disabled={saving} onClick={stayInWorld}>Stay</button>
+              <button className="secondary-button" disabled={saving} onClick={() => {
+                const pending = pendingWorldOpen.current;
+                if (!pending || savingNow.current) return;
+                pendingWorldOpen.current = null;
+                pending.open();
+              }}>Discard and open</button>
+              <button className="primary-button" disabled={saving} aria-busy={saving} onClick={() => void saveAndOpenWorld()}>
+                {saving ? "Saving…" : "Save and open"}
+              </button>
+            </div>
+          }
+        >
+          <p className="modal-copy">{world.name || "This world"} has unsaved changes.</p>
+          {saveError && <p className="modal-copy" role="alert">{saveError}</p>}
         </Modal>
       )}
       {dialog === "discard-creation" && (
@@ -2154,14 +2278,17 @@ export default function App() {
             history,
             savedAt: new Date().toISOString(),
           })}
-          onOpen={(entry) => {
+          onOpen={(entry) => requestWorldOpen(() => {
+            // Save and open may have just replaced this same library entry.
+            const latest = savedNow.current.find((item) => item.world.id === entry.world.id) ?? entry;
             loadWorld(
-              entry.world,
-              retainPlayState(entry.world, entry.state),
-              entry.history ?? [],
+              latest.world,
+              retainPlayState(latest.world, latest.state),
+              latest.history ?? [],
+              true,
             );
             setDialog(null);
-          }}
+          })}
           onImport={setSaved}
           onClose={() => setDialog(null)}
         />
