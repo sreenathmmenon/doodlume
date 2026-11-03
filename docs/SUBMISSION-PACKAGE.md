@@ -1,6 +1,6 @@
 # Doodlume submission package
 
-Prepared 3 November 2026. This is submission copy and a recording plan, not a completed film or a claim that the project has been submitted. The current application is local; repository visibility is still private.
+Prepared 3 November 2026. The local 178-second demo has now been recorded and rendered. This package includes submission copy and the original recording plan; the project has not been submitted. The current application is local; repository visibility is still private.
 
 ## Positioning and submission selections
 
@@ -55,7 +55,11 @@ These records establish the local source chain and reported origin only. They do
 
 **Unresolved author declaration:** commit timestamps establish when work was committed, not when every line was first written. This repository audit does not establish that there was no pre-event code. Before submission, the entrant must accurately identify any pre-existing implementation and external assets. Do not substitute “built entirely from scratch during the event” for this qualified statement without evidence. Preserve the existing history rather than rewriting dates. The authenticated guide gives a 27 October–4 November build period and requires the demo to identify event-created features.
 
-## Exact 178-second film plan
+## Recorded 178-second film
+
+Local export: `outputs/submission/video/Doodlume-2m58s-demo.mp4`. The same folder retains the final edit manifest, narration, reproducible render script and export checks. A continuous fresh request produced Dino’s Purple Leap, followed by real keyboard completion, original-platform widening/movement, replay, Save and open, and reopening the edited world. Interrupted footage was excluded. The generation wait is explicitly shortened; stored examples and the AI-generated room image are labelled. Narration is locally synthesized.
+
+## Original 178-second storyboard
 
 This is an edit decision list. The intervals total **2:58 (178 seconds)**. Record genuine interactions first; choose the clearest verified source, then edit to these boundaries. The narration below leaves space for visible actions and pauses. A shorter clip or a homepage animation is not the finished film.
 
@@ -76,9 +80,9 @@ This is an edit decision list. The intervals total **2:58 (178 seconds)**. Recor
 
 - **Public repository:** `gh repo view` confirmed `PRIVATE` on 3 November. The guide requires public access. Preparing documentation does not change visibility; owner authorization and a final secret/asset review precede publication.
 - **Public product access:** only loopback operation is verified. The server intentionally restricts host/origin to local addresses; a public interactive deployment needs an explicit hosting/configuration change and its own verification. A static homepage alone does not make new-image generation publicly usable.
-- **Final film:** this document is a script, not an exported 178-second video. Capture, edit, duration/audio checks, hosting and signed-out playback remain to be completed.
+- **Public video:** the local 178-second film is exported. Public hosting and signed-out playback remain to be completed. Technical audio checks and inspected frames are separate from a human listening review.
 - **Contribution and asset attribution:** identify pre-existing work and rights-cleared public demo assets; the current product implementation commit is `5fbd5b8`. Initial concept planning predates the repository's recorded implementation.
-- **Final current-build evidence:** attach the freshly recorded request, meaningful edit→play result, and save/reopen proof to the chosen final demo. Broader arbitrary-image reliability is not established.
+- **Current-build evidence:** the fresh request, meaningful edit→play result and save/reopen proof are included in the local film. Broader arbitrary-image reliability is not established.
 - **Form completion:** confirm track/problem statement, list all actual human contributors, public repository, public video and any required live URL. Submit only after the owner requests the final submission; retain a receipt.
 
 The authenticated [participant guide](https://cerebralvalley.ai/e/meta-ai-developer-hackathon/details) states **4 November, 9 PM EST** as the deadline: **5 November, 7:30 AM IST**. Its rubric is impact 30%, Meta tooling 25%, technical execution 20%, demo 25%. Judging runs 5–8 November and live finals are 9 November at noon ET. See [research ledger](SUBMISSION-RESEARCH-2026-11-02.md) for source distinctions and the public-page date discrepancy. No later judging period is treated as extra build time.

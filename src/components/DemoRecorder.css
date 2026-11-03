@@ -1,7 +1,8 @@
 .demo-recorder {
   position: fixed;
   z-index: 10000;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 16px;
   width: 300px;
   color: #18222d;

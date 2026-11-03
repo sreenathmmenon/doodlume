@@ -34,7 +34,7 @@ Deadline: **4 November, 9 PM EST / 5 November, 7:30 AM IST**. Participant guide:
 - [x] Implemented three real recorded example worlds with distinct source types; playable on the homepage, explicitly labelled examples.
 - [x] Verify first-view composition at 1440×900, 1280×720 and 1024×600; no clipped/overlapping text or misleading controls.
 - [x] Verify all three examples open, pause/resume and switch without state leakage; the drawing example completes through keyboard play.
-- [ ] Verify the homepage Play again control after completion on the final build.
+- [x] Verify homepage Play again: completed, replayed and completed again using ordinary keys; evidence `qa-homepage/24-play-again-completed.png`.
 - [x] Verify upload/draw actions, browser Back and return-to-studio preserve the current session.
 - [x] Inspect lower page and keyboard access; remove unnecessary content.
 
@@ -42,7 +42,7 @@ Deadline: **4 November, 9 PM EST / 5 November, 7:30 AM IST**. Participant guide:
 
 - [x] Verify one fresh real Meta request through the current UI; retain provider/model and actual outcome.
 - [x] Verify a fresh world’s source-art move/resize, Apply, Save, reopen and Undo in the live browser; source pixels and collision coordinates share the same transform.
-- [ ] Verify keyboard landing on that edited ledge after the Mac is unlocked; the visual edit proof is not substituted for this play check.
+- [x] Verify keyboard landing on the edited ledge and completing the route in a clean recording after unlock; restart/replay work without refocusing.
 - [x] Verify Save and open / Discard and open / Stay in the browser, including same-entry reopen.
 - [ ] Fault-test failed/stale saves; guards are source-reviewed, not browser fault-tested.
 - [x] Verify existing-object Delete preserves edits; explicit Reset and Undo work.
@@ -55,9 +55,9 @@ Deadline: **4 November, 9 PM EST / 5 November, 7:30 AM IST**. Participant guide:
 ## Film and submission package
 
 - [x] Reverse storyboard tied to the actual weighted rubric above.
-- [ ] Capture actual interaction footage and proof screenshots only after verifying the journey.
-- [ ] Produce an exact 178-second edit, readable without sound; separate accelerated generation from realtime play.
-- [ ] Check exported duration, picture, captions, audio and opening/closing frames.
+- [x] Capture a continuous fresh request→review→play→edit→play→save→reopen take; interrupted recording explicitly excluded.
+- [x] Produce a 178-second local edit with readable scene captions, synthetic narration and a labelled generation time cut; gameplay stays real time.
+- [x] Check export streams: 178 seconds each, 1920×1080, 30 fps, 5,340 frames, no decode errors; inspect scene/closing frames and captions; technical audio peak −1.5 dB. This is frame and technical audio review, not a claimed human full-motion listening review.
 - [x] Add verified model-use explanation, partner feedback, README quickstart, event-contribution statement and demonstration instructions.
 - [ ] Provide an accessible live product and video link; check from a signed-out browser.
 - [ ] Prepare optional short social cut and X post draft; posting is not authorized by this checklist.
@@ -65,6 +65,10 @@ Deadline: **4 November, 9 PM EST / 5 November, 7:30 AM IST**. Participant guide:
 
 ## Current status
 
-Homepage, editor and persistence checks have browser evidence in `outputs/submission/qa-homepage`, `qa-editor` and `qa-persistence`. A new real request produced Dino's Star Hop, then reached its destination using ordinary keyboard input (`qa-creation`). The edit-to-play check exposed a source-art layer defect. Its repair now passes fresh-request, editor, runtime-artwork, save/reopen and undo checks in the browser (`qa-creation/results.json`). Actual keyboard landing on the changed ledge is pending because the Mac locked during verification. Raw homepage/example footage and narration files are captured locally; no final film, public deployment or completed submission is claimed.
+Product implementation `5fbd5b8` and documentation `7d474dc` are pushed to the private repository. Homepage, editor and persistence checks have browser evidence in `outputs/submission/qa-homepage`, `qa-editor` and `qa-persistence`.
 
-Newly discovered gates: source-object visual bounds must remain aligned with edited collision geometry; fresh game input now works immediately without pause/resume, with browser proof in `qa-homepage/review.json`. These are functional requirements for the film, not issues to hide during editing. Restart and map focus restoration now pass browser DOM-focus checks on the final build. Mute/fullscreen use the same helper; held-key gameplay after restart still awaits unlock. Source provenance is documented in `SUBMISSION-PACKAGE.md`; the product implementation is committed as `5fbd5b8`, while owner declarations remain pending.
+The Mac is unlocked and the previously blocked play checks now pass. A clean continuous recording shows a fresh Meta request creating **Dino's Purple Leap**, completion, a widened/raised source platform, replay through the changed route, Save and open, and reopening with the edit and completion preserved. Homepage Play again also completes a second time. The interrupted take is excluded. Evidence and precise recording events are in `outputs/submission/qa-creation/results.json` and `footage/continuous-events.json`.
+
+The local film is `outputs/submission/video/Doodlume-2m58s-demo.mp4`; export checks are in `video/export-verification.json`. Recorder controls were cropped outside the game, and clip color formats were normalized to preserve picture/narration timing. Captioned scene boundaries, raw clips, narration text/audio and a reproducible local edit script are retained in that folder. The room example is explicitly identified as AI generated. No public deployment, public video link or completed submission is claimed.
+
+Still open: public release and signed-out access, owner contribution/asset declarations, optional social cut, fault-injected save checks and final submission. A successful known-input journey does not establish universal image support or a quality score.
