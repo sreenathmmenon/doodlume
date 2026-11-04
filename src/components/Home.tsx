@@ -70,7 +70,7 @@ export default function Home({ onContinueInStudio }: { onContinueInStudio?: (ent
     const links = Object.fromEntries((rover.interactions?.actions ?? []).map(a => [a.id, { from: a.toolId, to: a.targetId }]));
     return {
       patio: { world: patio, boxes: readBoxes(patio), relations: readRelations(patio), goal: goalTitle(patio) },
-      rover: { world: rover, boxes: readBoxes(rover), sentences: ruleSentences(rover), links },
+      rover: { world: rover, boxes: readBoxes(rover), sentences: ruleSentences(rover).slice(0, 2), links },
       rooftop: { world: rooftop, boxes: readBoxes(rooftop), beats: countBeats(rooftop), goal: goalTitle(rooftop) },
     };
   }, []);

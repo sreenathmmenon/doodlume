@@ -352,10 +352,13 @@ body {
   color: var(--ink);
   font-size: 12px;
 }
-.world-progress-counts button.required-progress { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); }
+.world-progress-counts button.required-progress { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 5px 12px 5px 5px; border: 1px solid var(--ink); border-radius: 100px; background: var(--paper); color: var(--ink); font-size: 13px; font-weight: 600; }
 .world-progress-counts button.required-progress:hover { background: var(--surface-hover); }
 .required-progress b {
-  font-weight: 650;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 36px; height: 24px; padding: 0 8px; border-radius: 100px;
+  background: var(--ink); color: var(--paper);
+  font-size: 12px; font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 .optional-progress {
