@@ -5,11 +5,11 @@ import { prepareSourceInteractionReview } from "./creative-adaptation.js";
 import { interpretDrawing } from "./interpret.js";
 import { modelConnection } from "./provider.js";
 import { imageData } from "./images.js";
-import { reduceInteraction } from "../shared/interactions.js";
+import { interactionEffects, reduceInteraction } from "../shared/interactions.js";
 import { emptyPlayState, goalProgress } from "../shared/world.js";
 
 const connection = modelConnection({ MODEL_PROVIDER: "meta", MODEL_API_KEY: "synthetic-test-only" });
-async function compile(options: { prefix?: string; amount?: number; initial?: number; required?: string[]; targetId?: string; carryable?: boolean; move?:boolean; resourceGoal?:boolean; requiresResource?:"source"|"target" } = {}) {
+async function compile(options: { prefix?: string; amount?: number; initial?: number; required?: string[]; targetId?: string; carryable?: boolean; move?:boolean; resourceGoal?:boolean; requiresResource?:"source"|"target"; placement?:"place"|"use"; edgePlacement?:boolean } = {}) {
   const prefix = options.prefix ?? "fixture";
   const source = `${prefix}-source`, target = `${prefix}-target`;
   const image = imageData(await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600"><rect width="1000" height="600" fill="#eee"/><path d="M100 100h100v100H100z" fill="#54a"/><circle cx="700" cy="350" r="60" fill="#7a5"/></svg>')).png().toBuffer());
@@ -18,7 +18,7 @@ async function compile(options: { prefix?: string; amount?: number; initial?: nu
     objects: [
       { id: source, kind: "decoration", label: "Supply", targetId: null, bounds: { left: 100, top: 160, right: 200, bottom: 340 } },
       ...(options.move ? [{id:"dock",kind:"decoration",label:"Dock",targetId:null,bounds:{left:800,top:100,right:950,bottom:400}}] : []),
-      { id: target, kind: "decoration", label: "Recipient", targetId: null, bounds: { left: 640, top: 480, right: 760, bottom: 690 } },
+      { id: target, kind: "decoration", label: "Recipient", targetId: null, bounds: options.edgePlacement ? { left: 980, top: 480, right: 1000, bottom: 690 } : { left: 640, top: 480, right: 760, bottom: 690 } },
     ],
     goalRules: { requiredCollectedIds: [], requiredActivatedIds: [] },
     gameplay: {
@@ -30,7 +30,7 @@ async function compile(options: { prefix?: string; amount?: number; initial?: nu
       requiredResourceIds: options.resourceGoal ? [target] : [],
       interactions: { version: 1,
         objects: [{ entityId: source, carryable: options.carryable ?? true, resource: { type: "water", initial: options.initial ?? 3, capacity: 3 } }, { entityId: target, carryable: false, resource: { type: "water", initial: 0, capacity: options.resourceGoal ? 2 : 5 } }],
-        actions: [{ id: "supply", label: "Fill the recipient", toolId: source, targetId: options.targetId ?? target, kind: "transfer", amount: options.amount ?? 2, requires: [], ...(options.requiresResource ? {requiresResourceIds:[options.requiresResource === "source" ? source : target]} : {}), effects: options.move ? [{kind:"moveObject",entityId:target,destinationId:"dock",durationMs:900}] : [] }],
+        actions: [{ id: "supply", label: "Fill the recipient", toolId: source, targetId: options.targetId ?? target, kind: options.placement ?? "transfer", ...(options.placement ? {} : {amount: options.amount ?? 2}), requires: [], ...(options.requiresResource ? {requiresResourceIds:[options.requiresResource === "source" ? source : target]} : {}), effects: options.placement ? [{kind:"moveObject",entityId:source,destinationId:target,durationMs:900}] : options.move ? [{kind:"moveObject",entityId:target,destinationId:"dock",durationMs:900}] : [] }],
       },
     },
   };
@@ -121,4 +121,31 @@ test("model resource prerequisites survive compilation and reject impossible fil
   const picked=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"fixture-source"});
   assert.equal(reduceInteraction(world,picked.state,{type:"perform",actionId:"supply"}).ok,true);
   await assert.rejects(compile({requiresResource:"target"}),/cannot be completed/);
+});
+
+
+test("model placement compiles real source objects, releases the object and earns the mission through its actual move", async () => {
+  const world = await compile({ placement: "place" });
+  const source = world.entities.find(entity => entity.id === "fixture-source")!;
+  const target = world.entities.find(entity => entity.id === "fixture-target")!;
+  assert.ok(source.art && source.sourceLayer, "The carried source artwork is prepared independently");
+  const picked = reduceInteraction(world, emptyPlayState(), { type: "pickup", entityId: source.id });
+  const placed = reduceInteraction(world, picked.state, { type: "perform", actionId: "supply" });
+  assert.equal(placed.ok, true);
+  assert.equal(placed.state.interactions?.heldEntityId, null);
+  assert.equal(placed.state.interactions?.attachments[source.id], undefined);
+  const move = interactionEffects(world, placed.state).objectMoves[source.id];
+  assert.equal(move.x, target.x + (target.width - source.width) / 2);
+  assert.equal(move.y, target.y + (target.height - source.height) / 2);
+  assert.equal(goalProgress(world, placed.state).ready, true);
+  assert.equal(reduceInteraction(world, placed.state, { type: "pickup", entityId: source.id }).ok, true);
+});
+
+test("self-movement returned as use is rejected rather than silently rewritten as placement", async () => {
+  await assert.rejects(compile({ placement: "use" }), /moving object|placement|stationary source|carried/);
+});
+
+
+test("edge placement names the conflicting source selections without clipping or shrinking artwork", async () => {
+  await assert.rejects(compile({ placement: "place", edgePlacement: true }), /Supply cannot fit at the center of Recipient.*more central visible destination.*not been resized/);
 });

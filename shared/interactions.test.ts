@@ -264,3 +264,84 @@ test("resource goals accept either ordering but prevent optional depletion and r
   invalid.goalRules!.requiredResourceIds=["unknown"];
   assert.throws(()=>validateWorld(invalid),/resource task/);
 });
+
+test("fractional supplies reach exact full/empty levels and remain completed after save", () => {
+  const w = world();
+  w.interactions!.objects[0].resource = {type:"charge", capacity:0.3, initial:0.3};
+  w.interactions!.objects[1].resource = {type:"charge", capacity:0.3, initial:0};
+  w.interactions!.actions = [
+    {id:"small", kind:"transfer", label:"Add a little", toolId:"supply", targetId:"receiver", amount:0.1},
+    {id:"large", kind:"transfer", label:"Add the rest", toolId:"supply", targetId:"receiver", amount:0.2},
+    {id:"finish", kind:"use", label:"Start the mechanism", toolId:"part", targetId:"receiver", requiresResourceIds:["receiver"], effects:[{kind:"openGate",entityId:"barrier"}]},
+  ];
+  w.goalRules!.requiredInteractionIds = ["finish"];
+  w.goalRules!.requiredResourceIds = ["receiver"];
+  validateWorld(w);
+  for (const order of [["small","large"],["large","small"]]) {
+    let s = step(w, emptyPlayState(), {type:"pickup", entityId:"supply"});
+    for (const actionId of order) s = step(w, s, {type:"perform", actionId});
+    assert.deepEqual(s.interactions!.quantities, {supply:0, receiver:0.3});
+    s = step(w, step(w, s, {type:"drop"}), {type:"pickup", entityId:"part"});
+    s = step(w, s, {type:"perform", actionId:"finish"});
+    assert.equal(goalProgress(w,s).ready,true);
+    const restored = validSavedWorlds(JSON.parse(JSON.stringify([{world:w,state:s,savedAt:new Date().toISOString()}])))[0];
+    assert.equal(goalProgress(restored.world,restored.state).ready,true);
+    assert.deepEqual(restored.state.interactions!.quantities, {supply:0,receiver:0.3});
+  }
+});
+
+test("unrelated optional interactions cannot crowd a valid resource route out of verification", () => {
+  const w = world();
+  w.interactions!.actions = [
+    {id:"finish", kind:"use", label:"Start the mechanism", toolId:"part", targetId:"receiver", requiresResourceIds:["receiver"], effects:[{kind:"openGate",entityId:"barrier"}]},
+    {id:"consume", kind:"attach", label:"Attach the supply", toolId:"supply", targetId:"receiver", effects:[{kind:"openGate",entityId:"barrier"}]},
+    ...Array.from({length:16}, (_,i) => ({id:`optional-${i}`, kind:"use" as const, label:`Optional capability ${i}`, toolId:"part", targetId:"receiver", effects:[{kind:"openGate" as const,entityId:"barrier"}]})),
+    {id:"fill", kind:"transfer", label:"Fill", toolId:"supply", targetId:"receiver", amount:10},
+  ];
+  w.goalRules!.requiredInteractionIds = ["finish"];
+  validateWorld(w);
+  let s = step(w, emptyPlayState(), {type:"pickup",entityId:"supply"});
+  assert.deepEqual(safeAvailableInteractions(w,s).map(a=>a.id),["fill"]);
+  assert.equal(reduceInteraction(w,s,{type:"perform",actionId:"consume"}).ok,false);
+  s = step(w,s,{type:"perform",actionId:"fill"});
+  s = step(w,step(w,s,{type:"drop"}),{type:"pickup",entityId:"part"});
+  assert.equal(safeAvailableInteractions(w,s).some(a=>a.id==="optional-0"),true,"Unrelated optional play remains available when safe.");
+  s = step(w,s,{type:"perform",actionId:"finish"});
+  assert.equal(goalProgress(w,s).ready,true);
+});
+
+test("placing a carried object changes its location, releases it, and preserves ordered placements on save", () => {
+  const w = world();
+  const part = w.entities.find(entity => entity.id === "part")!;
+  part.art = "/art/seed.svg";
+  w.interactions!.actions = [
+    {id:"place-first", kind:"place", label:"Place beside the mechanism", toolId:"part", targetId:"receiver", effects:[{kind:"moveObject",entityId:"part",x:360,y:100}]},
+    {id:"place-next", kind:"place", label:"Return beside the supply", toolId:"part", targetId:"supply", requires:["place-first"], effects:[{kind:"moveObject",entityId:"part",x:140,y:180}]},
+  ];
+  w.goalRules!.requiredInteractionIds = ["place-first","place-next"];
+  validateWorld(w);
+  let s = emptyPlayState();
+  assert.equal(reduceInteraction(w,s,{type:"perform",actionId:"place-first"}).ok,false,"Placement requires actually holding the object.");
+  s = step(w,s,{type:"pickup",entityId:"part"});
+  assert.equal(reduceInteraction(w,s,{type:"perform",actionId:"place-next"}).ok,false,"Later placement must wait for its prerequisite.");
+  s = step(w,s,{type:"perform",actionId:"place-first"});
+  assert.equal(s.interactions!.heldEntityId,null);
+  assert.deepEqual(s.interactions!.attachments,{},"Placement leaves the object free to pick up again.");
+  assert.deepEqual(interactionEffects(w,s).objectMoves.part,{x:360,y:100,durationMs:900,actionId:"place-first"});
+  assert.equal(part.x,200,"Original source geometry is unchanged.");
+  s = step(w,s,{type:"pickup",entityId:"part"});
+  assert.deepEqual(safeAvailableInteractions(w,s).map(action=>action.id),["place-next"]);
+  s = step(w,s,{type:"perform",actionId:"place-next"});
+  const restored = validSavedWorlds(JSON.parse(JSON.stringify([{world:w,state:s,savedAt:new Date().toISOString()}])))[0];
+  assert.equal(goalProgress(restored.world,restored.state).ready,true);
+  assert.deepEqual(interactionEffects(restored.world,restored.state).objectMoves.part,{x:140,y:180,durationMs:900,actionId:"place-next"});
+  assert.equal(step(w,restored.state,{type:"pickup",entityId:"part"}).interactions!.heldEntityId,"part");
+  for (const mutate of [
+    (invalid:WorldDefinition)=>{invalid.interactions!.actions[0].kind="use";},
+    (invalid:WorldDefinition)=>{invalid.interactions!.actions[0].effects=[{kind:"moveObject",entityId:"receiver",x:600,y:100}];},
+    (invalid:WorldDefinition)=>{invalid.interactions!.actions[0].effects!.push({kind:"openGate",entityId:"barrier"});},
+    (invalid:WorldDefinition)=>{invalid.interactions!.actions[1].requires=[];},
+    (invalid:WorldDefinition)=>{invalid.entities.find(entity=>entity.id==="part")!.art=undefined;},
+    (invalid:WorldDefinition)=>{invalid.interactions!.actions[0].targetId="part";},
+  ]) { const invalid=structuredClone(w); mutate(invalid); assert.throws(()=>validateWorld(invalid)); }
+});

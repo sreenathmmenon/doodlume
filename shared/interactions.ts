@@ -31,6 +31,7 @@ export type InteractionAction = ActionBase & (
   | { kind: "transfer"; amount: number }
   | { kind: "attach" }
   | { kind: "use" }
+  | { kind: "place" }
 );
 export interface InteractionPlan {
   version: 1;
@@ -50,7 +51,7 @@ export type InteractionCommand =
   | { type: "drop" }
   | { type: "perform"; actionId: string };
 export interface InteractionEvent {
-  kind: "pickup" | "drop" | "transfer" | "attach" | "use";
+  kind: "pickup" | "drop" | "transfer" | "attach" | "use" | "place";
   entityId?: string;
   actionId?: string;
   toolId?: string;
@@ -68,6 +69,10 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const keysOnly = (v: object, keys: string[]) => Object.keys(v).every(key => keys.includes(key));
 const quantity = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 10000;
 const fail = (message: string): never => { throw new Error(message); };
+// Resource values may be fractional. Compare within floating-point roundoff,
+// rather than letting 0.1 + 0.2 overflow a 0.3-capacity container.
+const sameQuantity = (a: number, b: number) => Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(Math.abs(a), Math.abs(b));
+const hasQuantity = (available: number, required: number) => available >= required || sameQuantity(available, required);
 
 export function validateInteractions(world: WorldDefinition, options: { allowUnpreparedArtwork?: boolean } = {}): void {
   const p = world.interactions;
@@ -103,7 +108,7 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
   for (const a of p.actions) {
     if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "requiresResourceIds", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
         !safeId(a.id) || actions.has(a.id) || typeof a.label !== "string" || !a.label.trim() || a.label.length > 80 ||
-        !["transfer", "attach", "use"].includes(a.kind) || !safeId(a.toolId) || !safeId(a.targetId) || a.toolId === a.targetId ||
+        !["transfer", "attach", "use", "place"].includes(a.kind) || !safeId(a.toolId) || !safeId(a.targetId) || a.toolId === a.targetId ||
         !objects.get(a.toolId)?.carryable || !objects.has(a.targetId) ||
         (a.requires !== undefined && (!Array.isArray(a.requires) || a.requires.length > 32 || a.requires.some(id => !safeId(id)) || new Set(a.requires).size !== a.requires.length)) ||
         (a.effects !== undefined && (!Array.isArray(a.effects) || a.effects.length > 8)))
@@ -114,7 +119,9 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
       const source = objects.get(a.toolId)!.resource, target = objects.get(a.targetId)!.resource;
       if (!source || !target || source.type !== target.type || !quantity(a.amount) || a.amount <= 0 || a.amount > source.capacity || a.amount > target.capacity)
         fail("A transfer needs compatible resources and a usable amount.");
-    } else if (!a.effects?.length) fail("Using or attaching an object must change a supported capability.");
+    } else if (!a.effects?.length) fail("Using, attaching or placing an object must change a supported capability.");
+    if (a.kind === "place" && (a.effects?.length !== 1 || a.effects[0].kind !== "moveObject" || a.effects[0].entityId !== a.toolId))
+      fail("Placing an object must move only the carried object to one destination.");
     if (a.kind === "attach") {
       if (attachedTools.has(a.toolId)) fail("A part can attach to only one target in this plan.");
       attachedTools.add(a.toolId);
@@ -128,11 +135,11 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
         const entity = entities.get(effect.entityId);
         const object = objects.get(effect.entityId);
         if (!keysOnly(effect, ["kind", "entityId", "x", "y", "durationMs"]) || !safeId(effect.entityId) ||
-            !entity || entity.kind !== "decoration" || !object || object.carryable ||
+            !entity || entity.kind !== "decoration" || !object || (object.carryable && (a.kind !== "place" || effect.entityId !== a.toolId)) ||
             ![effect.x, effect.y].every(Number.isFinite) || effect.x < 0 || effect.y < 0 ||
             effect.x + entity.width > world.width || effect.y + entity.height > world.height ||
             (effect.durationMs !== undefined && (!Number.isFinite(effect.durationMs) || effect.durationMs < 150 || effect.durationMs > 4000)))
-          fail("A moving object needs one bounded destination, a stationary source prop and a supported duration.");
+          fail("A moving object needs one bounded destination, a stationary prop or explicitly placed carried object, and a supported duration.");
         if (!options.allowUnpreparedArtwork && (!entity!.art || (entity!.artSource && !entity!.sourceLayer)))
           fail("Prepare the moving object's source artwork and background before giving it a destination.");
         const steps = movementSteps.get(effect.entityId) ?? [];
@@ -222,7 +229,7 @@ function blockedReason(world: WorldDefinition, s: InteractionState, action: Inte
   if (action.requires?.some(id => !s.completed.includes(id))) return "Complete the earlier step first.";
   const missingResources = (action.requiresResourceIds ?? []).filter(id => {
     const resource = world.interactions!.objects.find(object => object.entityId === id)!.resource!;
-    return (s.quantities[id] ?? 0) < resource.capacity;
+    return !hasQuantity(s.quantities[id] ?? 0, resource.capacity);
   });
   if (missingResources.length) {
     const names = missingResources.slice(0,2).map(id => world.entities.find(entity => entity.id === id)?.label?.trim() || "the required object");
@@ -232,19 +239,25 @@ function blockedReason(world: WorldDefinition, s: InteractionState, action: Inte
   if (s.attachments[action.toolId]) return "That part is already attached.";
   if (action.kind === "transfer") {
     const target = world.interactions!.objects.find(o => o.entityId === action.targetId)!.resource!;
-    if ((s.quantities[action.toolId] ?? 0) < action.amount) return "Not enough left in this object.";
-    if ((s.quantities[action.targetId] ?? 0) + action.amount > target.capacity) return "The target does not have enough room.";
+    if (!hasQuantity(s.quantities[action.toolId] ?? 0, action.amount)) return "Not enough left in this object.";
+    if (!hasQuantity(target.capacity, (s.quantities[action.targetId] ?? 0) + action.amount)) return "The target does not have enough room.";
   }
 }
-function apply(s: InteractionState, action: InteractionAction) {
+function apply(world: WorldDefinition, s: InteractionState, action: InteractionAction) {
   if (action.kind === "transfer") {
-    s.quantities[action.toolId] = Math.max(0, s.quantities[action.toolId] - action.amount);
-    s.quantities[action.targetId] += action.amount;
+    const source = s.quantities[action.toolId];
+    const target = s.quantities[action.targetId] + action.amount;
+    const capacity = world.interactions!.objects.find(object => object.entityId === action.targetId)!.resource!.capacity;
+    s.quantities[action.toolId] = sameQuantity(source, action.amount) ? 0 : Math.max(0, source - action.amount);
+    // Store exact full/empty boundary values so progress, saves and the renderer
+    // all agree without each consumer inventing its own numeric tolerance.
+    s.quantities[action.targetId] = sameQuantity(target, capacity) ? capacity : target;
   }
   if (action.kind === "attach") {
     s.attachments[action.toolId] = action.targetId;
     if (s.heldEntityId === action.toolId) s.heldEntityId = null;
   }
+  if (action.kind === "place" && s.heldEntityId === action.toolId) s.heldEntityId = null;
   s.completed.push(action.id);
   s.completedSignatures![action.id] = signature(action);
 }
@@ -256,7 +269,7 @@ export function interactionState(world: WorldDefinition, state: PlayState): Inte
   const actions = new Map(world.interactions.actions.map(a => [a.id, a]));
   for (const id of Array.isArray(saved.completed) ? saved.completed.slice(0, 64) : []) {
     const a = actions.get(id);
-    if (a && record(saved.completedSignatures) && Object.hasOwn(saved.completedSignatures, id) && saved.completedSignatures[id] === signature(a) && !blockedReason(world, result, a, false)) apply(result, a);
+    if (a && record(saved.completedSignatures) && Object.hasOwn(saved.completedSignatures, id) && saved.completedSignatures[id] === signature(a) && !blockedReason(world, result, a, false)) apply(world, result, a);
   }
   const held = saved.heldEntityId;
   if (typeof held === "string" && world.interactions.objects.some(o => o.entityId === held && o.carryable) && !result.attachments[held]) result.heldEntityId = held;
@@ -278,7 +291,27 @@ function completionFeasibility(world: WorldDefinition, start: InteractionState):
     }
   };
   for (const id of required) visit(id);
-  const ordered = [...actions].sort((a, b) => Number(needed.has(b.id)) - Number(needed.has(a.id)));
+  // An optional action with no effect on required work cannot help complete it.
+  // Searching every permutation of such actions can exhaust the budget before
+  // finding a simple valid route. Retain the complete connected resource graph:
+  // outgoing transfers may free capacity, incoming transfers may replenish a
+  // supply, and either route may introduce further prerequisites/readiness.
+  const relevant = new Set(needed);
+  const resourceIds = new Set(resources.map(object => object.entityId));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const addAction = (id: string) => { if (!relevant.has(id)) { relevant.add(id); changed = true; } };
+    const addResource = (id: string) => { if (!resourceIds.has(id)) { resourceIds.add(id); changed = true; } };
+    for (const action of actions) {
+      if (action.kind === "transfer" && (resourceIds.has(action.toolId) || resourceIds.has(action.targetId))) addAction(action.id);
+      if (!relevant.has(action.id)) continue;
+      for (const id of action.requires ?? []) addAction(id);
+      for (const id of action.requiresResourceIds ?? []) addResource(id);
+      if (action.kind === "transfer") { addResource(action.toolId); addResource(action.targetId); }
+    }
+  }
+  const ordered = actions.filter(action => relevant.has(action.id)).sort((a, b) => Number(needed.has(b.id)) - Number(needed.has(a.id)));
   const seen = new Set<string>();
   let bounded = false;
   const search = (state: InteractionState): boolean => {
@@ -292,7 +325,7 @@ function completionFeasibility(world: WorldDefinition, start: InteractionState):
       // consume parts, and quantities/prerequisites use the live game's rules.
       if (blockedReason(world, state, action, false)) continue;
       const next = structuredClone(state);
-      apply(next, action);
+      apply(world, next, action);
       if (search(next)) return true;
     }
     return false;
@@ -335,7 +368,7 @@ export function safeAvailableInteractions(world: WorldDefinition, state: PlaySta
       if (blockedReason(world, normalized, action, true)) return false;
       if (!hasGoals) return true;
       const candidate = structuredClone(normalized);
-      apply(candidate, action);
+      apply(world, candidate, action);
       return completionFeasibility(world, candidate) === "possible";
     });
     cached = { fingerprint, actions };
@@ -366,7 +399,7 @@ export function reduceInteraction(world: WorldDefinition, state: PlayState, comm
   if (!action) return reject("This action is no longer available.");
   const reason = blockedReason(world, s, action, true);
   if (reason) return reject(reason);
-  apply(s, action);
+  apply(world, s, action);
   const feasibility = completionFeasibility(world, s);
   if (feasibility !== "possible") return reject(feasibility === "bounded"
     ? "This choice needs a simpler task plan before it can be verified."

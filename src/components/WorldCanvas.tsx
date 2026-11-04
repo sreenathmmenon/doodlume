@@ -6,6 +6,7 @@ import {
   useImperativeHandle,
   useRef,
   useId,
+  useMemo,
   useState,
 } from "react";
 import Phaser from "phaser";
@@ -22,7 +23,8 @@ import {
 } from "../../shared/world";
 import "./world-canvas-controls.css";
 import { objectName } from "../lib/object-name";
-import { safeAvailableInteractions } from "../../shared/interactions";
+import { interactionState, safeAvailableInteractions } from "../../shared/interactions";
+import { nextInteractionHint } from "../lib/interaction-guide";
 import {
   diagnosticsEnabled,
   recordGameCreated,
@@ -32,6 +34,8 @@ import {
   recordWorldReady,
 } from "../lib/runtime-diagnostics";
 
+const quantityLabel = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 6 });
+
 export interface WorldCanvasHandle {
   snapshot: () => PlayState | undefined;
   explore: () => PlayState | undefined;
@@ -40,6 +44,7 @@ export interface WorldCanvasHandle {
   interactWithObject: (entityId: string, actionId?: string) => boolean;
   dropHeldObject: () => void;
   interactAt: (point: { x: number; y: number }) => boolean;
+  dismissObjectChoices: () => boolean;
 }
 interface Props {
   overlay?: ReactNode;
@@ -68,6 +73,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     );
     const [selectedDiscovery, setSelectedDiscovery] = useState("");
     const [selectedObjectAction, setSelectedObjectAction] = useState("");
+    const [hintOpen, setHintOpen] = useState(false);
     const mode = movementMode(props.world);
     const scene = useRef<WorldScene | undefined>(undefined);
     const startupFailed = useRef(false);
@@ -91,6 +97,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         interactWithObject: (entityId, actionId) => scene.current?.interactWithObject(entityId, actionId) ?? false,
         dropHeldObject: () => scene.current?.dropHeldObject(),
         interactAt: (point) => scene.current?.interactAt(point) ?? false,
+        dismissObjectChoices: () => scene.current?.dismissObjectChoices() ?? false,
         snapshot: () =>
           startupFailed.current
             ? structuredClone(
@@ -135,6 +142,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       setDiscoveryProgress(lastState);
       setSelectedDiscovery("");
       setSelectedObjectAction("");
+      setHintOpen(false);
       function clearStartupWait() {
         clearTimeout(readyTimeout);
         clearTimeout(openingFeedback);
@@ -479,12 +487,32 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         );
     const objectActions = selectedDiscovery ? safeAvailableInteractions(props.world, discoveryProgress, selectedDiscovery) : [];
     const chosenObjectAction = objectActions.length === 1 ? objectActions[0] : objectActions.find(action => action.id === selectedObjectAction);
+    const interactionProgress = interactionState(props.world, discoveryProgress);
+    const heldObject = props.world.entities.find(entity => entity.id === interactionProgress.heldEntityId);
+    const heldResource = props.world.interactions?.objects.find(object => object.entityId === heldObject?.id)?.resource;
+    const selectedObject = props.world.interactions?.objects.find(object => object.entityId === selectedDiscovery);
+    const canTakeSelected = selectedObject?.carryable && selectedDiscovery !== heldObject?.id && !interactionProgress.attachments[selectedDiscovery];
+    // Frame reports update position frequently. Re-plan an open hint only when
+    // actual progress changes; revealing it is deliberately opt-in.
+    const progressKey = JSON.stringify([discoveryProgress.interactions, discoveryProgress.collected, discoveryProgress.activated, discoveryProgress.completed, discoveryProgress.exploring]);
+    const nextHint = useMemo(() => hintOpen ? nextInteractionHint(props.world, discoveryProgress) : undefined,
+      [hintOpen, props.world, progressKey]);
+    const finished = discoveryProgress.completed && !discoveryProgress.exploring;
     const objectControls = props.world.interactions && ready && !failed && (
+      <div className="object-play-tools">
+        <div className="object-play-strip">
+          {heldObject && <div className="carried-object" role="status">
+            {heldObject.art && <img src={heldObject.art} alt="" />}
+            <span><small>Holding</small><strong>{objectName(props.world, heldObject.id, 42)}</strong></span>
+            {heldResource && <span className="carried-quantity" aria-label={`${quantityLabel.format(interactionProgress.quantities[heldObject.id])} of ${quantityLabel.format(heldResource.capacity)} remaining`}>{quantityLabel.format(interactionProgress.quantities[heldObject.id])}/{quantityLabel.format(heldResource.capacity)}</span>}
+            <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`Put back ${objectName(props.world, heldObject.id, 42)}`} title="Put back (Q)">Put back</button>
+          </div>}
+          {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}
       <details className="object-keyboard-play">
         <summary>Object controls</summary>
         <div>
           <label>Choose an object
-            <select aria-label="Choose interactive object" value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); }}>
+            <select aria-label="Choose interactive object" value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); if (event.target.value) scene.current?.revealObjectHint(event.target.value); }}>
               <option value="">Choose an object…</option>
               {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
             </select>
@@ -495,10 +523,16 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               {objectActions.map(action => <option key={action.id} value={action.id}>{action.label}</option>)}
             </select>
           </label>}
-          <button disabled={!props.playing || !selectedDiscovery || (objectActions.length > 1 && !chosenObjectAction) || (discoveryProgress.completed && !discoveryProgress.exploring)} onClick={() => scene.current?.interactWithObject(selectedDiscovery, chosenObjectAction?.id)}>{chosenObjectAction?.label ?? "Use object"}</button>
+          <button disabled={!props.playing || !selectedDiscovery || (objectActions.length > 1 && !chosenObjectAction) || finished} onClick={() => scene.current?.interactWithObject(selectedDiscovery, chosenObjectAction?.id)}>{chosenObjectAction?.label ?? (canTakeSelected ? `Take ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
           <button disabled={!props.playing || !discoveryProgress.interactions?.heldEntityId} onClick={() => scene.current?.dropHeldObject()}>Put back</button>
         </div>
       </details>
+        </div>
+        {hintOpen && !finished && <div className="object-next-hint" role="status">
+          <span>{nextHint?.text ?? "Inspect an object to see what it needs."}</span>
+          {nextHint && <button type="button" disabled={!props.playing} onClick={() => { scene.current?.revealObjectHint(nextHint.entityId); host.current?.focus({ preventScroll: true }); }}>Show me</button>}
+        </div>}
+      </div>
     );
     return (
       <div className="world-canvas-shell">

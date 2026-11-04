@@ -1845,7 +1845,7 @@ export class WorldScene extends Phaser.Scene {
           });
       });
     }
-    if (!playing) this.clearRoamTarget();
+    if (!playing) { this.objectInteractions?.cancelApproach(); this.clearRoamTarget(); }
     this.soundtrack.setState(
       playing || (this.state.completed && !this.state.exploring),
       this.muted,
@@ -1923,9 +1923,25 @@ export class WorldScene extends Phaser.Scene {
         this.roamTrack = { x: this.player.x, y: this.player.y, stalledMs: 0 };
         this.roamMarker?.setPosition(point.x, point.y).setVisible(true);
       },
+      stopApproach: () => {
+        if (!this.roamTarget) return;
+        this.clearRoamTarget();
+        if (this.definition.gameplay?.movement === "roam")
+          (this.player?.body as Phaser.Physics.Arcade.Body | undefined)?.setVelocity(0, 0);
+      },
       moment: message => this.hooks.onMoment(message),
       feedback: kind => this.soundtrack.cue(kind === "pickup" || kind === "drop" ? "collect" : "gate"),
     }, this.reducedMotion);
+    // A quick steering tap can be released between render frames. Cancel the
+    // pending click immediately, rather than letting the old target win later.
+    const cancelOnSteer = (event: KeyboardEvent) => {
+      if (this.isPlaying && this.definition.gameplay?.movement === "roam" &&
+          !this.objectInteractions?.hasChoices() &&
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyA", "KeyD", "KeyW", "KeyS"].includes(event.code))
+        this.objectInteractions?.cancelApproach();
+    };
+    this.input.keyboard?.on("keydown", cancelOnSteer);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.input.keyboard?.off("keydown", cancelOnSteer));
     this.applyObjectEffects();
     this.completeInteractionObjectives();
   }
@@ -1964,6 +1980,8 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  revealObjectHint(entityId: string): boolean { return this.objectInteractions?.revealHint(entityId) ?? false; }
+  dismissObjectChoices(): boolean { return this.objectInteractions?.dismissChoices() ?? false; }
   interactWithObject(id: string, actionId?: string) { return this.objectInteractions?.interact(id, actionId) ?? false; }
   dropHeldObject() { this.objectInteractions?.putBack(); }
 
@@ -2071,6 +2089,7 @@ export class WorldScene extends Phaser.Scene {
       )
         return;
       if (this.objectInteractions?.containsPoint(point)) return;
+      this.objectInteractions?.cancelApproach();
       this.roamTarget = { x: point.x, y: point.y };
       this.roamEngaged = true;
       this.roamTrack = { x: this.player.x, y: this.player.y, stalledMs: 0 };
@@ -2164,10 +2183,12 @@ export class WorldScene extends Phaser.Scene {
         this.clearRoamTarget();
         body.setVelocity(0, 0);
         desired = { x: 0, y: 0 };
-        if (blocked)
+        if (blocked) {
+          this.objectInteractions?.cancelApproach();
           this.hooks.onMoment(
             "That path is blocked. Choose another point or steer around it.",
           );
+        }
       }
     }
     body.setVelocity(
@@ -2204,7 +2225,27 @@ export class WorldScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    // Manual steering supersedes a queued click-to-use before proximity can
+    // execute it in this frame, including when the player has just arrived.
+    if (this.definition.gameplay?.movement === "roam" && this.isPlaying &&
+        (this.cursors?.left.isDown || this.cursors?.right.isDown || this.cursors?.up.isDown || this.cursors?.down.isDown ||
+         this.keys?.A.isDown || this.keys?.D.isDown || this.keys?.W.isDown || this.keys?.S.isDown ||
+         this.controls.left || this.controls.right || this.controls.up || this.controls.down))
+      this.objectInteractions?.cancelApproach();
     this.objectInteractions?.tick();
+    const choosing = this.objectInteractions?.hasChoices();
+    const choiceInput = this.objectInteractions?.consumeChoiceInput();
+    if ((choosing || choiceInput) && this.player?.body) {
+      const body = this.player.body as Phaser.Physics.Arcade.Body;
+      body.setAccelerationX(0).setVelocityX(0);
+      if (this.definition.gameplay?.movement === "roam") body.setVelocityY(0);
+      this.jumpQueued = -1000;
+      // Phaser keeps JustDown independently of key events; consume the menu
+      // selection/navigation press so it cannot fire on the following frame.
+      for (const key of [this.keys?.E, this.keys?.W, this.cursors?.up])
+        if (key) Phaser.Input.Keyboard.JustDown(key);
+      return;
+    }
     if (this.definition.gameplay?.movement === "discover") {
       if (this.isPlaying) this.soundtrack.tick(time);
       return;

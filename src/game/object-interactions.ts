@@ -12,8 +12,9 @@ interface InteractionHost {
   player(): { x: number; y: number; flipX?: boolean } | undefined;
   playing(): boolean;
   approach(point: { x: number; y: number }): void;
+  stopApproach(): void;
   moment(message: string): void;
-  feedback(kind: "pickup" | "transfer" | "attach" | "use" | "drop"): void;
+  feedback(kind: "pickup" | "transfer" | "attach" | "use" | "place" | "drop"): void;
 }
 
 /** Deterministic interactions use the real world objects; this layer only owns
@@ -32,11 +33,18 @@ export class ObjectInteractions {
   private hover = "";
   private lastNotice = -10000;
   private displayedQuantities = new Map<string, number>();
-  private movedObjects = new Map<string, { x: number; y: number; actionId: string }>();
+  private movedObjects = new Map<string, { x: number; y: number; width: number; height: number; actionId: string }>();
   private lastRenderTime = 0;
   private pendingMotions = 0;
   private actionMenu?: Phaser.GameObjects.Container;
   private menuTarget = "";
+  private menuOptions: { text: Phaser.GameObjects.Text; run: () => void }[] = [];
+  private menuIndex = 0;
+  private menuInputConsumed = false;
+  private hintTarget = "";
+  private hintUntil = 0;
+  private hintMark: Phaser.GameObjects.Graphics;
+  private hintLabel: Phaser.GameObjects.Text;
   private tap?: { x: number; y: number; id: number };
 
   constructor(
@@ -47,6 +55,11 @@ export class ObjectInteractions {
   ) {
     this.marks = scene.add.graphics().setDepth(24);
     this.focus = scene.add.graphics().setDepth(25);
+    this.hintMark = scene.add.graphics().setDepth(41);
+    this.hintLabel = scene.add.text(0, 0, "", {
+      fontFamily: "Manrope, sans-serif", fontSize: "13px", color: "#ffffff",
+      backgroundColor: "#264eb4", padding: { x: 10, y: 6 },
+    }).setOrigin(0.5, 1).setDepth(42).setVisible(false);
     this.prompt = scene.add.text(0, 0, "", {
       fontFamily: "Manrope, sans-serif", fontSize: "14px", color: "#ffffff",
       backgroundColor: "#253340", padding: { x: 12, y: 8 }, align: "center",
@@ -64,9 +77,26 @@ export class ObjectInteractions {
     };
     this.e?.on("down", queueUse);
     this.q?.on("down", queueReturn);
+    const navigateChoices = (event: KeyboardEvent) => {
+      if (!this.actionMenu || !this.host.playing() || this.inputOutsideGame()) return;
+      if (!["ArrowDown", "KeyS", "ArrowUp", "KeyW", "Enter", "NumpadEnter", "Escape", "KeyE"].includes(event.code)) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      this.menuInputConsumed = true;
+      this.queuedUse = false;
+      if (event.code === "Escape") this.closeChoices();
+      else if (["Enter", "NumpadEnter", "KeyE"].includes(event.code)) this.menuOptions[this.menuIndex]?.run();
+      else {
+        const delta = ["ArrowUp", "KeyW"].includes(event.code) ? -1 : 1;
+        this.menuIndex = (this.menuIndex + delta + this.menuOptions.length) % this.menuOptions.length;
+        this.highlightChoice();
+      }
+    };
+    scene.input.keyboard?.on("keydown", navigateChoices);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.e?.off("down", queueUse);
       this.q?.off("down", queueReturn);
+      scene.input.keyboard?.off("keydown", navigateChoices);
     });
     const backdrop = world.entities.find(e => e.kind === "decoration" && isSourceBackdrop(e));
     for (const object of world.interactions?.objects ?? []) {
@@ -95,7 +125,7 @@ export class ObjectInteractions {
       const point = pointer.positionToCamera(scene.cameras.main) as Phaser.Math.Vector2;
       const entity = this.objectAt(point);
       if (entity) this.interact(entity.id);
-      else this.closeChoices();
+      else { this.cancelApproach(); this.closeChoices(); }
     });
     scene.input.on(Phaser.Input.Events.GAME_OUT, () => { this.hover = ""; this.tap = undefined; });
     this.syncMoves(false);
@@ -178,8 +208,8 @@ export class ObjectInteractions {
       } else this.notice("Move closer.");
       return true;
     }
-    this.pending = "";
-    this.pendingActionId = undefined;
+    this.cancelApproach();
+    this.host.stopApproach();
     const alternatives = safeAvailableInteractions(this.world, this.host.state()).filter(action => action.targetId === id);
     if (!actionId && alternatives.length > 1) {
       this.showChoices(entity, alternatives);
@@ -235,18 +265,66 @@ export class ObjectInteractions {
     if (this.hasPendingMotion()) return;
     const result = reduceInteraction(this.world, this.host.state(), { type: "drop" });
     if (!result.ok || !this.host.playing()) return;
-    this.pending = "";
-    this.pendingActionId = undefined;
+    this.cancelApproach();
     this.closeChoices();
     this.host.change(result.state);
     this.host.feedback("drop");
     this.render();
   }
 
+  /** A new movement intent must cancel a previous click-to-use command. */
+  cancelApproach() {
+    const hadPending = Boolean(this.pending);
+    this.pending = "";
+    this.pendingActionId = undefined;
+    // A ground click listener may already have established a newer movement
+    // target. Never cancel that target after the old object command is cleared.
+    if (hadPending) this.host.stopApproach();
+  }
+
+  hasChoices() { return Boolean(this.actionMenu); }
+
+  dismissChoices() {
+    if (!this.actionMenu) return this.menuInputConsumed;
+    this.menuInputConsumed = true;
+    this.closeChoices();
+    return true;
+  }
+
+  revealHint(entityId: string) {
+    if (!this.host.playing() || !this.entity(entityId) ||
+        !this.world.interactions?.objects.some(object => object.entityId === entityId)) return false;
+    this.hintTarget = entityId;
+    this.hintUntil = this.scene.time.now + 3000;
+    this.render();
+    return true;
+  }
+
+  /** Keep the selection key from also jumping or pulling a nearby lever. */
+  consumeChoiceInput() {
+    const consumed = this.menuInputConsumed;
+    this.menuInputConsumed = false;
+    return consumed;
+  }
+
+  private inputOutsideGame() {
+    const active = document.activeElement;
+    return Boolean(active?.matches('input, textarea, select, button, [contenteditable="true"]') || active?.closest('[role="dialog"], dialog'));
+  }
+
+  private highlightChoice() {
+    this.menuOptions.forEach(({ text }, index) => {
+      text.setColor(index === this.menuIndex ? "#ffffff" : "#d7e0e4");
+      text.setBackgroundColor(index === this.menuIndex ? "#355567" : "transparent");
+    });
+  }
+
   private closeChoices() {
     this.actionMenu?.destroy(true);
     this.actionMenu = undefined;
     this.menuTarget = "";
+    this.menuOptions = [];
+    this.menuIndex = 0;
   }
 
   private showChoices(entity: WorldEntity, actions: InteractionAction[], page = 0) {
@@ -264,8 +342,9 @@ export class ObjectInteractions {
       text.setFixedSize(252, text.height);
       text.on("pointerdown", (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => { this.tap = undefined; event.stopPropagation(); });
       text.on("pointerup", (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => { this.tap = undefined; event.stopPropagation(); action(); });
-      text.on("pointerover", () => text.setColor("#8ae3ce"));
-      text.on("pointerout", () => text.setColor("#ffffff"));
+      const index = this.menuOptions.length;
+      this.menuOptions.push({ text, run: action });
+      text.on("pointerover", () => { this.menuIndex = index; this.highlightChoice(); });
       container.add(text);
       y += text.height + 3;
     };
@@ -273,6 +352,12 @@ export class ObjectInteractions {
     if (page > 0) addButton("‹ Previous", () => this.showChoices(entity, actions, page - 1));
     if ((page + 1) * 4 < actions.length) addButton("More ›", () => this.showChoices(entity, actions, page + 1));
     addButton("Cancel", () => this.closeChoices());
+    this.highlightChoice();
+    const hint = this.scene.add.text(18, y + 3, "↑ ↓ Choose   ·   E / Enter Select", {
+      fontFamily: "Manrope, sans-serif", fontSize: "11px", color: "#c3d1d9",
+    });
+    container.add(hint);
+    y += hint.height + 15;
     backdrop.fillStyle(0x20323f, 0.98).fillRoundedRect(0, 0, 276, y + 6, 12);
     backdrop.lineStyle(1, 0x698491, 0.7).strokeRoundedRect(0, 0, 276, y + 6, 12);
     const p = this.point(entity);
@@ -297,7 +382,7 @@ export class ObjectInteractions {
   }
   private toolGesture(toolId: string, kind: string) {
     const art = this.art.get(toolId);
-    if (!art || this.reducedMotion || kind === "attach") return;
+    if (!art || this.reducedMotion || (kind === "attach" || kind === "place")) return;
     this.scene.tweens.killTweensOf(art);
     art.setRotation(0);
     this.scene.tweens.add({ targets: art, angle: kind === "transfer" ? -24 : 12,
@@ -313,9 +398,9 @@ export class ObjectInteractions {
       if (this.movedObjects.get(id)?.actionId === move.actionId) continue;
       const entity = this.entity(id), art = this.art.get(id);
       if (!entity || !art) continue;
-      const home = art.getData("home") as { x: number; y: number };
-      const position = { x: art.x, y: art.y, actionId: move.actionId };
-      const destination = { x: home.x + move.x - entity.x, y: home.y + move.y - entity.y };
+      const home = art.getData("home") as { x: number; y: number; width: number; height: number };
+      const position = { x: art.x, y: art.y, width: art.displayWidth, height: art.displayHeight, actionId: move.actionId };
+      const destination = { x: home.x + move.x - entity.x, y: home.y + move.y - entity.y, width: home.width, height: home.height };
       this.movedObjects.set(id, position);
       if (!animate || this.reducedMotion) Object.assign(position, destination);
       else {
@@ -357,7 +442,7 @@ export class ObjectInteractions {
     const use = this.queuedUse, putBack = this.queuedReturn;
     this.queuedUse = false;
     this.queuedReturn = false;
-    if (!this.host.playing() || document.activeElement?.matches('input, textarea, select, button, [contenteditable="true"]') || document.activeElement?.closest('[role="dialog"], dialog')) return;
+    if (!this.host.playing() || this.inputOutsideGame() || this.menuInputConsumed || this.hasChoices()) return;
     if (putBack) this.putBack();
     const context = this.context();
     if (context.nearby && use) {
@@ -389,7 +474,7 @@ export class ObjectInteractions {
         continue;
       } else {
         const position = this.movedObjects.get(id) ?? home;
-        art.setPosition(position.x, position.y).setDisplaySize(home.width, home.height).setDepth(16);
+        art.setPosition(position.x, position.y).setDisplaySize(position.width, position.height).setDepth(16);
       }
     }
     for (const [id, targetId] of Object.entries(state.attachments)) {
@@ -410,6 +495,29 @@ export class ObjectInteractions {
     }
     this.marks.clear();
     this.focus.clear();
+    this.hintMark.clear();
+    this.hintLabel.setVisible(false);
+    if (this.host.playing() && this.scene.time.now < this.hintUntil) {
+      const entity = this.entity(this.hintTarget);
+      if (entity) {
+        const point = this.point(entity), view = camera.worldView;
+        const onScreen = view.contains(point.x, point.y);
+        if (onScreen) this.targetCorners(entity, unit, 0x264eb4, 1, this.hintMark);
+        const x = Phaser.Math.Clamp(point.x, view.left + 90 * unit, view.right - 90 * unit);
+        const y = Phaser.Math.Clamp(point.y - this.size(entity).height / 2 - 18 * unit,
+          view.top + 65 * unit, view.bottom - 35 * unit);
+        this.hintLabel.setText(objectName(this.world, entity.id, 24)).setScale(unit)
+          .setPosition(x, y).setVisible(true);
+        if (!onScreen) {
+          const angle = Math.atan2(point.y - view.centerY, point.x - view.centerX);
+          const tip = { x: x + Math.cos(angle) * 18 * unit, y: y + 16 * unit + Math.sin(angle) * 18 * unit };
+          this.hintMark.lineStyle(3 * unit, 0x264eb4, 1).beginPath()
+            .moveTo(tip.x - Math.cos(angle - 0.6) * 11 * unit, tip.y - Math.sin(angle - 0.6) * 11 * unit)
+            .lineTo(tip.x, tip.y)
+            .lineTo(tip.x - Math.cos(angle + 0.6) * 11 * unit, tip.y - Math.sin(angle + 0.6) * 11 * unit).strokePath();
+        }
+      }
+    }
     for (const object of this.world.interactions?.objects ?? []) {
       if (!object.resource) continue;
       const entity = this.entity(object.entityId);
@@ -471,6 +579,9 @@ export class ObjectInteractions {
     if (focused && !available.some(action => action.targetId === focused.id)) {
       this.targetCorners(focused, unit, 0x355b69, 0.8);
     }
+    // The requested hint owns this brief attention moment. A second E prompt
+    // in the same space would obscure both the object name and the action.
+    if (this.hintLabel.visible) { this.prompt.setVisible(false); return; }
     if (context.nearby) {
       const point = this.point(context.nearby.entity);
       this.prompt.setText(`E  ${context.label}`).setScale(unit);
@@ -491,15 +602,15 @@ export class ObjectInteractions {
     } else this.prompt.setVisible(false);
   }
 
-  private targetCorners(entity: WorldEntity, unit: number, color: number, alpha: number) {
+  private targetCorners(entity: WorldEntity, unit: number, color: number, alpha: number, graphics = this.focus) {
     const point = this.point(entity), size = this.size(entity);
     const w = Math.max(20 * unit, size.width / 2 + 7 * unit);
     const h = Math.max(20 * unit, size.height / 2 + 7 * unit);
     const length = 9 * unit;
-    this.focus.lineStyle(2 * unit, color, alpha);
+    graphics.lineStyle(2 * unit, color, alpha);
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
       const x = point.x + sx * w, y = point.y + sy * h;
-      this.focus.beginPath().moveTo(x - sx * length, y).lineTo(x, y).lineTo(x, y - sy * length).strokePath();
+      graphics.beginPath().moveTo(x - sx * length, y).lineTo(x, y).lineTo(x, y - sy * length).strokePath();
     }
   }
 }

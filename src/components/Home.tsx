@@ -136,6 +136,11 @@ export default function Home() {
         <div className="home-showcase" id="play-room" tabIndex={-1} ref={showcase}>
           <div className={`home-showcase-caption ${world ? "has-mission" : ""}`}><span>{showSource ? "THE ORIGINAL" : world ? complete ? "World complete" : mission : "PLAY AN EXAMPLE"}</span><span>{world ? complete || showSource ? "" : progress : `0${index + 1} / 0${scenes.length}`}</span></div>
           <div ref={stage} style={{"--scene-aspect":scene.aspect} as CSSProperties} className={`home-live-stage ${world ? "is-live" : ""}`} onKeyDown={event => {
+            if (event.key === "Escape" && playing && !drawing) {
+              if (!game.current?.dismissObjectChoices()) setPlaying(false);
+              event.preventDefault();
+              event.stopPropagation();
+            }
             // Keep game keys inside the playable stage even on the frame a
             // goal completes and the game releases its keyboard capture.
             if ((!playing || complete) && (event.target as HTMLElement).closest('[role="application"]') && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) event.preventDefault();

@@ -458,6 +458,7 @@ export default function App({ active = true }: { active?: boolean }) {
       )
         return;
       if (e.key === "Escape" && !dialog) {
+        if (e.defaultPrevented || canvas.current?.dismissObjectChoices()) return;
         setPlaying(false);
         setFocusedPlay(false);
       }
@@ -2370,6 +2371,7 @@ export default function App({ active = true }: { active?: boolean }) {
             {world.interactions ? (
               <>
                 <div><dt>Use objects</dt><dd>Select a tool, then the object it works with. Q puts it back.</dd></div>
+                <div><dt>Choose an action</dt><dd>Use ↑ / ↓ to choose, Enter or E to act, and Esc to close. Need a hint? reveals one useful next move.</dd></div>
                 {mode !== "discover" && <div><dt>Move & interact</dt><dd>Use WASD or arrow keys. Press E near an object.{mode === "platform" ? " Space jumps." : " Click to move to a target."}</dd></div>}
                 <div><dt>Invent</dt><dd>Open Edit world, draw an object and give it a purpose.</dd></div>
               </>

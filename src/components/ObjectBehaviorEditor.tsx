@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { InteractionAction, InteractionPlan } from "../../shared/interactions";
+import { validateInteractions, type InteractionAction, type InteractionPlan } from "../../shared/interactions";
 import type { WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop } from "../../shared/source-scenery";
 import { movementMode } from "../../shared/world";
@@ -65,7 +65,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   const openingTargets = world.entities.filter(e => e.kind === "gate" && (!e.artSource || Boolean(e.sourceLayer) || (world.entities.some(isSourceAlignedScenery) && Boolean(e.art))));
   const movingTargets = world.entities.filter(e => e.kind === "decoration" && e.art && (!e.artSource || e.sourceLayer) && !isSourceBackdrop(e) && !plan?.objects.some(o => o.entityId === e.id && o.carryable));
   const targets = world.entities.filter(e => e.id !== item.id &&
-    (movesObject ? movingTargets.some(target => target.id === e.id) : behavior === "open" ? openingTargets.some(gate => gate.id === e.id) : behavior === "jump" || behavior === "speed" ? e.kind === "player" : !isSourceBackdrop(e) && e.kind !== "terrain" && e.kind !== "bridge"));
+    (behavior === "place" ? !isSourceBackdrop(e) : movesObject ? movingTargets.some(target => target.id === e.id) : behavior === "open" ? openingTargets.some(gate => gate.id === e.id) : behavior === "jump" || behavior === "speed" ? e.kind === "player" : !isSourceBackdrop(e) && e.kind !== "terrain" && e.kind !== "bridge"));
   function addAction() {
     if (!targets.some(e => e.id === targetId)) { setError("Choose what your object works with."); return; }
     if (movesObject && !destination) { setError("Choose where the object should go on the scene."); return; }
@@ -75,6 +75,14 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     }
     if ((behavior === "jump" || behavior === "speed" || behavior === "attach-move") && actions.some(a => a.kind === "attach")) {
       setError("This part already has an attachment. Draw another part for a new ability."); return;
+    }
+    const placementTarget = targets.find(entity => entity.id === targetId)!;
+    const placement = {
+      x: placementTarget.x + (placementTarget.width - item.width) / 2,
+      y: placementTarget.y + (placementTarget.height - item.height) / 2,
+    };
+    if (behavior === "place" && (placement.x < 0 || placement.y < 0 || placement.x + item.width > world.width || placement.y + item.height > world.height)) {
+      setError("This object would extend beyond the scene. Choose another target."); return;
     }
     const next: InteractionPlan = structuredClone(plan ?? { version: 1, objects: [], actions: [] });
     const source = next.objects.find(o => o.entityId === item.id) ?? { entityId: item.id, carryable: true };
@@ -98,10 +106,22 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     if (!next.objects.some(o => o.entityId === target.entityId)) next.objects.push(target);
     const base = { id: `action-${crypto.randomUUID()}`, label: label.trim(), toolId: item.id, targetId, ...(prerequisites.length ? {requires: prerequisites.filter(id => next.actions.some(action => action.id === id))} : {}), ...(resourcePrerequisites.length ? {requiresResourceIds:resourcePrerequisites.filter(id=>next.objects.some(object=>object.entityId===id && object.resource))} : {}) };
     const action: InteractionAction = behavior === "transfer" ? { ...base, kind: "transfer", amount } :
+      behavior === "place" ? { ...base, kind: "place", effects: [{kind: "moveObject", entityId: item.id, ...placement, durationMs: 900}] } :
       movesObject ? { ...base, kind: behavior === "attach-move" ? "attach" : "use", effects: [{ kind: "moveObject", entityId: targetId, x: destination!.x, y: destination!.y, durationMs: 1600 }] } :
       behavior === "open" ? { ...base, kind: "use", effects: [{ kind: "openGate", entityId: targetId }] } :
       { ...base, kind: "attach", effects: [{ kind: behavior === "jump" ? "jumpBoost" : "moveSpeedBoost", multiplier: 1.5 }] };
-    next.actions.push(action); onChange(next);
+    next.actions.push(action);
+    if (behavior === "place") {
+      try { validateInteractions({...world, interactions: next}); }
+      catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Check this placement and its requirements.";
+        setError(message.includes("explicit prerequisite sequence")
+          ? "Choose the earlier placement under Requirements first."
+          : message);
+        return;
+      }
+    }
+    onChange(next);
     setTargetId(""); setBehavior("transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
     setAmount(1); setSupply(1); setCapacity(1); setPrerequisites([]); setResourcePrerequisites([]); setDestination(undefined); setError("");
   }
@@ -127,13 +147,14 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     <label>What can it do?
       <select aria-label="Object ability" value={behavior} onChange={e => { onCancelDestination?.(); setBehavior(e.target.value); setTargetId(""); setDestination(undefined); setError(""); }}>
         <option value="transfer">Transfer a resource</option>
+        <option value="place">Place this object</option>
         {movingTargets.length > 0 && <><option value="move">Make an object move</option><option value="attach-move">Fit a part to make it move</option></>}
         {mode !== "discover" && openingTargets.length > 0 && <option value="open">Open a gate</option>}
         {mode === "platform" && <option value="jump">Attach · jump higher</option>}
         {mode !== "discover" && <option value="speed">Attach · move faster</option>}
       </select>
     </label>
-    <label>Works with
+    <label>{behavior === "place" ? "Place at" : "Works with"}
       <select aria-label="Action target" value={targetId} onChange={e => { onCancelDestination?.(); setTargetId(e.target.value); setDestination(undefined); }}>
         <option value="">Choose an object…</option>
         {targets.map(e => <option key={e.id} value={e.id}>{e.label || e.kind}</option>)}

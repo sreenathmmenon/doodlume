@@ -35,3 +35,24 @@ The target is a distinctive game product that people enjoy controlling, explorin
 5. **Submission proof:** record the genuine workflow with the configured Meta model, source artwork and same-world edit; publish accurate model/partner usage and observed limitations. Finish the final demo only after the product path is real.
 
 The game-quality target remains high. This record distinguishes implemented behavior, actual checks and work still required; it does not claim EA-equivalent production scope or guaranteed purchase intent.
+
+## November 4 — source-driven object gameplay
+
+Implemented a generic `place` action alongside transfers, attachments and tool use. A carried source object moves to a validated destination, returns to its original drawn size, releases the hand, and can be picked up again. Completion waits for movement to arrive. Ordered placements use explicit prerequisites; invalid or out-of-bounds placements request correction instead of silently resizing source art. The creator can add placements under Give it a purpose.
+
+Interaction choices now support Up/Down or W/S, E/Enter and Escape without also moving the player or triggering a lever. Manual steering cancels a pending click-to-use journey. The compact carried-object strip shows the actual object and remaining quantity. Optional hints trace legal action/resource dependencies and can highlight an object without executing the action. Hints do not yet prove spatial reachability in every movement world.
+
+Generation now asks for a role, meaningful change, decision/dependency and visible payoff grounded in the image. Physical placement cannot be represented by a misleading resource-transfer label. Roam validation explores alternate action orders and moved/attached object positions, rather than rejecting a valid plan after one greedy resource allocation. Fractional resource amounts have consistent full/empty boundaries.
+
+### Observed evidence
+
+- Six real Fireworks-hosted Meta Muse Spark Open requests across a rough room drawing, a marker reef drawing and a tabletop photographic input. The two drawings were AI-generated test inputs, not represented as drawings by children. No filename-specific game branches or substituted model replies were added.
+- Room Tidy Top View: the live generated world has three ordered placements. Browser play clicked the actual source objects and targets, completed 3/3, saved, reloaded, and retained 3/3.
+- Diver's Reef Helpers: the live generated world has three food supplies, three receivers and nine possible transfer routes. Browser play used three transfers to fill the receivers, completed 3/3, saved, reloaded, and retained 3/3. Both inspected desktop sessions had no document horizontal overflow.
+- Creator UI: an unordered second placement was rejected with a readable prerequisite message; choosing the earlier placement allowed the new ability. The test draft was discarded, preserving the generated world.
+- Separate synthetic runtime fixtures verified keyboard action choice, offscreen highlighting without progress mutation, immediate cancellation on steering, delayed completion during placement, and pickup/return to the placed location. These fixtures are not generation evidence.
+- TypeScript and production build passed. The focused gameplay/regression selection passed 49/49 checks.
+
+The tabletop photographic case remains unresolved: one plan requested placement outside the image, and the final attempt required correction of the keys' whole-object outline. It is not counted as a successful automatic photo-to-game conversion. Early room and tabletop failures are retained in the local evidence. The two successful small missions prove the mechanics, not depth, replay appeal, universal image support or a quality rating.
+
+Local evidence is under `outputs/verification/gameplay-2026-11-04/` and `output/playwright/`; generated assets, raw model outputs and browser profiles remain ignored. The playable two-world import is `outputs/verification/gameplay-2026-11-04/playable-backup.json`.

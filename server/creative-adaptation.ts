@@ -4,13 +4,13 @@ import sharp from "sharp";
 import { cropArtwork, imageData, normalizeDrawing } from "./images.js";
 import { extractArtwork, segmentationConfigured, type SegmentationConnection } from "./segmentation.js";
 import { InterpretationError } from "./model.js";
-import { emptyPlayState, validateWorld, type GoalRules, type InputKind, type WorldDefinition, type WorldEntity, type WorldGameplay } from "../shared/world.js";
-import { interactionEffects, reduceInteraction } from "../shared/interactions.js";
+import { validateWorld, type GoalRules, type InputKind, type WorldDefinition, type WorldEntity, type WorldGameplay } from "../shared/world.js";
 import { setupFeedback } from "../shared/setup.js";
 import { RecognitionReviewError } from "./recognition-error.js";
 import { validateRecognitionReview } from "../shared/recognition-review.js";
 import { reviewGoalRules } from "../shared/recognition-review.js";
 import { sourcePlatformScene } from "./source-platform-scene.js";
+import { checkRoamRoute } from "./roam-route.js";
 import { sourceScenery, SOURCE_SCENERY_NOTE } from "./source-scenery.js";
 import { applyPlannedInteractions, interactionInstructions, interactionsSchema, readPlannedInteractions, type PlannedInteractions } from "./interaction-planning.js";
 
@@ -85,7 +85,9 @@ export const gameplaySchema = {
 };
 
 export const creativeInstructions = `Your job has TWO separate outputs: honest visual recognition in objects, and an explicit gameplay design in gameplay. Almost any supplied image can inspire a game; it does NOT need to depict a platform game. Never ask the person to draw a player or terrain merely because they are absent. Select only actual visible subjects, parts, shapes and surfaces with tight normalized 0..1000 source boxes. Assign actual fruit, leaves, droplets, gears, details, stars or separable paint marks a coin role when the game asks the person to find them. This is a game-role assignment, not a claim that the original picture was a game. A lever can represent an actual visible button, gear or switch to activate. Keep their source IDs and original source positions.
-Choose gameplay.movement to fit BOTH this image's composition and explicit intent. platform is a side-view running/jumping adventure: use it when recognizable side-view paths or a detached character and sensible jump adventure fit. roam is free four-direction exploration across the unchanged source image, with a clearly introduced geometric explorer; it is not a floor-and-bridges platformer. discover is an image-native investigation: the person points/taps the actual source details in place, no moving character, no source crop rectangles pasted over the image, no added bridges. A detailed illustration, photo, collage, single-subject picture with interesting parts, or abstract painting may become a coherent discovery hunt using 3–6 real source details. Do not reduce every image to the same chain of jumping platforms. Do not choose by file names or assumed categories; inspect its actual visual content.
+DESIGN THE ACTIVITY BEFORE CHOOSING MOVEMENT. A neutral request such as "make this a game" asks you to choose a compelling supported activity; it is not a request for a search-and-click hunt. First inspect relationships between actual visible objects, then choose (1) the player's role, (2) a concrete change they can cause, (3) a meaningful decision or dependency, and (4) a visible payoff. Explain that specific choice briefly in gameplay.reason. When the image has separable tools/supplies and compatible recipients/parts, prefer source-native object play with gameplay.interactions over merely finding those objects. Use bounded transfer, placement, attachment, gate opening or source-object movement only as the engine actually supports; perceived categories alone never select a preset game. A neutral task must have an earned finishing condition in requiredInteractionIds or requiredResourceIds when using interactions, unless the person explicitly requests free play. Resource units are game quantities, not measured physical facts. Keep ordinary photographs semantically plausible unless the creator explicitly requests fantasy; do not manufacture a metaphorical supply/receiver relationship between unrelated objects.
+Do not force a roleplay task onto an isolated face, single scribble or image without coherent separable relationships. Preserve the drawing's identity: a simple figure with suitable scenery may become traversal; an image rich in meaningful details may support an investigation. Compare these choices against the actual source instead of treating every photograph as a hunt. Do not split one object into fictional supply and recipient boxes just to create an interaction. The requested intention remains authoritative, and optional actions must remain optional.
+Choose gameplay.movement to fit BOTH this image's composition and explicit intent. platform is a side-view running/jumping adventure: use it when recognizable side-view paths or a detached character and sensible jump adventure fit. roam is free four-direction exploration across the unchanged source image, with a clearly introduced geometric explorer; it is not a floor-and-bridges platformer. discover supports image-native object play AND investigation: the person points/taps actual source objects in place, with no moving player or added bridges. With interactions, the player selects tools, arranges real source objects, routes supplies and changes the scene through supported effects. Only moving source objects are extracted; stationary details remain in the original image. Without coherent action relationships, an investigation may use a few meaningful real source details with image-specific clues; do not pad an image to reach an item count. Do not reduce every image to the same chain of jumping platforms. Do not choose by file names or assumed categories; inspect its actual visual content.
 For a platform adventure, only assign a lever when it opens an actual recognized gate and set its targetId. A decorative gear with no gate connection is decoration, not a lever; do not invent an activation mechanic. Recognize ALL meaningful actual walkable ledges, platforms, cliff tops and bridges as separate terrain/bridge objects, even in creative mode. The real source surfaces are authoritative stage geometry; the compiler only connects genuinely unreachable gaps. Bound each separate solid mass tightly, without enclosing empty space between disconnected ledges. Keep a pillar shaft separate from its usable top: shafts, towers and architectural walls are decoration, not terrain, unless they are deliberately intended to block movement. For a doorway atop a tower, recognize the ledge at the doorway base as terrain; the full tower must not become a giant blocking rectangle. Bound the WHOLE moving character, including every leg, antenna and protruding part, never just its center or head. Recognize actual source destinations, collectibles, switches and gates too; link a source lever to its actual gate only when that relationship is visible or deliberately assigned in the game design. Never invent a pictured support, switch, gate, flag or collectible to fill a role. Choose source-grounded collect-and-activate prerequisites together when these create a meaningful causal route. Avoid decorative mechanic claims that the engine cannot implement: a pictured spike or gear is not automatically simulated damage or machinery.
 In discover, provide sequential clues to actual coin/lever/goal IDs in objects. Each clue must be image-specific, grounded in visible shape/color/relationship or story, solvable from the actual image and not merely an object label. The last clue can lead to an actual pictured destination. Avoid broad overlapping selections; select the meaningful detail itself. In roam, keep targets at original source positions and provide concise image-specific objectives; the first path point must leave clear starting space outside all targets, so progress is earned by exploration rather than immediately at spawn. obstacleIds lists ONLY deliberate source terrain/bridge/gate IDs that should obstruct traversal, never turn a whole photographed floor/landscape into a blocking rectangle. Empty obstacleIds means open exploration, not invented obstacles. Keep obstacleIds empty in discover. In discover, do not return a player. In roam, avatarId may be null: a geometric explorer is introduced honestly; no moving duplicate of the photograph is invented.
 Use mode:source-layout only for an already usable platform layout to preserve it exactly; otherwise mode:creative. Keep title and adventure grounded in this image. objectiveTitle is one concise mission title (max100 characters), instructions one actionable sentence (max180). clues is an array (empty permitted outside discover), with each text<=160 and each entityId matching a real interactive source object. avatarId is a source subject ID or null. objective chooses collect, explore or activate as a default design, while goalRules retains ALL explicitly requested collected/activated source IDs together: collection and activation can both be prerequisites. Empty rules mean optional only when that matches the explicit intent. Do not drop a requested action to make a model answer pass. Use actual source collectibles when available; do not pad a mission with duplicate invented items merely because a route has more stops. Preserve actual pictured destinations as source goal objects. An absent pictured destination may be an explicitly generated finish marker, not a falsely detected source object. Never claim a particular source object exists merely because the person mentions it; clarify a genuinely unmet source request or describe an introduced game element honestly.
@@ -204,122 +206,6 @@ function checkedCompiledWorld(world: WorldDefinition, plan?: GameplayPlan): Worl
       `The image was understood, but its game layout needs correction: ${placement.errors.join(" ")}`.slice(0, 500),
     );
   return world;
-}
-
-/** Conservative bounded navigation check for a deliberately obstructed roam
- * world. Unlike a spawn-only overlap check, this detects enclosed objectives
- * and full-width barriers before presenting an unwinnable game as successful.
- */
-function checkRoamRoute(width: number, height: number, guide: WorldEntity, entities: WorldEntity[], rules: GoalRules, interactions?: PlannedInteractions) {
-  let solids = entities.filter(entity => ["terrain", "bridge", "gate"].includes(entity.kind));
-  const step = 32, radius = 18;
-  const behaviorIds = new Set(interactions?.objects.map(object => object.entityId) ?? []);
-  const targets = entities.filter(entity => ["coin", "lever", "goal"].includes(entity.kind) || behaviorIds.has(entity.id));
-  const cols = Math.ceil((width - radius * 2) / step) + 1;
-  const rows = Math.ceil((height - radius * 2) / step) + 1;
-  const point = (index: number) => ({ x: Math.min(width - radius, radius + index % cols * step), y: Math.min(height - radius, radius + Math.floor(index / cols) * step) });
-  const free = (x: number, y: number) => solids.every(solid => x + radius <= solid.x || x - radius >= solid.x + solid.width || y + radius <= solid.y || y - radius >= solid.y + solid.height);
-  const outsideTargets = (x: number, y: number) => targets.every(target => {
-    const dx = Math.max(target.x - x, 0, x - target.x - target.width);
-    const dy = Math.max(target.y - y, 0, y - target.y - target.height);
-    return Math.hypot(dx, dy) >= radius + 24;
-  });
-  const segmentFree = (a: { x: number; y: number }, b: { x: number; y: number }) => solids.every(solid =>
-    Math.max(a.x, b.x) + radius <= solid.x || Math.min(a.x, b.x) - radius >= solid.x + solid.width ||
-    Math.max(a.y, b.y) + radius <= solid.y || Math.min(a.y, b.y) - radius >= solid.y + solid.height);
-  let start = -1, distance = Infinity;
-  for (let index = 0; index < cols * rows; index++) {
-    const at = point(index);
-    if (!free(at.x, at.y) || !outsideTargets(at.x, at.y)) continue;
-    const nextDistance = Math.hypot(at.x - guide.x - guide.width / 2, at.y - guide.y - guide.height / 2);
-    if (nextDistance < distance) { start = index; distance = nextDistance; }
-  }
-  if (start === -1) throw new InterpretationError("There is no clear starting space outside the proposed objects and obstacles. Choose more focused source details, or explore this image through discovery.");
-  const at = point(start);
-  guide.x = at.x - guide.width / 2; guide.y = at.y - guide.height / 2;
-  if (!solids.length) return;
-  const seen = new Uint8Array(cols * rows), queue = new Int32Array(cols * rows);
-  let tail = 0;
-  const flood = () => {
-    let head = 0; tail = 1;
-    seen.fill(0); queue[0] = start; seen[start] = 1;
-    while (head < tail) {
-      const index = queue[head++], col = index % cols, row = Math.floor(index / cols), from = point(index);
-      const next = [col > 0 ? index - 1 : -1, col + 1 < cols ? index + 1 : -1,
-        row > 0 ? index - cols : -1, row + 1 < rows ? index + cols : -1];
-      for (const candidate of next) {
-        if (candidate < 0 || seen[candidate]) continue;
-        const to = point(candidate);
-        if (free(to.x, to.y) && segmentFree(from, to)) { seen[candidate] = 1; queue[tail++] = candidate; }
-      }
-    }
-  };
-  flood();
-  const reachable = (entity: WorldEntity) => {
-    const reach = behaviorIds.has(entity.id) ? 100 : entity.kind === "lever" ? 120 : 18;
-    for (let index = 0; index < tail; index++) {
-      const at = point(queue[index]);
-      if (behaviorIds.has(entity.id)) {
-        const dx = Math.max(entity.x - at.x, 0, at.x - entity.x - entity.width);
-        const dy = Math.max(entity.y - at.y, 0, at.y - entity.y - entity.height);
-        if (Math.hypot(dx, dy) <= 100) return true;
-        continue;
-      }
-      if (entity.kind === "lever") {
-        if (Math.hypot(at.x - entity.x - entity.width / 2, at.y - entity.y - entity.height / 2) <= 135) return true;
-        continue;
-      }
-      if (at.x + reach >= entity.x && at.x - reach <= entity.x + entity.width &&
-          at.y + reach >= entity.y && at.y - reach <= entity.y + entity.height) return true;
-    }
-    return false;
-  };
-  const required = new Set([...rules.requiredCollectedIds, ...rules.requiredActivatedIds, ...behaviorIds]);
-  const behaviorWorld = interactions ? applyPlannedInteractions({
-    id: "roam-preflight", name: "Source interaction preflight", description: "", theme: "grove",
-    width, height, source: "manual", sourceImage: "/art/preflight.png", revision: 1, entities, goalRules: rules,
-    gameplay: { movement: "roam", objectiveTitle: "Check access", instructions: "Use the source objects." },
-  }, interactions, rules.requiredInteractionIds, true) : undefined;
-  let interactionProgress = emptyPlayState();
-  // Reachable switches may open a route through their actual gates, including
-  // chained gates. A switch trapped behind its own closed gate cannot count.
-  let opened: boolean;
-  do {
-    opened = false;
-    for (const lever of entities.filter(entity => entity.kind === "lever" && entity.targetId)) {
-      if (solids.some(solid => solid.id === lever.targetId && solid.kind === "gate") && reachable(lever)) {
-        solids = solids.filter(solid => solid.id !== lever.targetId); opened = true;
-      }
-    }
-    if (behaviorWorld) {
-      // A usable tool/target pair can change the walkable region, but only
-      // after the same quantities and dependencies used during actual play pass.
-      for (const action of behaviorWorld.interactions!.actions) {
-        if (interactionProgress.interactions?.completed.includes(action.id)) continue;
-        const tool = entities.find(entity => entity.id === action.toolId)!;
-        const target = entities.find(entity => entity.id === action.targetId)!;
-        if (!reachable(tool) || !reachable(target)) continue;
-        const dropped = reduceInteraction(behaviorWorld, interactionProgress, { type: "drop" });
-        const picked = reduceInteraction(behaviorWorld, dropped.ok ? dropped.state : interactionProgress, { type: "pickup", entityId: action.toolId });
-        if (!picked.ok) continue;
-        const performed = reduceInteraction(behaviorWorld, picked.state, { type: "perform", actionId: action.id });
-        if (!performed.ok) continue;
-        interactionProgress = performed.state;
-        const openIds = new Set(interactionEffects(behaviorWorld, interactionProgress).openGateIds);
-        solids = solids.filter(solid => !openIds.has(solid.id));
-        opened = true;
-      }
-    }
-    if (opened) flood();
-  } while (opened);
-  const blocked = entities.find(entity => required.has(entity.id) && !reachable(entity));
-  const goals = entities.filter(entity => entity.kind === "goal");
-  if (behaviorWorld && ((rules.requiredInteractionIds ?? []).some(id => !interactionProgress.interactions?.completed.includes(id)) || (rules.requiredResourceIds ?? []).some(id=>{const r=interactions?.objects.find(o=>o.entityId===id)?.resource; return !r || (interactionProgress.interactions?.quantities[id] ?? r.initial)<r.capacity;})))
-    throw new InterpretationError("The required object actions cannot be completed along this route. Check access to the tools, targets and supplies.");
-  if (blocked || (goals.length > 0 && !goals.some(reachable)))
-    throw new InterpretationError(blocked
-      ? `The intended obstacles block the route to ${blocked.label || "a required object"}. Which source region should be passable?`.slice(0, 280)
-      : "The intended obstacles block every destination. Which source region should remain passable?");
 }
 
 /** New image-native modes preserve the exact source image's aspect and map

@@ -241,3 +241,27 @@
 .object-keyboard-play select { width: 100%; padding: 10px; margin-bottom: 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 .object-keyboard-play button { min-height: 36px; margin-right: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font: inherit; }
 .object-keyboard-play button:disabled { opacity: .45; cursor: default; }
+
+/* Gameplay help stays outside the artwork. It appears only when requested;
+   possession stays visible so a player never has to remember a hidden tool. */
+.object-play-tools { flex: 1 1 240px; min-width: 0; color: var(--ink); }
+.object-play-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.object-play-strip button { font: 600 12px/18px var(--font-ui); cursor: pointer; }
+.carried-object { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: auto; }
+.carried-object img { width: 36px; height: 36px; object-fit: contain; }
+.carried-object > span:first-of-type { display: grid; gap: 1px; }
+.carried-object small { font-size: 10px; line-height: 14px; color: var(--muted); }
+.carried-object strong { max-width: 180px; font-size: 12px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.carried-quantity { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.carried-object button, .object-hint-toggle, .object-next-hint button {
+  min-height: 36px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--paper); color: var(--ink); white-space: nowrap;
+}
+.object-play-strip .object-keyboard-play { margin-left: 0; }
+.object-hint-toggle { margin-left: auto; }
+.object-next-hint { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 12px; border-left: 2px solid var(--focus); background: var(--field); border-radius: 0 8px 8px 0; font: 500 12px/18px var(--font-ui); }
+.object-next-hint span { flex: 1; }
+.object-next-hint button { flex: 0 0 auto; font: 600 12px/18px var(--font-ui); cursor: pointer; }
+.object-play-tools button:hover:not(:disabled) { background: var(--surface-hover); }
+.object-play-tools button:disabled { color: var(--disabled-ink); cursor: default; }
+.object-play-tools :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
