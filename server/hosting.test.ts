@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import {hostingConfig,installHostingBoundary} from './hosting.js';
 import {installCapture} from './capture.js';
+import {failureLocation} from './diagnostics.js';
+
+test('operational failure logging contains source locations without messages or private paths',()=>{
+  const error=new Error('private provider body and image');
+  error.stack='Error: private provider body and image\n    at compile (/app/server/interpret.ts:42:7)\n    at loader (/private/credentials/owner.js:1:2)';
+  assert.deepEqual(failureLocation(error),{type:'Error',frames:['server/interpret.ts:42:7']});
+  assert.deepEqual(failureLocation({message:'private'}),{type:'UnknownError',frames:[]});
+});
 
 test('hosting requires an explicit HTTPS origin and retains the existing local boundary',()=>{
   assert.throws(()=>hostingConfig({NODE_ENV:'production'}),/PUBLIC_ORIGIN/);

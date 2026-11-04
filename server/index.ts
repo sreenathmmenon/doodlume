@@ -23,6 +23,7 @@ import { installStudioFallback } from "./static-routing.js";
 import { installSourceRefinement } from "./source-refinement.js";
 import { installSourceScenery } from "./source-scenery-route.js";
 import { hostingConfig, installHostingBoundary } from "./hosting.js";
+import { failureLocation } from "./diagnostics.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
@@ -155,6 +156,7 @@ for (const action of ["interpret", "amend"] as const)
           error:
             "The interpretation took too long or was stopped. Your drawing and current world are safe.",
         });
+      console.error(JSON.stringify({event:'interpretation-failure',operation:action,...failureLocation(error)}));
       return reply.code(502).send({
         error:
           "The drawing could not become a world this time. Your current world is unchanged.",
