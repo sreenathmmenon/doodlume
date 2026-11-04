@@ -22,3 +22,7 @@ Fetch `/art/showcase/catalog.json`. The catalog includes source kind, provenance
 One fresh neutral rough drawing produced a playable game; this is not universal unfamiliar-input proof. The other neutral rough drawing needed review and exposed the repaired thin-floor/spawn issue. Its diagnostic recompile completed, but poor local reconstruction excludes it from the public examples. Guided model retries failed with invalid action semantics/provider errors. Automatic richer roleplay, dependable neutral generation and model latency remain open. New-part abilities are deliberately creator assigned; arbitrary physics is not inferred from a sketch. No perfect quality score, external panel approval or guaranteed prize is claimed.
 
 Local private evidence: `outputs/verification/flagship-experience-2026-11-04/` and `outputs/verification/activity-design-2026-11-04/`.
+
+## Hosted release verification
+
+Source `a11a95a`, correct-account Railway deployment `2ad7b36b-a40d-4b3f-b42a-d9b1265e6d1b`, status **SUCCESS**. Health, readiness and the featured catalog returned200. Environment/source paths returned404; unrelated-origin generation returned403. Hosted Rooftop springs loaded through its direct link, its Spring rig was taken and fitted to Cat, and the actual effect receipt confirmed jump strength×1.5. The existing Fill the Bathtub saved world reopened and retained completion after a full reload. No homepage design, video, runtime secret or service-resource setting changed.
