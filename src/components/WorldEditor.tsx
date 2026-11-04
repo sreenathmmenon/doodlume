@@ -971,6 +971,7 @@ function WorldEditorSession({
     const previewEntity = { ...e, ...(baseline ? { sourceLayer: baseline } : {}), ...layer };
     const artBox = derivedScenery && sourceBackdrop && previewEntity.sourceLayer
       ? sourceLayerArtworkBounds(previewEntity, sourceBackdrop) : undefined;
+    const embeddedSource = Boolean(sourceBackdrop?.art && e.artSource && !e.art && !isSourceBackdrop(e) && e.kind === "decoration");
     const sourceStationary = derivedScenery && e.artSource && !isSourceBackdrop(e) && e.kind !== "player" && e.kind !== "gate";
     const awaitingLayer = Boolean(baseline && !e.sourceLayer && !preparedScene);
     const x = e.x, y = e.y;
@@ -1003,7 +1004,7 @@ function WorldEditorSession({
             strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
           />
-        ) : sourceStationary && (!artBox || awaitingLayer) ? null : e.art ? (
+        ) : embeddedSource || sourceStationary && (!artBox || awaitingLayer) ? null : e.art ? (
           <image
             href={isSourceBackdrop(e) && preparedScene?.sourceScenery ? preparedScene.sourceScenery.art : previewEntity.art}
             x={artBox ? artBox.x - e.x : 0}

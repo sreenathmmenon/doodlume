@@ -1,6 +1,7 @@
 import starterWorld from "../public/art/showcase/rover.json";
 import { Brand } from "./components/Brand";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { hasAlternativeInteractionRoute } from "./lib/interaction-replay";
 import {
   Save,
   Ellipsis,
@@ -1011,10 +1012,15 @@ export default function App({ active = true }: { active?: boolean }) {
     return selected ? [selected.label] : [];
   });
   const completionTitle = objective.ready ? `${world.name} complete` : "Earlier completion retained";
+  const replayStateKey = metrics.completed && !metrics.exploring ? JSON.stringify(latestState.current.interactions) : "";
+  const canReplayAlternative = useMemo(() => hasAlternativeInteractionRoute(world, latestState.current),
+    [world, metrics.completed, metrics.exploring, replayStateKey]);
   const completionDetail = objective.ready
-    ? destination
+    ? chosenOutcomes.length
+      ? `${chosenOutcomes.slice(0, 2).join(" · ")}${destination ? ` → ${objectName(world, destination.id, 40)}` : ""}`
+      : destination
       ? `${mode === "discover" && !world.interactions ? "Final clue found" : "Destination reached"}: ${objectName(world, destination.id, 80)}`
-      : chosenOutcomes.length ? chosenOutcomes.slice(0, 2).join(" · ") : world.gameplay?.objectiveTitle ? `${world.gameplay.objectiveTitle} — complete.` : ""
+      : world.gameplay?.objectiveTitle ? `${world.gameplay.objectiveTitle} — complete.` : ""
     : "Your achievement stays with this world after its rules change.";
   const missionText =
     metrics.completed && !metrics.exploring
@@ -1446,14 +1452,17 @@ export default function App({ active = true }: { active?: boolean }) {
                       {completionDetail && <p>{completionDetail}</p>}
                     </div>
                     <div>
+                      {canReplayAlternative && <button className="primary-button" onClick={() => {
+                        restart(); tell("Fresh run. Choose another route.");
+                      }}>Try another route <RotateCcw size={16} /></button>}
                       <button
-                        className="primary-button"
+                        className={canReplayAlternative ? "secondary-button" : "primary-button"}
                         onClick={() => continueWorld()}
                       >
                         Keep exploring <Play size={16} />
                       </button>
                       <button
-                        className="secondary-button"
+                        className={canReplayAlternative ? "text-button" : "secondary-button"}
                         onClick={() => continueWorld(true)}
                       >
                         Continue creating <Pencil size={16} />

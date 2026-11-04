@@ -196,3 +196,185 @@ test("a branch payoff does not claim to close an option already excluded by the 
   assert.doesNotMatch(preview.consequence,/Closes|other route/);
   assert.match(preview.consequence,/Fern: 0 → 2 \/ 2/);
 });
+
+test("stationary-source hints say Select, inspect the active source, and allow switching while carrying", async () => {
+  const {inspectInteractionTarget, incompatibleTargetReason} = await import("../../shared/interaction-preview");
+  const {selectInteractionSourceCommand, activeInteractionSource} = await import("../../shared/interactions");
+  const world = fixture();
+  const source = world.interactions!.objects.find(object => object.entityId === "pitcher")!;
+  delete source.carryable; source.usableInPlace = true;
+  validateWorld(world);
+  const initial = emptyPlayState(), before = JSON.stringify(initial);
+  assert.match(nextInteractionHint(world, initial)!.text, /^Select Jug to fill the cup/);
+  assert.equal(JSON.stringify(initial), before);
+  const carried = reduceInteraction(world, initial, {type:"pickup",entityId:"cup"});
+  assert.equal(carried.ok, true, carried.reason);
+  assert.equal(incompatibleTargetReason(world, carried.state, "pitcher"), undefined);
+  const selected = reduceInteraction(world, carried.state, selectInteractionSourceCommand(world, "pitcher"));
+  assert.equal(selected.ok, true, selected.reason);
+  assert.equal(activeInteractionSource(selected.state.interactions!), "pitcher");
+  assert.equal(selected.state.interactions!.heldEntityId, null);
+  assert.deepEqual(nextInteractionHint(world, selected.state), {entityId:"cup",text:"Fill the cup · Cup"});
+  const actions = inspectInteractionTarget(world, selected.state, "cup");
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].id, "refill");
+  assert.equal(actions[0].available, true);
+  assert.match(incompatibleTargetReason(world, selected.state, "plant")!, /Jug has no action with Fern/);
+});
+
+test("stationary-source outcome probes discover refilled sources without changing selection or saved state", async () => {
+  const {interactionOutcomeMessage} = await import("../../shared/interaction-preview");
+  const {selectInteractionSourceCommand} = await import("../../shared/interactions");
+  const world = fixture();
+  for (const id of ["pitcher", "cup"]) {
+    const source = world.interactions!.objects.find(object => object.entityId === id)!;
+    delete source.carryable; source.usableInPlace = true;
+  }
+  validateWorld(world);
+  const before = reduceInteraction(world, emptyPlayState(), selectInteractionSourceCommand(world, "pitcher")).state;
+  const action = world.interactions!.actions.find(action => action.id === "refill")!;
+  const result = reduceInteraction(world, before, {type:"perform",actionId:action.id});
+  assert.equal(result.ok, true, result.reason);
+  const snapshot = JSON.stringify([world,before,result.state]);
+  assert.equal(interactionOutcomeMessage(world, before, result.state, action), "Unlocked: Water the fern");
+  assert.match(nextInteractionHint(world, result.state)!.text, /^Select Cup to water the fern/);
+  assert.equal(JSON.stringify([world,before,result.state]), snapshot);
+});
+
+test("direct controls reveal preparation, become usable without pickup, and preserve real selection", async () => {
+  const {inspectInteractionTarget,incompatibleTargetReason,interactionOutcomeMessage} = await import("../../shared/interaction-preview");
+  const world=fixture();
+  world.interactions!.objects.find(object=>object.entityId==="cup")!.carryable=false;
+  world.entities.find(entity=>entity.id==="cup")!.label="Pump control";
+  world.entities.find(entity=>entity.id==="plant")!.art="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+  world.interactions!.actions=world.interactions!.actions.filter(action=>action.id==="refill");
+  world.interactions!.actions.push({id:"start",kind:"operate",label:"Start the pump",toolId:"cup",targetId:"cup",requiresResourceIds:["cup"],effects:[{kind:"moveObject",entityId:"plant",x:650,y:200,durationMs:900}]});
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredInteractionIds:["start"]};
+  validateWorld(world);
+  const initial=emptyPlayState(), blocked=inspectInteractionTarget(world,initial,"cup");
+  assert.equal(blocked.length,1); assert.equal(blocked[0].available,false);assert.match(blocked[0].reason!,/Fill Pump control first/);
+  assert.match(nextInteractionHint(world,initial)!.text,/Take Jug/);
+  const held=reduceInteraction(world,initial,{type:"pickup",entityId:"pitcher"}).state;
+  const refill=world.interactions!.actions[0], result=reduceInteraction(world,held,{type:"perform",actionId:refill.id});
+  assert.equal(result.ok,true,result.reason);
+  const snapshot=JSON.stringify([world,held,result.state]);
+  assert.equal(interactionOutcomeMessage(world,held,result.state,refill),"Unlocked: Start the pump");
+  assert.equal(incompatibleTargetReason(world,result.state,"cup"),undefined);
+  const preview=inspectInteractionTarget(world,result.state,"cup");
+  assert.deepEqual(preview.map(action=>action.id),["start"]);assert.equal(preview[0].available,true);
+  assert.deepEqual(nextInteractionHint(world,result.state),{entityId:"cup",text:"Start the pump · Pump control"});
+  assert.equal(JSON.stringify([world,held,result.state]),snapshot);
+  const noHands=reduceInteraction(world,result.state,{type:"drop"}).state;
+  assert.equal(inspectInteractionTarget(world,noHands,"cup")[0].available,true);
+  const operated=reduceInteraction(world,noHands,{type:"perform",actionId:"start"});
+  assert.equal(operated.ok,true,operated.reason);
+  assert.deepEqual(inspectInteractionTarget(world,operated.state,"cup"),[]);
+  assert.match(incompatibleTargetReason(world,operated.state,"cup")!,/already been completed/);
+});
+
+test("source selection skips spent or excluded abilities but preserves future refill uses",async()=>{
+  const {canSelectInteractionSource}=await import("../../shared/interaction-preview");
+  const world=fixture();
+  assert.equal(canSelectInteractionSource(world,emptyPlayState(),"pitcher"),true);
+  assert.equal(canSelectInteractionSource(world,emptyPlayState(),"cup"),true,"An empty source can be filled before its later use.");
+  world.interactions!.choiceGroups=[{id:"allocation",label:"Choose delivery",actionIds:["waste-water","refill"]}];
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredChoiceGroupIds:["allocation"]};
+  validateWorld(world);
+  const held=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"pitcher"}).state;
+  const filled=reduceInteraction(world,held,{type:"perform",actionId:"refill"}).state;
+  const dropped=reduceInteraction(world,filled,{type:"drop"}).state;
+  assert.equal(canSelectInteractionSource(world,dropped,"pitcher"),false,"Both completed and closed sibling uses are spent.");
+  assert.equal(canSelectInteractionSource(world,dropped,"cup"),true);
+});
+
+function preparedRouteFixture(resourceOnly = false) {
+  const world=fixture();
+  world.gameplay!.movement="platform";
+  world.entities.push({id:"floor",kind:"terrain",x:0,y:700,width:1440,height:120},{id:"hero",kind:"player",label:"Robot",x:20,y:20,width:30,height:30}, {id:"gate",kind:"gate",label:"Gate",x:700,y:100,width:60,height:150});
+  world.entities.find(entity=>entity.id==="pitcher")!.label="Battery";
+  world.entities.find(entity=>entity.id==="cup")!.label="Button";
+  world.entities.find(entity=>entity.id==="plant")!.label="Spring";
+  world.interactions!.objects.find(object=>object.entityId==="cup")!.carryable=false;
+  world.interactions!.objects.find(object=>object.entityId==="plant")!.carryable=true;
+  world.interactions!.objects.push({entityId:"hero"});
+  world.interactions!.actions=[
+    {id:"charge",kind:"transfer",label:"Charge the button",toolId:"pitcher",targetId:"cup",amount:2},
+    {id:"operate-gate",kind:"operate",label:"Press button to open gate",toolId:"cup",targetId:"cup",...(resourceOnly ? {requiresResourceIds:["cup"]} : {requires:["charge"]}),effects:[{kind:"openGate",entityId:"gate"}]},
+    {id:"fit-spring",kind:"attach",label:"Fit spring to jump higher",toolId:"plant",targetId:"hero",effects:[{kind:"jumpBoost",multiplier:1.5}]},
+  ];
+  world.interactions!.choiceGroups=[{id:"route",label:"Choose a way through",actionIds:["operate-gate","fit-spring"]}];
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredChoiceGroupIds:["route"]};
+  return validateWorld(world);
+}
+
+test("requested hints show prepared and immediate routes before suggesting one route's preparation",()=>{
+  for(const resourceOnly of [false,true]) {
+    const world=preparedRouteFixture(resourceOnly), initial=emptyPlayState();
+    const before=JSON.stringify([world,initial]);
+    const hint=nextInteractionHint(world,initial);
+    assert.match(hint!.text,/^Choose: Press button to open gate \(first: Charge the button\) or Fit spring to jump higher/);
+    assert.equal(JSON.stringify([world,initial]),before,"A choice hint neither performs preparation nor changes the chosen route.");
+    const held=reduceInteraction(world,initial,{type:"pickup",entityId:"pitcher"}).state;
+    const charged=reduceInteraction(world,held,{type:"perform",actionId:"charge"});
+    assert.equal(charged.ok,true,charged.reason);
+    const ready=nextInteractionHint(world,charged.state)!;
+    assert.match(ready.text,/^Choose: Press button to open gate or Fit spring to jump higher/);
+    assert.doesNotMatch(ready.text,/first:|prepare first/);
+  }
+});
+
+test("route hints honor a fixed manual branch, committed choices, and individually impossible outcomes",()=>{
+  const world=preparedRouteFixture(), initial=emptyPlayState();
+  const fixed=structuredClone(world);fixed.goalRules!.requiredInteractionIds=["operate-gate"];validateWorld(fixed);
+  const forced=nextInteractionHint(fixed,initial)!;
+  assert.match(forced.text,/Take Battery to charge the button/);
+  assert.doesNotMatch(forced.text,/^Choose:|Fit spring/);
+  const held=reduceInteraction(world,initial,{type:"pickup",entityId:"plant"}).state;
+  const chosen=reduceInteraction(world,held,{type:"perform",actionId:"fit-spring"});
+  assert.equal(chosen.ok,true,chosen.reason);
+  assert.doesNotMatch(nextInteractionHint(world,chosen.state)?.text ?? "",/^Choose:|Charge|button|Battery/);
+  const unavailable=preparedRouteFixture(true);
+  unavailable.interactions!.objects.find(object=>object.entityId==="cup")!.resource!.capacity=3;
+  validateWorld(unavailable); // The OR goal remains solvable through the spring.
+  const hint=nextInteractionHint(unavailable,initial)!;
+  assert.doesNotMatch(hint.text,/^Choose:|Press button/);
+  assert.match(hint.text,/Fit spring|fit spring/);
+});
+
+test("replay invitation requires a completed required choice with a feasible different branch", async () => {
+  const {hasAlternativeInteractionRoute}=await import("./interaction-replay");
+  const world=fixture();
+  world.interactions!.choiceGroups=[{id:"route",label:"Route",actionIds:["refill","waste-water"]}];
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredChoiceGroupIds:["route"]};
+  let state=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"pitcher"}).state;
+  state=reduceInteraction(world,state,{type:"perform",actionId:"refill"}).state;
+  assert.equal(hasAlternativeInteractionRoute(world,state),false);
+  state={...state,completed:true};
+  const before=JSON.stringify({world,state});
+  assert.equal(hasAlternativeInteractionRoute(world,state),true);
+  assert.equal(JSON.stringify({world,state}),before);
+  assert.equal(hasAlternativeInteractionRoute(world,{...state,exploring:true}),false);
+  world.goalRules.requiredInteractionIds=["refill"];
+  assert.equal(hasAlternativeInteractionRoute(world,state),false,"Fixed route excludes the nominal alternative.");
+  world.goalRules.requiredInteractionIds=[];
+  world.goalRules.requiredChoiceGroupIds=[];
+  assert.equal(hasAlternativeInteractionRoute(world,state),false,"An incidental choice is not advertised as another route.");
+});
+
+test("a completed controller can still be selected for its remaining resource use with empty hands",async()=>{
+  const {canSelectInteractionSource,incompatibleTargetReason}=await import("../../shared/interaction-preview");
+  const world=fixture();
+  const control=world.interactions!.objects.find(object=>object.entityId==="pitcher")!;
+  control.carryable=false;control.usableInPlace=true;
+  world.entities.find(entity=>entity.id==="plant")!.art="/art/test.png";
+  world.interactions!.actions.unshift({id:"position",kind:"operate",label:"Position the fern",toolId:"pitcher",targetId:"pitcher",effects:[{kind:"moveObject",entityId:"plant",x:450,y:100}]});
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredInteractionIds:["position","refill"]};
+  validateWorld(world);
+  const operated=reduceInteraction(world,emptyPlayState(),{type:"perform",actionId:"position"});
+  assert.equal(operated.ok,true,operated.reason);
+  assert.equal(canSelectInteractionSource(world,operated.state,"pitcher"),true);
+  assert.equal(incompatibleTargetReason(world,operated.state,"pitcher"),undefined);
+  const selected=reduceInteraction(world,operated.state,{type:"selectSource",entityId:"pitcher"});
+  assert.equal(selected.ok,true,selected.reason);
+  assert.equal(reduceInteraction(world,selected.state,{type:"perform",actionId:"refill"}).ok,true);
+});

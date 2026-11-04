@@ -4,7 +4,7 @@ import { ObjectInteractions } from "./object-interactions";
 import { interactionEffects } from "../../shared/interactions";
 import { createAtmosphere } from "./atmosphere";
 import { Soundscape } from "./soundscape";
-import { artworkRasterSize } from "./artwork-raster";
+import { artworkRasterSize, artworkFootPadding, artworkFootOffset } from "./artwork-raster";
 import {
   containArtwork,
   imageDirection,
@@ -163,6 +163,7 @@ export class WorldScene extends Phaser.Scene {
   private heroHeight = 1;
   private heroVisualWidth = 1;
   private heroVisualHeight = 1;
+  private heroFootPadding = 0;
   private sourceHero = false;
   private creativeArtwork = false;
   private sourceAlignedArtwork = false;
@@ -422,8 +423,10 @@ export class WorldScene extends Phaser.Scene {
         : { width: hero.width, height: hero.height };
     this.heroVisualWidth = heroSize.width;
     this.heroVisualHeight = heroSize.height;
+    this.heroFootPadding = this.sourceHero && (this.definition.gameplay?.movement ?? "platform") === "platform"
+      ? this.readHeroFootPadding() : 0;
     this.heroArt.setDisplaySize(heroSize.width, heroSize.height);
-    this.heroArt.setPosition(this.player.x, this.player.y + hero.height / 2);
+    this.heroArt.setPosition(this.player.x, this.player.y + hero.height / 2 + artworkFootOffset(this.heroFootPadding, heroSize.height, this.definition.gameplay?.movement));
     if (this.creativeArtwork) {
       this.heroHalo.setVisible(false);
       this.heroFocus = this.add.graphics().setDepth(19);
@@ -1018,6 +1021,22 @@ export class WorldScene extends Phaser.Scene {
     else if (this.state.completed) this.hooks.onMoment("World complete.");
     this.report();
     return true;
+  }
+
+  private readHeroFootPadding(): number {
+    try {
+      const frame = this.heroArt.frame;
+      const canvas = document.createElement("canvas");
+      canvas.width = frame.width; canvas.height = frame.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return 0;
+      context.drawImage(this.heroArt.texture.getSourceImage() as CanvasImageSource,
+        frame.cutX, frame.cutY, frame.cutWidth, frame.cutHeight, 0, 0, canvas.width, canvas.height);
+      // Read once per loaded hero, never during animation or physics updates.
+      return artworkFootPadding(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+    } catch {
+      return 0; // Unreadable artwork preserves its prior placement and pixels.
+    }
   }
 
   private sampleSourceDirection(entity: WorldEntity | string): ImageDirection {
@@ -1817,6 +1836,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   releaseControls() {
+    this.objectInteractions?.clearInspection();
     for (const key of Object.keys(this.controls) as (keyof WorldControls)[])
       this.controls[key] = false;
     this.input?.keyboard?.resetKeys();
@@ -1925,6 +1945,7 @@ export class WorldScene extends Phaser.Scene {
       },
       settled: () => { this.completeInteractionObjectives(); this.report(); },
       player: () => this.player,
+      playerArtBounds: () => this.heroArt?.getBounds(),
       playing: () => this.isPlaying && (!this.state.completed || Boolean(this.state.exploring)),
       approach: point => {
         this.roamTarget = point;
@@ -1939,7 +1960,7 @@ export class WorldScene extends Phaser.Scene {
           (this.player?.body as Phaser.Physics.Arcade.Body | undefined)?.setVelocity(0, 0);
       },
       moment: message => this.hooks.onMoment(message),
-      feedback: kind => this.soundtrack.cue(kind === "pickup" || kind === "drop" ? "collect" : "gate"),
+      feedback: kind => this.soundtrack.cue(kind === "pickup" || kind === "selectSource" || kind === "drop" ? "collect" : "gate"),
     }, this.reducedMotion);
     // A quick steering tap can be released between render frames. Cancel the
     // pending click immediately, rather than letting the old target win later.
@@ -1989,6 +2010,8 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  previewObjectAction(actionId?: string) { this.objectInteractions?.previewAction(actionId); }
+
   revealObjectHint(entityId: string): boolean { return this.objectInteractions?.revealHint(entityId) ?? false; }
   canUndoObjectAction(): boolean {
     return this.sceneCreated && !this.resourcesReleased && !this.artworkFailed && this.isPlaying &&
@@ -1996,6 +2019,7 @@ export class WorldScene extends Phaser.Scene {
   }
   dismissObjectChoices(): boolean { return this.objectInteractions?.dismissChoices() ?? false; }
   interactWithObject(id: string, actionId?: string) { return this.objectInteractions?.interact(id, actionId) ?? false; }
+  selectFixedSource(id: string) { return this.objectInteractions?.selectFixedSource(id) ?? false; }
   dropHeldObject() { this.objectInteractions?.putBack(); }
 
   private nearestLever() {
@@ -2398,7 +2422,7 @@ export class WorldScene extends Phaser.Scene {
         this.player.x,
         (this.creativeArtwork
           ? body.bottom
-          : this.player.y + this.heroHeight / 2) + bob,
+          : this.player.y + this.heroHeight / 2) + bob + artworkFootOffset(this.heroFootPadding, this.heroVisualHeight * this.poseY, this.definition.gameplay?.movement),
       )
       .setDisplaySize(
         this.heroVisualWidth * this.poseX,

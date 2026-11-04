@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import sharp from "sharp";
 import { validateInteractions, reduceInteraction } from "../shared/interactions.js";
 import { emptyPlayState, type WorldDefinition } from "../shared/world.js";
 import { validateGeneratedRetryablePlan } from "./retryable-planning.js";
@@ -58,4 +59,22 @@ test("retryable admission rejects uncertainty at its fixed state budget",()=>{
   world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredResourceIds:recipients};
   validateInteractions(world);
   assert.throws(()=>validateGeneratedRetryablePlan(world),/too complex to verify/);
+});
+
+
+test("retryable witness traversal selects fixed sources and can switch between them",()=>{
+  const world=fixture();
+  for(const object of world.interactions!.objects)if(object.carryable){object.carryable=false;object.usableInPlace=true;}
+  validateInteractions(world);validateGeneratedRetryablePlan(world);
+});
+
+
+test("retryable proof executes a prepared stationary control without inventing a pickup",async()=>{
+  const world=fixture();
+  const art=`data:image/png;base64,${(await sharp({create:{width:30,height:30,channels:4,background:"#456"}}).png().toBuffer()).toString("base64")}`;
+  world.entities.push({id:"payload",kind:"decoration",x:10,y:300,width:30,height:30,art});
+  world.interactions!.objects.push({entityId:"payload"});
+  world.interactions!.actions.push({id:"launch",kind:"operate",label:"Launch",toolId:"goal",targetId:"goal",requiresResourceIds:["goal"],effects:[{kind:"moveObject",entityId:"payload",x:500,y:300}]});
+  world.goalRules!.requiredInteractionIds=["launch"];
+  validateInteractions(world);validateGeneratedRetryablePlan(world);
 });

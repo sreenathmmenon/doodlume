@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyPlayState, goalProgress, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "./world.js";
-import { availableInteractions, safeAvailableInteractions, playerAvailableInteractions, interactionCompletionStatus, interactionEffects, interactionState, reduceInteraction, validateInteractionChoiceOutcomes, type InteractionCommand } from "./interactions.js";
+import { activeInteractionSource, selectInteractionSourceCommand, availableInteractions, safeAvailableInteractions, playerAvailableInteractions, interactionCompletionStatus, interactionEffects, interactionState, reduceInteraction, validateInteractionChoiceOutcomes, type InteractionCommand } from "./interactions.js";
 import { applyWorldPatch, undoWorldPatch } from "./revisions.js";
 import { validSavedWorlds } from "../src/lib/library.js";
 import { inspectInteractionTarget, previewInteraction, incompatibleTargetReason } from "./interaction-preview.js";
@@ -45,7 +45,7 @@ test("inspection predicts a transfer without spending supplies and explains unsa
   const previews = inspectInteractionTarget(w, start, "receiver");
   assert.equal(previews.find(p => p.id === "fill")?.available, true);
   assert.match(previews.find(p => p.id === "fill")!.consequence, /0 → 6 \/ 10/);
-  assert.match(previews.find(p => p.id === "fill")!.consequence, /One use/);
+  assert.match(previews.find(p => p.id === "fill")!.consequence, /Uses 6 once/);
   assert.equal(previews.find(p => p.id === "extra")?.available, false);
   assert.match(previews.find(p => p.id === "extra")!.reason!, /block completion/);
   assert.deepEqual(start, original);
@@ -75,7 +75,7 @@ test("a used transfer explains its one-use limit without implying every action o
   w.interactions!.actions[1].label="A longer alternative delivery name that must preserve the one-use explanation";
   w.entities.find(entity=>entity.id==="receiver")!.label="An unusually long receiver name for preview clipping";
   validateWorld(w);
-  assert.match(previewInteraction(w,before,w.interactions!.actions[0]).consequence.slice(0,160),/One use/);
+  assert.match(previewInteraction(w,before,w.interactions!.actions[0]).consequence.slice(0,160),/Uses 2 once/);
   w.interactions!.objects.find(object=>object.entityId==="receiver")!.carryable=true;
   assert.equal(incompatibleTargetReason(w,both,"receiver"),undefined,"A free carryable receiver must remain available for pickup.");
 });
@@ -115,6 +115,133 @@ function allocationWorld(): WorldDefinition {
   w.interactions!.actions.push({id:"wrong-allocation",kind:"transfer",label:"Charge the part",toolId:"supply",targetId:"part",amount:6});
   return validateWorld(w);
 }
+
+function stationaryWorld(): WorldDefinition {
+  const w=allocationWorld();
+  w.gameplay!.movement="discover";
+  w.entities=w.entities.filter(entity=>entity.kind!=="player");
+  w.interactions!.actions=w.interactions!.actions.filter(action=>action.kind==="transfer");
+  w.goalRules!.requiredInteractionIds=["fill"];
+  const source=w.interactions!.objects.find(object=>object.entityId==="supply")!;
+  source.carryable=false; source.usableInPlace=true;
+  return validateWorld(w);
+}
+
+test("stationary sources select without carrying and switch explicitly between activation modes",()=>{
+  const w=stationaryWorld(), start=emptyPlayState();
+  assert.deepEqual(selectInteractionSourceCommand(w,"supply"),{type:"selectSource",entityId:"supply"});
+  assert.deepEqual(selectInteractionSourceCommand(w,"part"),{type:"pickup",entityId:"part"});
+  assert.equal(reduceInteraction(w,start,{type:"pickup",entityId:"supply"}).ok,false);
+  assert.match(reduceInteraction(w,start,{type:"perform",actionId:"fill"}).reason!,/Select the matching source/);
+  let selected=step(w,start,selectInteractionSourceCommand(w,"supply"));
+  assert.equal(selected.interactions!.heldEntityId,null);
+  assert.equal(selected.interactions!.selectedSourceId,"supply");
+  assert.equal(activeInteractionSource(selected.interactions!),"supply");
+  assert.equal(reduceInteraction(w,selected,{type:"selectSource",entityId:"supply"}).ok,false);
+  const bad=reduceInteraction(w,selected,{type:"selectSource",entityId:"receiver"});
+  assert.equal(bad.ok,false); assert.equal(bad.state,selected);
+  assert.deepEqual(safeAvailableInteractions(w,selected).map(action=>action.id),["fill"]);
+  selected=step(w,selected,{type:"perform",actionId:"fill"});
+  assert.deepEqual(selected.interactions!.quantities,{supply:4,receiver:6,part:0});
+  assert.equal(selected.interactions!.heldEntityId,null);
+  assert.equal(selected.interactions!.selectedSourceId,"supply");
+  const held=step(w,selected,{type:"pickup",entityId:"part"});
+  assert.equal(held.interactions!.heldEntityId,"part");
+  assert.equal(Object.hasOwn(held.interactions!,"selectedSourceId"),false);
+  const switched=step(w,held,{type:"selectSource",entityId:"supply"});
+  assert.equal(switched.interactions!.heldEntityId,null,"Selecting a stationary source atomically puts down the prior carried object.");
+  const dropped=step(w,switched,{type:"drop"});
+  assert.equal(activeInteractionSource(dropped.interactions!),null);
+  assert.equal(Object.hasOwn(dropped.interactions!,"selectedSourceId"),false);
+  assert.equal(Object.hasOwn(interactionState(w,start),"selectedSourceId"),false,"Legacy initial states do not gain an optional field.");
+  assert.deepEqual(interactionEffects(w,selected).objectMoves,{});
+});
+
+test("stationary transfer receipt replay keeps resource history but drops stale or conflicting activation",()=>{
+  const w=stationaryWorld();
+  const selected=step(w,emptyPlayState(),{type:"selectSource",entityId:"supply"});
+  const delivered=step(w,selected,{type:"perform",actionId:"fill"});
+  const dual=structuredClone(delivered); dual.interactions!.heldEntityId="part";
+  assert.equal(interactionState(w,dual).heldEntityId,null);
+  assert.equal(interactionState(w,dual).selectedSourceId,"supply");
+  const forged=structuredClone(delivered); forged.interactions!.selectedSourceId="missing";
+  assert.equal(Object.hasOwn(interactionState(w,forged),"selectedSourceId"),false);
+  const portable=structuredClone(w);
+  portable.interactions!.objects[0].usableInPlace=false; portable.interactions!.objects[0].carryable=true;
+  validateWorld(portable);
+  const retained=retainPlayState(portable,delivered);
+  assert.equal(activeInteractionSource(retained.interactions!),null,"Changing source mode does not silently pick it up.");
+  assert.deepEqual(retained.interactions!.completed,["fill"]);
+  assert.deepEqual(retained.interactions!.quantities,delivered.interactions!.quantities);
+  assert.deepEqual(retained.interactions!.completedSignatures,delivered.interactions!.completedSignatures);
+  const edited=applyWorldPatch(w,delivered,{id:"portable-source",worldId:w.id,baseRevision:w.revision,origin:"manual",additions:[],interactions:portable.interactions});
+  assert.equal(activeInteractionSource(edited.state.interactions!),null,"An actual world edit clears selection when its source mode changes.");
+  assert.deepEqual(edited.state.interactions!.completed,["fill"]);
+  const undone=undoWorldPatch(edited.world,edited.state,edited.checkpoint);
+  assert.equal(activeInteractionSource(undone.state.interactions!),null,"Undoing a world edit does not invent a new selection.");
+  assert.deepEqual(undone.state.interactions!.quantities,delivered.interactions!.quantities);
+  const removed=structuredClone(w);
+  removed.entities=removed.entities.filter(entity=>entity.id!=="supply");
+  removed.interactions!.objects=removed.interactions!.objects.filter(object=>object.entityId!=="supply");
+  removed.interactions!.actions=[]; removed.goalRules!.requiredInteractionIds=[];
+  validateWorld(removed);
+  assert.equal(activeInteractionSource(retainPlayState(removed,selected).interactions!),null);
+});
+
+test("stationary sources support retryable and exclusive completion proofs without relaxing immediate rules",()=>{
+  const refill=stationaryWorld();
+  refill.interactions!.objects.find(object=>object.entityId==="supply")!.resource!.initial=2;
+  refill.interactions!.objects.find(object=>object.entityId==="part")!.resource!.initial=4;
+  refill.interactions!.actions.push({id:"refill-fixed",kind:"transfer",label:"Refill the stationary source",toolId:"part",targetId:"supply",amount:4});
+  validateWorld(refill);
+  let refilled=step(refill,emptyPlayState(),selectInteractionSourceCommand(refill,"part"));
+  refilled=step(refill,refilled,{type:"perform",actionId:"refill-fixed"});
+  refilled=step(refill,refilled,selectInteractionSourceCommand(refill,"supply"));
+  refilled=step(refill,refilled,{type:"perform",actionId:"fill"});
+  assert.equal(goalProgress(refill,refilled).ready,true,"Initial feasibility includes carried refills into a stationary source.");
+  const w=stationaryWorld(); w.interactions!.completionPolicy="retryable";
+  const selected=step(w,emptyPlayState(),{type:"selectSource",entityId:"supply"});
+  assert.equal(playerAvailableInteractions(w,selected).some(action=>action.id==="wrong-allocation"),true);
+  const lost=step(w,selected,{type:"perform",actionId:"wrong-allocation"});
+  assert.equal(interactionCompletionStatus(w,lost),"impossible");
+  assert.equal(reduceInteraction(w,lost,{type:"perform",actionId:"fill"}).ok,false);
+  assert.equal(reduceInteraction(w,lost,{type:"perform",actionId:"wrong-allocation"}).ok,false);
+  const choices=stationaryWorld();
+  choices.interactions!.choiceGroups=[{id:"route",label:"Delivery",actionIds:["fill","wrong-allocation"]}];
+  choices.goalRules!.requiredInteractionIds=[]; choices.goalRules!.requiredChoiceGroupIds=["route"];
+  validateWorld(choices); validateInteractionChoiceOutcomes(choices);
+  for(const id of ["fill","wrong-allocation"]){
+    const before=step(choices,emptyPlayState(),{type:"selectSource",entityId:"supply"});
+    const after=step(choices,before,{type:"perform",actionId:id});
+    assert.equal(goalProgress(choices,after).ready,true);
+    const other=id==="fill"?"wrong-allocation":"fill";
+    assert.match(reduceInteraction(choices,after,{type:"perform",actionId:other}).reason!,/already chosen/);
+  }
+});
+
+test("stationary sources require explicit discovery resource semantics and cannot themselves move or attach",()=>{
+  for(const mutate of [
+    (w:WorldDefinition)=>{w.interactions!.objects[0].carryable=true;},
+    (w:WorldDefinition)=>{w.gameplay!.movement="roam";},
+    (w:WorldDefinition)=>{w.entities.find(entity=>entity.id==="supply")!.kind="terrain";},
+    (w:WorldDefinition)=>{delete w.interactions!.objects[0].resource;},
+    (w:WorldDefinition)=>{w.interactions!.actions=[];w.goalRules!.requiredInteractionIds=[];},
+    (w:WorldDefinition)=>{(w.interactions!.objects[0] as unknown as {usableInPlace:string}).usableInPlace="yes";},
+    (w:WorldDefinition)=>{w.interactions!.actions.push({id:"fixed-use",kind:"use",label:"Use",toolId:"supply",targetId:"receiver",effects:[{kind:"moveObject",entityId:"receiver",x:600,y:100}]});},
+    (w:WorldDefinition)=>{w.interactions!.actions.push({id:"fixed-attach",kind:"attach",label:"Attach",toolId:"supply",targetId:"receiver",effects:[{kind:"moveObject",entityId:"receiver",x:600,y:100}]});},
+    (w:WorldDefinition)=>{w.interactions!.actions.push({id:"fixed-place",kind:"place",label:"Place",toolId:"supply",targetId:"receiver",effects:[{kind:"moveObject",entityId:"supply",x:600,y:100}]});},
+    (w:WorldDefinition)=>{w.interactions!.actions.push({id:"move-fixed",kind:"use",label:"Move",toolId:"part",targetId:"supply",effects:[{kind:"moveObject",entityId:"supply",x:600,y:100}]});},
+  ]){const invalid=stationaryWorld();mutate(invalid);assert.throws(()=>validateWorld(invalid));}
+  const recipient=stationaryWorld();
+  recipient.entities.find(entity=>entity.id==="receiver")!.art="/art/seed.svg";
+  recipient.interactions!.actions.push({id:"fit-at-source",kind:"attach",label:"Fit",toolId:"part",targetId:"supply",effects:[{kind:"moveObject",entityId:"receiver",x:600,y:100}]});
+  validateWorld(recipient);
+  const placed=stationaryWorld();
+  placed.entities.find(entity=>entity.id==="part")!.art="/art/seed.svg";
+  placed.interactions!.actions.push({id:"place-at-source",kind:"place",label:"Place",toolId:"part",targetId:"supply",effects:[{kind:"moveObject",entityId:"part",x:600,y:100}]});
+  validateWorld(placed);
+  assert.equal(placed.entities.find(entity=>entity.id==="supply")!.art,undefined,"Embedded stationary source artwork requires no extraction.");
+});
 
 test("retryable allocation permits a legal losing move only by explicit opt-in while hints remain safe", () => {
   for (const policy of [undefined, "protected", "retryable"] as const) {
@@ -695,4 +822,105 @@ test("attachments inherit exclusive ancestor assignments while independent OR gr
   }
   impossible.goalRules!.requiredChoiceGroupIds=["require-gate","require-speed"];
   assert.throws(()=>validateWorld(impossible),/cannot be completed/,"Individually reachable OR goals cannot require mutually exclusive ancestor choices together.");
+});
+
+function operatingWorld(): WorldDefinition {
+  const w=world();
+  w.interactions!.objects.find(object=>object.entityId==="receiver")!.resource!.capacity=6;
+  w.interactions!.actions=w.interactions!.actions.filter(action=>action.id==="fill");
+  w.interactions!.actions.push({id:"operate",kind:"operate",label:"Open the powered passage",toolId:"receiver",targetId:"receiver",requires:["fill"],requiresResourceIds:["receiver"],effects:[{kind:"openGate",entityId:"barrier"}]});
+  w.goalRules!.requiredInteractionIds=["operate"];
+  return validateWorld(w);
+}
+
+test("direct operation needs actual preparation, preserves possession, and persists only valid receipts",()=>{
+  const w=operatingWorld(), initial=emptyPlayState();
+  const blocked=reduceInteraction(w,initial,{type:"perform",actionId:"operate"});
+  assert.equal(blocked.ok,false);assert.equal(blocked.state,initial);assert.match(blocked.reason!,/earlier step/);
+  const ready=filled(w), before=structuredClone(ready);
+  assert.ok(availableInteractions(w,ready).some(action=>action.id==="operate"));
+  const operated=step(w,ready,{type:"perform",actionId:"operate"});
+  assert.equal(operated.interactions!.heldEntityId,"supply","Operation does not fabricate a held controller or discard an existing tool.");
+  assert.equal(Object.hasOwn(operated.interactions!,"selectedSourceId"),false);
+  assert.deepEqual(ready,before);assert.deepEqual(interactionEffects(w,operated).openGateIds,["barrier"]);
+  assert.equal(goalProgress(w,operated).ready,true);
+  const noHands=step(w,ready,{type:"drop"});
+  assert.equal(step(w,noHands,{type:"perform",actionId:"operate"}).interactions!.heldEntityId,null);
+  assert.equal(reduceInteraction(w,operated,{type:"perform",actionId:"operate"}).ok,false);
+  const saved=validSavedWorlds([{world:w,state:operated,savedAt:new Date().toISOString()}])[0];
+  assert.deepEqual(interactionEffects(saved.world,saved.state).openGateIds,["barrier"]);
+  assert.deepEqual(interactionEffects(w,retainPlayState(w,operated)).openGateIds,["barrier"]);
+  const changed=structuredClone(w);changed.interactions!.actions[1].requiresResourceIds=["supply"];
+  assert.deepEqual(interactionState(changed,operated).completed,["fill"],"A changed readiness contract invalidates its old operation receipt.");
+  const forged={...initial,interactions:{...operated.interactions!,completed:["operate"]}};
+  assert.deepEqual(interactionState(w,forged).completed,[],"A final full counter cannot manufacture prerequisite receipts.");
+  assert.deepEqual(interactionEffects(w,before).openGateIds,[],"Restoring the pre-operation state restores the closed passage.");
+});
+
+test("operation effects stay receipt-based after a once-full resource is subsequently spent",()=>{
+  const w=operatingWorld();
+  w.interactions!.actions[1].requires=[];
+  w.interactions!.actions[1].requiresResourceIds=["supply"];
+  w.interactions!.actions[0].requires=["operate"];
+  w.goalRules!.requiredInteractionIds=["operate","fill"];
+  validateWorld(w);
+  let state=step(w,emptyPlayState(),{type:"perform",actionId:"operate"});
+  state=step(w,state,{type:"pickup",entityId:"supply"});
+  state=step(w,state,{type:"perform",actionId:"fill"});
+  assert.equal(state.interactions!.quantities.supply,4);
+  assert.deepEqual(interactionState(w,state).completed,["operate","fill"]);
+  assert.deepEqual(interactionEffects(w,state).openGateIds,["barrier"]);
+  assert.equal(goalProgress(w,state).ready,true);
+});
+
+test("operation branches and resource safety use the same completion search without pickup",()=>{
+  const w=operatingWorld();
+  w.interactions!.actions.push({id:"speed",kind:"operate",label:"Power the fast route",toolId:"receiver",targetId:"receiver",requires:["fill"],requiresResourceIds:["receiver"],effects:[{kind:"moveSpeedBoost",multiplier:1.5}]});
+  w.interactions!.choiceGroups=[{id:"route",label:"Powered route",actionIds:["operate","speed"]}];
+  w.goalRules!.requiredInteractionIds=[];w.goalRules!.requiredChoiceGroupIds=["route"];
+  w.interactions!.objects.find(object=>object.entityId==="part")!.resource={type:"charge",capacity:10,initial:0};
+  w.interactions!.actions.push({id:"waste",kind:"transfer",label:"Spend elsewhere",toolId:"supply",targetId:"part",amount:5});
+  validateWorld(w);validateInteractionChoiceOutcomes(w);
+  const holding=step(w,emptyPlayState(),{type:"pickup",entityId:"supply"});
+  assert.ok(availableInteractions(w,holding).some(action=>action.id==="waste"));
+  assert.equal(safeAvailableInteractions(w,holding).some(action=>action.id==="waste"),false);
+  assert.equal(reduceInteraction(w,holding,{type:"perform",actionId:"waste"}).ok,false);
+  for(const chosen of ["operate","speed"]){
+    const state=step(w,step(w,filled(w),{type:"drop"}),{type:"perform",actionId:chosen});
+    assert.equal(goalProgress(w,state).ready,true);assert.equal(state.interactions!.heldEntityId,null);
+    assert.equal(interactionEffects(w,state).moveSpeedMultiplier,chosen==="speed"?1.5:1);
+    assert.deepEqual(interactionEffects(w,state).openGateIds,chosen==="operate"?["barrier"]:[]);
+    assert.match(reduceInteraction(w,state,{type:"perform",actionId:chosen==="operate"?"speed":"operate"}).reason!,/already chosen/);
+  }
+  w.interactions!.completionPolicy="retryable";
+  const lost=step(w,holding,{type:"perform",actionId:"waste"});
+  assert.equal(interactionCompletionStatus(w,lost),"impossible");
+  const impossible=structuredClone(w);impossible.interactions!.objects[0].resource!.initial=5;
+  assert.throws(()=>validateWorld(impossible),/cannot be completed/);
+});
+
+test("operation requires one uncarried controller and real supported effects, including prepared own movement",()=>{
+  for(const mutate of [
+    (w:WorldDefinition)=>{w.interactions!.actions[1].targetId="part";},
+    (w:WorldDefinition)=>{w.interactions!.objects[1].carryable=true;},
+    (w:WorldDefinition)=>{w.entities.find(entity=>entity.id==="receiver")!.kind="terrain";},
+    (w:WorldDefinition)=>{w.interactions!.actions[1].effects=[];},
+    (w:WorldDefinition)=>{w.interactions!.actions[1].requiresResourceIds=["missing"];},
+    (w:WorldDefinition)=>{w.interactions!.actions[1].effects=[{kind:"moveObject",entityId:"receiver",x:700,y:100}];},
+  ]){const invalid=operatingWorld();mutate(invalid);assert.throws(()=>validateWorld(invalid));}
+  const moving=operatingWorld();moving.gameplay!.movement="discover";moving.entities=moving.entities.filter(entity=>entity.kind!=="player");
+  moving.entities.find(entity=>entity.id==="receiver")!.art="/art/controller.png";
+  moving.interactions!.actions[1].effects=[{kind:"moveObject",entityId:"receiver",x:700,y:100}];
+  validateWorld(moving);
+  assert.equal(interactionEffects(moving,step(moving,filled(moving),{type:"perform",actionId:"operate"})).objectMoves.receiver.x,700);
+  const dual=stationaryWorld();dual.entities.find(entity=>entity.id==="receiver")!.art="/art/receiver.png";
+  dual.interactions!.actions.push({id:"operate",kind:"operate",label:"Send the receiver onward",toolId:"supply",targetId:"supply",effects:[{kind:"moveObject",entityId:"receiver",x:700,y:100}]});
+  validateWorld(dual);
+  const selected=step(dual,emptyPlayState(),{type:"selectSource",entityId:"supply"});
+  const after=step(dual,selected,{type:"perform",actionId:"operate"});
+  assert.equal(after.interactions!.selectedSourceId,"supply");assert.equal(after.interactions!.heldEntityId,null);
+  assert.equal(interactionEffects(dual,after).objectMoves.receiver.x,700);
+  const fixedMove=structuredClone(dual);fixedMove.entities.find(entity=>entity.id==="supply")!.art="/art/controller.png";
+  fixedMove.interactions!.actions.at(-1)!.effects=[{kind:"moveObject",entityId:"supply",x:700,y:100}];
+  assert.throws(()=>validateWorld(fixedMove),/moving object/);
 });

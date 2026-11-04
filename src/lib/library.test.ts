@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EXAMPLES, freshExample } from "./examples.js";
 import { emptyPlayState, continueExploration, getRetryCheckpoint, pinRetryCheckpoint, retainPlayState, validateWorld } from "../../shared/world.js";
-import { interactionCompletionStatus, reduceInteraction } from "../../shared/interactions.js";
+import { activeInteractionSource, interactionCompletionStatus, reduceInteraction, selectInteractionSourceCommand } from "../../shared/interactions.js";
 import { applyWorldPatch } from "../../shared/revisions.js";
 import {
   mergeLibraryRecords,
@@ -52,6 +52,33 @@ test("retryable allocation pins one exact solvable state across later mistakes, 
   const copied=copies.find(entry=>entry.world.id!==sample.world.id)!;
   assert.deepEqual(getRetryCheckpoint(copied.world,copied.state),sample.before);
   assert.equal(getRetryCheckpoint(sample.world,emptyPlayState()),undefined,"Restart has no checkpoint.");
+});
+
+test("stationary selection and its solvable checkpoint survive backup, reload and import-copy without fake carrying",()=>{
+  const sample=retryableSave();
+  const source=sample.world.interactions!.objects[0]; source.carryable=false; source.usableInPlace=true;
+  validateWorld(sample.world);
+  const selection=reduceInteraction(sample.world,{...emptyPlayState(),player:{x:250,y:220}},selectInteractionSourceCommand(sample.world,"supply"));
+  assert.equal(selection.ok,true,selection.reason);
+  const mistake=reduceInteraction(sample.world,selection.state,{type:"perform",actionId:"other-one"});
+  assert.equal(mistake.ok,true,mistake.reason);
+  sample.state=pinRetryCheckpoint(sample.world,selection.state,mistake.state);
+  const [reopened]=parseBackup(serializeBackup([sample]));
+  assert.equal(reopened.state.interactions!.heldEntityId,null);
+  assert.equal(reopened.state.interactions!.selectedSourceId,"supply");
+  assert.equal(activeInteractionSource(reopened.state.interactions!),"supply");
+  assert.equal(interactionCompletionStatus(reopened.world,reopened.state),"impossible");
+  assert.deepEqual(getRetryCheckpoint(reopened.world,reopened.state),selection.state);
+  const copied=mergeLibraryRecords([], [sample], [sample], "copies").entries.find(entry=>entry.world.id!==sample.world.id)!;
+  assert.deepEqual(getRetryCheckpoint(copied.world,copied.state),selection.state);
+  for(const selected of ["missing","receiver",false]){
+    const forged=structuredClone(reopened);
+    (forged.state.retryCheckpoint!.state.interactions as unknown as {selectedSourceId:unknown}).selectedSourceId=selected;
+    const [retained]=validSavedWorlds([forged]);
+    assert.ok(retained);
+    assert.equal(retained.state.retryCheckpoint,undefined,"A stale or malformed selection cannot become a recovery position.");
+    assert.equal(retained.state.interactions!.selectedSourceId,"supply");
+  }
 });
 
 test("the recovery checkpoint advances after a successful intermediate allocation",()=>{

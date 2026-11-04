@@ -25,9 +25,9 @@ import {
 } from "../../shared/world";
 import "./world-canvas-controls.css";
 import { objectName } from "../lib/object-name";
-import { interactionState } from "../../shared/interactions";
+import { activeInteractionSource, interactionState } from "../../shared/interactions";
 import { nextInteractionHint } from "../lib/interaction-guide";
-import { inspectInteractionTarget, incompatibleTargetReason } from "../../shared/interaction-preview";
+import { canSelectInteractionSource, inspectInteractionTarget, incompatibleTargetReason } from "../../shared/interaction-preview";
 import {
   diagnosticsEnabled,
   recordGameCreated,
@@ -77,6 +77,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     );
     const [selectedDiscovery, setSelectedDiscovery] = useState("");
     const [selectedObjectAction, setSelectedObjectAction] = useState("");
+    const [objectControlsFocused, setObjectControlsFocused] = useState(false);
     const [hintOpen, setHintOpen] = useState(false);
     const [undoCount, setUndoCount] = useState(0);
     const [pendingObjectMotion, setPendingObjectMotion] = useState(false);
@@ -510,16 +511,23 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           </div>
         );
     const interactionProgress = interactionState(props.world, discoveryProgress);
-    const heldObject = props.world.entities.find(entity => entity.id === interactionProgress.heldEntityId);
-    const heldResource = props.world.interactions?.objects.find(object => object.entityId === heldObject?.id)?.resource;
+    const activeSourceId = activeInteractionSource(interactionProgress);
+    const sourceObject = props.world.entities.find(entity => entity.id === activeSourceId);
+    const sourceResource = props.world.interactions?.objects.find(object => object.entityId === activeSourceId)?.resource;
+    const sourceIsFixed = Boolean(interactionProgress.selectedSourceId);
+    const releaseLabel = sourceIsFixed ? "Clear selection" : "Put back";
     const selectedObject = props.world.interactions?.objects.find(object => object.entityId === selectedDiscovery);
-    const canTakeSelected = selectedObject?.carryable && selectedDiscovery !== heldObject?.id && !interactionProgress.attachments[selectedDiscovery];
+    const canSelectSource = canSelectInteractionSource(props.world, discoveryProgress, selectedDiscovery, interactionProgress);
     // Frame reports update position frequently. Re-plan an open hint only when
     // actual progress changes; revealing it is deliberately opt-in.
     const progressKey = JSON.stringify([discoveryProgress.interactions, discoveryProgress.collected, discoveryProgress.activated, discoveryProgress.completed, discoveryProgress.exploring]);
     const targetPreviews = useMemo(() => selectedDiscovery ? inspectInteractionTarget(props.world, discoveryProgress, selectedDiscovery) : [],
       [props.world, progressKey, selectedDiscovery]);
     const selectedPreview = targetPreviews.length === 1 ? targetPreviews[0] : targetPreviews.find(preview => preview.id === selectedObjectAction);
+    useEffect(() => {
+      scene.current?.previewObjectAction(ready && props.playing && !pendingObjectMotion && objectControlsFocused && selectedPreview?.available ? selectedPreview.id : undefined);
+      return () => scene.current?.previewObjectAction(undefined);
+    }, [ready, props.playing, pendingObjectMotion, objectControlsFocused, selectedPreview?.id, selectedPreview?.available]);
     const incompatibleReason = selectedDiscovery ? incompatibleTargetReason(props.world, discoveryProgress, selectedDiscovery) : undefined;
     const nextHint = useMemo(() => hintOpen ? nextInteractionHint(props.world, discoveryProgress) : undefined,
       [hintOpen, props.world, progressKey]);
@@ -551,19 +559,22 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       callbacks.current.onMoment("Last action undone.");
       host.current?.focus({ preventScroll: true });
     }
-    const objectControls = props.world.interactions && ready && !failed && (
+    const objectControls = props.world.interactions && ready && !failed && !finished && (
       <div className="object-play-tools">
         <div className="object-play-strip">
-          {heldObject && <div className="carried-object" role="status">
-            {heldObject.art && <img src={heldObject.art} alt="" />}
-            <span><small>Holding</small><strong>{objectName(props.world, heldObject.id, 42)}</strong></span>
-            {heldResource && <span className="carried-quantity" aria-label={`${quantityLabel.format(interactionProgress.quantities[heldObject.id])} of ${quantityLabel.format(heldResource.capacity)} remaining`}>{quantityLabel.format(interactionProgress.quantities[heldObject.id])}/{quantityLabel.format(heldResource.capacity)}</span>}
-            <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`Put back ${objectName(props.world, heldObject.id, 42)}`} title="Put back (Q)">Put back</button>
+          {sourceObject && <div className="carried-object" role="status">
+            {!sourceIsFixed && sourceObject.art && <img src={sourceObject.art} alt="" />}
+            <span><small>{sourceIsFixed ? "Selected" : "Holding"}</small><strong>{objectName(props.world, sourceObject.id, 42)}</strong></span>
+            {sourceResource && <span className="carried-quantity" aria-label={`${quantityLabel.format(interactionProgress.quantities[sourceObject.id])} of ${quantityLabel.format(sourceResource.capacity)} remaining`}>{quantityLabel.format(interactionProgress.quantities[sourceObject.id])}/{quantityLabel.format(sourceResource.capacity)}</span>}
+            <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`${releaseLabel} ${objectName(props.world, sourceObject.id, 42)}`} title={`${releaseLabel} (Q)`}>{releaseLabel}</button>
           </div>}
           {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}
           {undoCount > 0 && <button type="button" className="discovery-hint" aria-label="Undo last action" disabled={!props.playing || finished || pendingObjectMotion} onClick={undoLastAction}><Undo2 size={14} aria-hidden="true" /> Undo</button>}
           {!undoCount && retryPoint && !finished && <button type="button" className="discovery-hint" disabled={!props.playing || pendingObjectMotion} onClick={revisitChoice}><Undo2 size={14} aria-hidden="true" /> Revisit choice</button>}
-      <details className="object-keyboard-play">
+      <details className="object-keyboard-play"
+        onToggle={event => { if (!event.currentTarget.open) setObjectControlsFocused(false); }}
+        onFocusCapture={() => setObjectControlsFocused(true)}
+        onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setObjectControlsFocused(false); }}>
         <summary>Object controls</summary>
         <div>
           <label>Choose an object
@@ -580,8 +591,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           </label>}
           {selectedPreview && <p className="object-action-preview" id={objectPreviewId}>{selectedPreview.available ? selectedPreview.consequence : selectedPreview.reason}</p>}
           {!selectedPreview && incompatibleReason && <p className="object-action-preview" id={objectPreviewId}>{incompatibleReason}</p>}
-          <button aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={() => scene.current?.interactWithObject(selectedDiscovery, selectedPreview?.id)}>{selectedPreview?.label ?? (canTakeSelected ? `Take ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
-          <button disabled={!props.playing || !discoveryProgress.interactions?.heldEntityId} onClick={() => scene.current?.dropHeldObject()}>Put back</button>
+          <button aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={() => scene.current?.interactWithObject(selectedDiscovery, selectedPreview?.id)}>{selectedPreview?.label ?? (canSelectSource ? `${selectedObject?.usableInPlace ? "Select" : "Take"} ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
+          {canSelectSource && selectedObject?.usableInPlace && targetPreviews.length > 0 && <button disabled={!props.playing} onClick={() => scene.current?.selectFixedSource(selectedDiscovery)}>Select as source</button>}
+          <button disabled={!props.playing || !activeSourceId} onClick={() => scene.current?.dropHeldObject()}>{releaseLabel}</button>
         </div>
       </details>
         </div>
@@ -600,7 +612,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           aria-busy={!ready && !failed}
           aria-label={
             props.world.interactions
-              ? "Interactive world. Select a tool, then its target. E uses a nearby object; Q puts it back."
+                ? "Interactive world. Select a source, then its target. E uses a nearby object; Q releases your selection."
               : mode === "discover"
               ? "Discovery game. Find the object described by each clue in the original image. Tap it, or use Keyboard play."
               : mode === "roam"

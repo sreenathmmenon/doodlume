@@ -1,4 +1,4 @@
-import { interactionChoiceBlockedReason, interactionEffects, interactionState, reduceInteraction, playerAvailableInteractions, type InteractionAction } from "./interactions.js";
+import { activeInteractionSource, selectInteractionSourceCommand, interactionChoiceBlockedReason, interactionEffects, interactionState, reduceInteraction, playerAvailableInteractions, type InteractionAction, type InteractionState } from "./interactions.js";
 import type { PlayState, WorldDefinition } from "./world.js";
 
 export interface ActionPreview {
@@ -11,6 +11,14 @@ export interface ActionPreview {
 const number = new Intl.NumberFormat("en", { maximumSignificantDigits: 6 });
 const compact = (text: string, limit: number) => text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
 const label = (world: WorldDefinition, id: string) => compact(world.entities.find(entity => entity.id === id)?.label?.trim() || "object", 40);
+
+/** Selection should suggest unfinished uses, not spent supplies or a branch
+ * already closed by the player's choice. Future preparation remains possible. */
+export function canSelectInteractionSource(world: WorldDefinition, state: PlayState, entityId: string, progress: InteractionState = interactionState(world,state)): boolean {
+  const object=world.interactions?.objects.find(object=>object.entityId===entityId);
+  return Boolean((object?.carryable || object?.usableInPlace) && activeInteractionSource(progress)!==entityId && !progress.attachments[entityId] &&
+    world.interactions?.actions.some(action=>action.kind!=="operate" && action.toolId===entityId && !progress.completed.includes(action.id) && !interactionChoiceBlockedReason(world,progress,action)));
+}
 
 /** Predict only the selected action, using the same reducer as execution.
  * No invented outcome, future solution, mutation, or model call. Call on an
@@ -28,13 +36,13 @@ export function previewInteraction(world: WorldDefinition, state: PlayState, act
     const resource = world.interactions?.objects.find(object => object.entityId === action.targetId)?.resource;
     const before = progress.quantities[action.targetId] ?? 0;
     const after = result.ok ? result.state.interactions!.quantities[action.targetId] : before + action.amount;
-    consequence = `One use · ${label(world, action.targetId)}: ${number.format(before)} → ${number.format(after)}${resource ? ` / ${number.format(resource.capacity)}` : ""} · Uses ${number.format(action.amount)}`;
+    consequence = `Uses ${number.format(action.amount)} once · ${label(world, action.targetId)}: ${number.format(before)} → ${number.format(after)}${resource ? ` / ${number.format(resource.capacity)}` : ""}`;
   } else if (action.kind === "place") {
     consequence = `${label(world, action.toolId)} moves to ${label(world, action.targetId)}.`;
   } else {
     consequence = (action.effects ?? []).map(effect => effect.kind === "openGate"
       ? `Opens ${label(world, effect.entityId)}.`
-      : effect.kind === "moveObject" ? `Moves ${label(world, effect.entityId)} to its marked destination.`
+      : effect.kind === "moveObject" ? `Moves ${label(world, effect.entityId)} to a new position.`
       : effect.kind === "jumpBoost" ? capability("Jump strength", beforeEffects.jumpMultiplier, afterEffects.jumpMultiplier)
       : capability("Movement speed", beforeEffects.moveSpeedMultiplier, afterEffects.moveSpeedMultiplier)).join(" ");
     if (action.kind === "attach") consequence = `Fits ${label(world, action.toolId)} to ${label(world, action.targetId)}. ${consequence}`;
@@ -56,19 +64,23 @@ export function previewInteraction(world: WorldDefinition, state: PlayState, act
     ...(!result.ok ? {reason: preceding && result.reason === "Complete the earlier step first." ? `First: ${preceding.label}` : result.reason} : {}), consequence};
 }
 
-/** Inspect only this target with the currently held tool. No tool is silently
+/** Inspect only this target with the currently active source. No tool is silently
  * equipped and no route is chosen for the player. */
 export function inspectInteractionTarget(world: WorldDefinition, state: PlayState, targetId: string): ActionPreview[] {
   const progress = interactionState(world, state);
-  const held = progress.heldEntityId;
-  return (world.interactions?.actions ?? []).filter(action => action.toolId === held && action.targetId === targetId && !progress.completed.includes(action.id))
+  const held = activeInteractionSource(progress);
+  return (world.interactions?.actions ?? []).filter(action => (action.kind === "operate" || action.toolId === held) && action.targetId === targetId && !progress.completed.includes(action.id))
     .map(action => previewInteraction(world, state, action));
 }
 
 export function incompatibleTargetReason(world: WorldDefinition, state: PlayState, targetId: string): string | undefined {
-  const progress = interactionState(world, state), held = progress.heldEntityId;
+  const progress = interactionState(world, state), held = activeInteractionSource(progress);
   const object = world.interactions?.objects.find(object => object.entityId === targetId);
-  if (!held || !object || held === targetId || (object.carryable && !progress.attachments[targetId])) return;
+  const direct = world.interactions?.actions.filter(action => action.kind === "operate" && action.targetId === targetId) ?? [];
+  if (direct.some(action => !progress.completed.includes(action.id))) return;
+  if (!held && direct.length && direct.every(action => progress.completed.includes(action.id)) &&
+      !canSelectInteractionSource(world, state, targetId, progress)) return "This action has already been completed.";
+  if (!held || !object || held === targetId || ((object.carryable || object.usableInPlace) && !progress.attachments[targetId])) return;
   const pair = world.interactions?.actions.filter(action => action.toolId === held && action.targetId === targetId) ?? [];
   if (pair.length) {
     if (pair.every(action => progress.completed.includes(action.id)))
@@ -89,9 +101,18 @@ export function interactionOutcomeMessage(world: WorldDefinition, before: PlaySt
       (candidate.kind === "transfer" && [candidate.toolId, candidate.targetId].some(id => beforeProgress.quantities[id] !== afterProgress.quantities[id]))));
   const toolIds = [...new Set(candidates.map(candidate => candidate.toolId))];
   const enabled = new Set<string>(), previouslyEnabled = new Set<string>();
+  // Direct controls do not equip a tool. Inspect their true readiness even
+  // when no object is held, and retain the player's current selection.
+  for (const [state, availableIds] of [[before, previouslyEnabled], [after, enabled]] as const) {
+    for (const available of playerAvailableInteractions(world, state)) if (available.kind === "operate") availableIds.add(available.id);
+  }
   for (const toolId of toolIds) {
-    for (const available of playerAvailableInteractions(world, {...before, interactions: {...beforeProgress, heldEntityId: toolId}})) previouslyEnabled.add(available.id);
-    for (const available of playerAvailableInteractions(world, {...after, interactions: {...afterProgress, heldEntityId: toolId}})) enabled.add(available.id);
+    const command = selectInteractionSourceCommand(world, toolId);
+    if (!command) continue;
+    for (const [state, progress, availableIds] of [[before, beforeProgress, previouslyEnabled], [after, afterProgress, enabled]] as const) {
+      const selected = reduceInteraction(world, {...state, interactions: {...progress, heldEntityId: null, selectedSourceId: null}}, command);
+      if (selected.ok) for (const available of playerAvailableInteractions(world, selected.state)) availableIds.add(available.id);
+    }
   }
   const unlocked = candidates.filter(candidate => enabled.has(candidate.id) && !previouslyEnabled.has(candidate.id));
   if (unlocked.length === 1) return `Unlocked: ${unlocked[0].label}`;

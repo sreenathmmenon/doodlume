@@ -4,6 +4,8 @@ import type { PlayState, WorldDefinition } from "./world.js";
 export interface InteractionObject {
   entityId: string;
   carryable?: boolean;
+  /** A discovery resource source selected at its original position, never carried. */
+  usableInPlace?: boolean;
   /** Explicit underlays stay behind ordinary props; never inferred from names. */
   layer?: "surface" | "object";
   resource?: { type: string; capacity: number; initial: number };
@@ -33,6 +35,8 @@ export type InteractionAction = ActionBase & (
   | { kind: "transfer"; amount: number }
   | { kind: "attach" }
   | { kind: "use" }
+  /** Direct operation of one uncarried decoration: toolId equals targetId. */
+  | { kind: "operate" }
   | { kind: "place" }
 );
 export interface InteractionChoiceGroup {
@@ -51,6 +55,7 @@ export interface InteractionPlan {
 }
 export interface InteractionState {
   heldEntityId: string | null;
+  selectedSourceId?: string | null;
   quantities: Record<string, number>;
   completed: string[];
   attachments: Record<string, string>;
@@ -59,10 +64,11 @@ export interface InteractionState {
 }
 export type InteractionCommand =
   | { type: "pickup"; entityId: string }
+  | { type: "selectSource"; entityId: string }
   | { type: "drop" }
   | { type: "perform"; actionId: string };
 export interface InteractionEvent {
-  kind: "pickup" | "drop" | "transfer" | "attach" | "use" | "place";
+  kind: "pickup" | "selectSource" | "drop" | "transfer" | "attach" | "use" | "place" | "operate";
   entityId?: string;
   actionId?: string;
   toolId?: string;
@@ -74,6 +80,14 @@ export interface InteractionResult {
   ok: boolean;
   reason?: string;
   event?: InteractionEvent;
+}
+/** Interaction activation is separate from physically carrying artwork. */
+export function activeInteractionSource(progress: InteractionState): string | null {
+  return progress.selectedSourceId ?? progress.heldEntityId;
+}
+/** Explicit authoring decides selection mode; the reducer validates the command. */
+export function selectInteractionSourceCommand(world: WorldDefinition, entityId: string): InteractionCommand {
+  return {type: world.interactions?.objects.find(object => object.entityId === entityId)?.usableInPlace ? "selectSource" : "pickup", entityId};
 }
 const safeId = (v: unknown): v is string => typeof v === "string" && /^[\w-]{1,60}$/.test(v) && !["__proto__", "constructor", "prototype"].includes(v);
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -99,11 +113,14 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
   const entities = new Map(world.entities.map(e => [e.id, e]));
   const objects = new Map<string, InteractionObject>();
   for (const o of p.objects) {
-    if (!record(o) || !keysOnly(o, ["entityId", "carryable", "resource", "layer"]) || !safeId(o.entityId) ||
+    if (!record(o) || !keysOnly(o, ["entityId", "carryable", "usableInPlace", "resource", "layer"]) || !safeId(o.entityId) ||
         objects.has(o.entityId) || !entities.has(o.entityId) ||
         (o.layer !== undefined && o.layer !== "surface" && o.layer !== "object") ||
-        (o.carryable !== undefined && typeof o.carryable !== "boolean"))
+        (o.carryable !== undefined && typeof o.carryable !== "boolean") ||
+        (o.usableInPlace !== undefined && typeof o.usableInPlace !== "boolean"))
       fail("An interaction needs one distinct source object.");
+    if (o.usableInPlace && (o.carryable || world.gameplay?.movement !== "discover" || entities.get(o.entityId)!.kind !== "decoration" || !o.resource))
+      fail("A source used in place must be an uncarried resource decoration in a discovery world.");
     // Moving a terrain/player/goal would invalidate their ordinary physics roles.
     if (o.carryable && entities.get(o.entityId)!.kind !== "decoration")
       fail("A carried object must have the decoration role so it cannot also be collected or collide as terrain.");
@@ -120,18 +137,20 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
   for (const a of p.actions) {
     if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "requiresResourceIds", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
         !safeId(a.id) || actions.has(a.id) || typeof a.label !== "string" || !a.label.trim() || a.label.length > 80 ||
-        !["transfer", "attach", "use", "place"].includes(a.kind) || !safeId(a.toolId) || !safeId(a.targetId) || a.toolId === a.targetId ||
-        !objects.get(a.toolId)?.carryable || !objects.has(a.targetId) ||
+        !["transfer", "attach", "use", "place", "operate"].includes(a.kind) || !safeId(a.toolId) || !safeId(a.targetId) ||
+        (a.kind === "operate"
+          ? a.toolId !== a.targetId || !objects.has(a.toolId) || !!objects.get(a.toolId)?.carryable || entities.get(a.toolId)?.kind !== "decoration"
+          : a.toolId === a.targetId || !(objects.get(a.toolId)?.carryable || (objects.get(a.toolId)?.usableInPlace && a.kind === "transfer"))) || !objects.has(a.targetId) ||
         (a.requires !== undefined && (!Array.isArray(a.requires) || a.requires.length > 32 || a.requires.some(id => !safeId(id)) || new Set(a.requires).size !== a.requires.length)) ||
         (a.effects !== undefined && (!Array.isArray(a.effects) || a.effects.length > 8)))
-      fail("An action needs a carried source, a distinct target and supported effects.");
+      fail("An action needs a carried or stationary transfer source and distinct target; direct operation needs one uncarried decoration as both source and target.");
     if (a.requiresResourceIds !== undefined && (!Array.isArray(a.requiresResourceIds) || a.requiresResourceIds.length > 32 || new Set(a.requiresResourceIds).size !== a.requiresResourceIds.length || a.requiresResourceIds.some(id => !safeId(id) || !objects.get(id)?.resource)))
       fail("An action readiness condition needs distinct resource objects from this world.");
     if (a.kind === "transfer") {
       const source = objects.get(a.toolId)!.resource, target = objects.get(a.targetId)!.resource;
       if (!source || !target || source.type !== target.type || !quantity(a.amount) || a.amount <= 0 || a.amount > source.capacity || a.amount > target.capacity)
         fail("A transfer needs compatible resources and a usable amount.");
-    } else if (!a.effects?.length) fail("Using, attaching or placing an object must change a supported capability.");
+    } else if (!a.effects?.length) fail("Using, operating, attaching or placing an object must change a supported capability.");
     if (a.kind === "place" && (a.effects?.length !== 1 || a.effects[0].kind !== "moveObject" || a.effects[0].entityId !== a.toolId))
       fail("Placing an object must move only the carried object to one destination.");
     for (const effect of a.effects ?? []) {
@@ -143,7 +162,7 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
         const entity = entities.get(effect.entityId);
         const object = objects.get(effect.entityId);
         if (!keysOnly(effect, ["kind", "entityId", "x", "y", "durationMs"]) || !safeId(effect.entityId) ||
-            !entity || entity.kind !== "decoration" || !object || (object.carryable && (a.kind !== "place" || effect.entityId !== a.toolId)) ||
+            !entity || entity.kind !== "decoration" || !object || object.usableInPlace || (object.carryable && (a.kind !== "place" || effect.entityId !== a.toolId)) ||
             ![effect.x, effect.y].every(Number.isFinite) || effect.x < 0 || effect.y < 0 ||
             effect.x + entity.width > world.width || effect.y + entity.height > world.height ||
             (effect.durationMs !== undefined && (!Number.isFinite(effect.durationMs) || effect.durationMs < 150 || effect.durationMs > 4000)))
@@ -163,6 +182,8 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     }
     actions.set(a.id, a);
   }
+  for (const object of p.objects) if (object.usableInPlace && !p.actions.some(action => action.kind === "transfer" && action.toolId === object.entityId))
+    fail("A source used in place needs an outgoing resource transfer.");
   const choiceGroups = new Map<string, InteractionChoiceGroup>();
   const membership = new Map<string, InteractionChoiceGroup>();
   if (p.choiceGroups !== undefined) {
@@ -325,7 +346,9 @@ function blockedReason(world: WorldDefinition, s: InteractionState, action: Inte
     const names = missingResources.slice(0,2).map(id => world.entities.find(entity => entity.id === id)?.label?.trim() || "the required object");
     return `Fill ${names.join(" and ")} first${missingResources.length > 2 ? ", along with the other required objects" : ""}.`;
   }
-  if (checkHeld && s.heldEntityId !== action.toolId) return "Pick up the matching object first.";
+  if (checkHeld && action.kind !== "operate" && activeInteractionSource(s) !== action.toolId)
+    return world.interactions!.objects.find(object => object.entityId === action.toolId)?.usableInPlace
+      ? "Select the matching source first." : "Pick up the matching object first.";
   if (s.attachments[action.toolId]) return "That part is already attached.";
   if (action.kind === "transfer") {
     const target = world.interactions!.objects.find(o => o.entityId === action.targetId)!.resource!;
@@ -363,6 +386,11 @@ export function interactionState(world: WorldDefinition, state: PlayState): Inte
   }
   const held = saved.heldEntityId;
   if (typeof held === "string" && world.interactions.objects.some(o => o.entityId === held && o.carryable) && !result.attachments[held]) result.heldEntityId = held;
+  const selected = saved.selectedSourceId;
+  if (typeof selected === "string" && world.interactions.objects.some(o => o.entityId === selected && o.usableInPlace) && !result.attachments[selected]) {
+    result.selectedSourceId = selected;
+    result.heldEntityId = null;
+  }
   return result;
 }
 
@@ -516,17 +544,28 @@ export function reduceInteraction(world: WorldDefinition, state: PlayState, comm
   const s = interactionState(world, state);
   const reject = (reason: string): InteractionResult => ({ state, ok: false, reason });
   if (!world.interactions) return reject("This world has no object interactions.");
+  if (command.type === "selectSource") {
+    if (!world.interactions.objects.some(object => object.entityId === command.entityId && object.usableInPlace)) return reject("This object is not a source used in place.");
+    if (s.attachments[command.entityId]) return reject("That part is already attached.");
+    if (s.selectedSourceId === command.entityId) return reject("This source is already selected.");
+    s.heldEntityId = null;
+    s.selectedSourceId = command.entityId;
+    return {ok:true, state:{...state, interactions:s}, event:{kind:"selectSource", entityId:command.entityId}};
+  }
   if (command.type === "pickup") {
     if (!world.interactions.objects.some(o => o.entityId === command.entityId && o.carryable)) return reject("This object stays in the world.");
     if (s.attachments[command.entityId]) return reject("That part is already attached.");
     if (s.heldEntityId && s.heldEntityId !== command.entityId) return reject("Put down the object you are holding first.");
     if (s.heldEntityId === command.entityId) return reject("You are already holding it.");
     s.heldEntityId = command.entityId;
+    delete s.selectedSourceId;
     return { ok: true, state: { ...state, interactions: s }, event: { kind: "pickup", entityId: command.entityId } };
   }
   if (command.type === "drop") {
-    if (!s.heldEntityId) return reject("You are not holding anything.");
-    const entityId = s.heldEntityId; s.heldEntityId = null;
+    const entityId = activeInteractionSource(s);
+    if (!entityId) return reject("You are not holding or selecting a source.");
+    s.heldEntityId = null;
+    delete s.selectedSourceId;
     return { ok: true, state: { ...state, interactions: s }, event: { kind: "drop", entityId } };
   }
   const action = world.interactions.actions.find(a => a.id === command.actionId);

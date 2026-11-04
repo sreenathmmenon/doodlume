@@ -127,8 +127,9 @@ export function getRetryCheckpoint(world: WorldDefinition, state: PlayState): Pl
       const raw = saved.interactions;
       const sameMap = (a: unknown, b: Record<string, unknown>) => Boolean(a && typeof a === "object" && !Array.isArray(a) &&
         Object.keys(a).length === Object.keys(b).length && Object.entries(b).every(([key, value]) => Object.hasOwn(a, key) && (a as Record<string, unknown>)[key] === value));
-      if (!raw || typeof raw !== "object" || Object.keys(raw).some(key => !["heldEntityId", "quantities", "completed", "attachments", "completedSignatures"].includes(key)) || !Array.isArray(raw.completed) ||
+      if (!raw || typeof raw !== "object" || Object.keys(raw).some(key => !["heldEntityId", "selectedSourceId", "quantities", "completed", "attachments", "completedSignatures"].includes(key)) || !Array.isArray(raw.completed) ||
           raw.completed.length !== normalized.completed.length || raw.completed.some((id, index) => id !== normalized.completed[index]) ||
+          (raw.selectedSourceId ?? null) !== (normalized.selectedSourceId ?? null) ||
           raw.heldEntityId !== normalized.heldEntityId || !sameMap(raw.quantities, normalized.quantities) ||
           !sameMap(raw.attachments, normalized.attachments) || !sameMap(raw.completedSignatures ?? {}, normalized.completedSignatures ?? {})) return;
     }

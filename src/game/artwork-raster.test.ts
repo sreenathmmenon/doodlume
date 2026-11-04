@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { artworkRasterSize } from "./artwork-raster.ts";
+import { artworkRasterSize, artworkFootPadding, artworkFootOffset, carriedArtworkPosition, attachedPlayerArtwork } from "./artwork-raster.ts";
 import {
   containArtwork,
   imageDirection,
@@ -82,4 +82,51 @@ test("SVG raster budgets preserve normal artwork and bound extreme display sizes
     unchanged,
     "the original source pixels remain unchanged",
   );
+});
+
+
+test("platform visual feet ignore transparent padding without cropping artwork or changing roam anchors",()=>{
+  const pixels=new Uint8ClampedArray(6*10*4);
+  // A body with a faint, lower appendage: retain even that visible alpha.
+  for(let y=1;y<=5;y++)for(let x=1;x<=4;x++)pixels[(y*6+x)*4+3]=255;
+  pixels[(6*6+2)*4+3]=1;
+  const before=Uint8ClampedArray.from(pixels);
+  const padding=artworkFootPadding(pixels,6,10);
+  assert.equal(padding,.3);
+  const height=80,baseline=200,offset=artworkFootOffset(padding,height,"platform");
+  assert.equal(offset,24);
+  assert.equal(baseline+offset-padding*height,baseline,"Lowest visible edge meets the original collision baseline");
+  assert.equal(artworkFootOffset(padding,height,"roam"),0);
+  assert.equal(artworkFootOffset(padding,height,"discover"),0);
+  assert.deepEqual(pixels,before,"Full pixels, including appendages, remain unchanged");
+  const opaque=new Uint8ClampedArray(6*10*4).fill(255);
+  assert.equal(artworkFootPadding(opaque,6,10),0);
+  assert.equal(artworkFootPadding(new Uint8ClampedArray(6*10*4),6,10),0);
+  assert.equal(artworkFootPadding([],6,10),0);
+});
+
+
+test("carried artwork stays beside differently sized heroes without changing its aspect",()=>{
+  for(const hero of [{x:100,y:100,width:40,height:160},{x:100,y:100,width:180,height:60}])
+    for(const held of [{width:86,height:20},{width:20,height:86}])for(const facingLeft of [false,true]){
+      const before={...held},at=carriedArtworkPosition(hero,held,facingLeft);
+      assert.ok(facingLeft?at.x+held.width/2<hero.x:at.x-held.width/2>hero.x+hero.width);
+      assert.ok(at.y>hero.y+hero.height/2&&at.y<hero.y+hero.height,"Carry near the lower middle, not above the head");
+      assert.deepEqual(held,before);
+    }
+});
+
+
+test("player attachments mount at the lower outside edge while preserving source aspect",()=>{
+  for(const hero of [{x:100,y:80,width:100,height:160},{x:100,y:80,width:180,height:60}])
+    for(const source of [{width:58,height:77},{width:100,height:20}])for(const left of [false,true]){
+      const baseline=hero.y+hero.height-12;
+      const mount=attachedPlayerArtwork(hero,source,baseline,left);
+      assert.ok(Math.abs(mount.width/mount.height-source.width/source.height)<1e-9);
+      assert.equal(mount.y+mount.height/2,baseline);
+      assert.ok(mount.height<=hero.height*.35&&mount.width<=hero.width*.65);
+      const overlap=left?mount.x+mount.width/2-hero.x:hero.x+hero.width-(mount.x-mount.width/2);
+      assert.ok(overlap>0&&overlap<=Math.min(hero.width,mount.width)*.081,"Small contact edge, rather than a torso overlay");
+      assert.ok(mount.y-mount.height/2>hero.y+hero.height*.4,"Upper identity remains clear");
+    }
 });

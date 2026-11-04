@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import { sourcePlatformScene } from "./source-platform-scene.js";
-import type { GameplayPlan, SourceSelection } from "./creative-adaptation.js";
+import { compileCreativeAdaptation, type GameplayPlan, type SourceSelection } from "./creative-adaptation.js";
 import { validateWorld } from "../shared/world.js";
+import { validateRecognitionReview } from "../shared/recognition-review.js";
+import { RecognitionReviewError } from "./recognition-error.js";
+import { closeLocalSegmentationWorkers } from "./local-segmentation.js";
+import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const object = (id: string, kind: SourceSelection["kind"], x: number, y: number, width: number, height: number): SourceSelection => ({id, kind, label: id, x, y, width, height});
 test("source platform action preflight preserves independent artwork and rejects impossible resource prerequisites", async () => {
@@ -31,6 +37,12 @@ test("source platform action preflight preserves independent artwork and rejects
   const part = result.entities.find(e=>e.id==="part")!;
   assert.ok(part.art && part.artSource && part.sourceLayer, "The actual source part is a separate movable layer");
   assert.equal(result.entities.filter(e=>e.id==="part").length,1);
+  const operatePlan=structuredClone(plan);
+  operatePlan.interactions!.objects.find(object=>object.entityId==="part")!.carryable=false;
+  Object.assign(operatePlan.interactions!.actions[1],{kind:"operate",toolId:"target",targetId:"target",requiresResourceIds:["target"]});
+  const operated=await compile(operatePlan);
+  assert.ok(operated,`A prepared stationary control opens the route: ${reason}`);
+  assert.equal(operated.entities.find(entity=>entity.id==="target")!.sourceLayer,undefined);
   const continuous = objects.filter(object => object.id !== "right").map(object => object.id === "left" ? {...object, width: 750} : object);
   assert.ok(await compile(plan, continuous), `A continuous surface remains playable: ${reason}`);
   // Geometry from the failed real interpretation: a background counter line
@@ -52,6 +64,14 @@ test("source platform action preflight preserves independent artwork and rejects
   const safeChoices = await compile(choicePlan, separatedGate);
   assert.ok(safeChoices, reason);
   assert.deepEqual(safeChoices.goalRules?.requiredChoiceGroupIds, ["assembly"]);
+  const operatedChoices=structuredClone(choicePlan);
+  operatedChoices.interactions!.objects.find(object=>object.entityId==="part")!.carryable=false;
+  for(const action of operatedChoices.interactions!.actions.filter(action=>action.id!=="fill"))
+    Object.assign(action,{kind:"operate",toolId:"target",targetId:"target",requiresResourceIds:["target"]});
+  assert.ok(await compile(operatedChoices,separatedGate),`Direct-control choices are both physically proved: ${reason}`);
+  operatedChoices.interactions!.actions.find(action=>action.id==="fit-fast")!.effects=[{kind:"moveSpeedBoost",multiplier:1.1}];
+  assert.equal(await compile(operatedChoices,separatedGate),null,"A direct control cannot hide a physically losing exclusive branch");
+  assert.match(reason,/choice|route|connections/);
   assert.ok(await compile(choicePlan, continuous), `Both gate-opening choices work on one continuous support: ${reason}`);
   const jumpChoices = structuredClone(choicePlan);
   jumpChoices.interactions!.actions.find(action=>action.id==="fit-fast")!.effects = [{kind:"jumpBoost",multiplier:1.6}];
@@ -74,4 +94,30 @@ test("source platform action preflight preserves independent artwork and rejects
   impossible.interactions!.objects[0].resource!.initial=0;
   assert.equal(await compile(impossible),null);
   assert.match(reason,/cannot be completed/);
+
+  // A synthetic local worker returns no verified masks. This exercises actual
+  // outline rejection and recovery construction without model inference.
+  const directory = await mkdtemp(join(tmpdir(), "doodlume-outline-review-"));
+  const executable = join(directory, "empty-mask-worker.cjs");
+  await writeFile(executable, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+let pending='';process.stdin.on('data',chunk=>{pending+=chunk;let end;while((end=pending.indexOf('\\n'))!==-1){const request=JSON.parse(pending.slice(0,end));pending=pending.slice(end+1);process.stdout.write(JSON.stringify({id:request.id,records:[],ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');}});
+`);
+  await chmod(executable, 0o700);
+  try {
+    const namedObjects = objects.map(object => object.id === "supply" ? {...object,label:"Yellow battery"} : object);
+    await assert.rejects(() => compileCreativeAdaptation({source,inputKind:"drawing",name:"Test",description:"Test",theme:"grove",objects:namedObjects,plan,
+      segmentation:{enabled:true,apiKey:"",provider:"local-sam2",local:{python:executable,checkpoint:"synthetic-protocol-only",worker:"synthetic-protocol-only",configured:true}},
+      signal:new AbortController().signal,transport:async()=>{throw Error("No network expected");}}), error => {
+      assert.ok(error instanceof RecognitionReviewError);
+      const review = validateRecognitionReview(error.recovery);
+      assert.deepEqual(review.issues.map(issue=>({id:issue.id,objectId:issue.objectId,label:issue.label})),
+        [{id:"source-outline",objectId:"supply",label:"Yellow battery"}]);
+      assert.match(review.issues[0].message,/complete object outline could not be verified/);
+      assert.deepEqual(review.draft.entities.find(entity=>entity.id==="supply")!.artSource,{x:110,y:540,width:35,height:55});
+      assert.deepEqual(review.draft.interactions!.actions.map(action=>action.id),plan.interactions!.actions.map(action=>action.id));
+      assert.deepEqual(review.draft.goalRules!.requiredInteractionIds,plan.requiredInteractionIds);
+      return true;
+    });
+  } finally { closeLocalSegmentationWorkers(); await rm(directory,{recursive:true,force:true}); }
 });

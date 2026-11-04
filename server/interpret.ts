@@ -1,3 +1,4 @@
+import { validatePlannedInteractionSources } from "./interaction-planning.js";
 import { refinePlatformSelections } from "./platform-grounding.js";
 import { groundDrawingBoxes } from "./ink-grounding.js";
 import { normalizeDrawing, imageData, cropArtwork } from "./images.js";
@@ -296,6 +297,7 @@ async function compileInterpretation(value: unknown, context: {
     );
   if (gameplay && (gameplay.mode === "creative" || gameplay.movement !== "platform") && detected.clarification.trim())
     throw new InterpretationError(detected.clarification.trim().slice(0, 280));
+  validatePlannedInteractionSources(gameplay?.interactions, objects, gameplay?.movement);
   if (gameplay?.movement === "platform" && objects.some(object => object.kind === "player") &&
       objects.filter(object => ["terrain", "bridge"].includes(object.kind)).length >= 2 && connection.reserveRequest) {
     objects = (await refinePlatformSelections(normalized, objects, connection, signal, transport, segmentation))

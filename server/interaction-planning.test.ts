@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import { prepareSourceInteractionReview, readGameplayPlan, gameplaySchema } from "./creative-adaptation.js";
-import { readPlannedInteractions, interactionsSchema, interactionInstructions, plannedInteractionDiagnostics, applyPlannedInteractions } from "./interaction-planning.js";
+import { readPlannedInteractions, interactionsSchema, interactionInstructions, plannedInteractionDiagnostics, applyPlannedInteractions, validatePlannedInteractionSources } from "./interaction-planning.js";
 import { interpretDrawing, RecognitionReviewError } from "./interpret.js";
 import { modelConnection } from "./provider.js";
 import { imageData } from "./images.js";
-import { interactionEffects, reduceInteraction } from "../shared/interactions.js";
+import { interactionEffects, reduceInteraction, selectInteractionSourceCommand } from "../shared/interactions.js";
 import { emptyPlayState, goalProgress, type WorldDefinition } from "../shared/world.js";
 
 const connection = modelConnection({ MODEL_PROVIDER: "meta", MODEL_API_KEY: "synthetic-test-only" });
@@ -235,7 +235,7 @@ test("provider authorization, rate limit, network and abort failures never trigg
 });
 
 
-test("one correction receives combined tool, self-movement and edge-fit diagnostics without changing the rejected plan", async () => {
+test("one correction receives semantic tool and self-movement diagnostics before geometry without changing the rejected plan", async () => {
   const requests: any[] = [];
   const world = await compile({placement:"use",carryable:false,edgePlacement:true,onRequest:request=>requests.push(request),
     rewrite:(value,call)=>{
@@ -250,9 +250,9 @@ test("one correction receives combined tool, self-movement and edge-fit diagnost
   assert.equal(requests.length,2);
   const instructions=requests[1].messages[0].content as string;
   const diagnostic=JSON.parse(instructions.slice(instructions.lastIndexOf('\n')+1));
-  assert.match(diagnostic.validationError,/Supply \(fixture-source\) must be a carried source/);
+  assert.match(diagnostic.validationError,/fixture-source must be a carried source/);
   assert.match(diagnostic.validationError,/own carried tool; moving it requires kind:"place"/);
-  assert.match(diagnostic.validationError,/Supply cannot fit at the center of Recipient/);
+  assert.doesNotMatch(diagnostic.validationError,/cannot fit/,"Early semantic preflight does not use unrefined geometry");
   assert.ok(diagnostic.validationError.length<=1500);
   assert.equal(diagnostic.rejectedPlan.gameplay.interactions.objects[0].carryable,false);
   assert.equal(diagnostic.rejectedPlan.gameplay.interactions.actions[0].kind,"use");
@@ -493,4 +493,150 @@ test("diagnostic subset budget defers to full validation for a valid creator pla
   const impossible=structuredClone(world);
   impossible.interactions!.objects[0].resource!.initial=0;
   assert.throws(()=>applyPlannedInteractions(impossible,impossible.interactions,[],false,{validateGeneratedChoices:false}),/cannot all finish|cannot be completed/);
+});
+
+
+test("explicit stationary sources compile without cutouts or backdrop repair and preserve legacy carrying",async()=>{
+  const fixed=await compile({carryable:false,rewrite:value=>{
+    const proposal=structuredClone(value) as any;
+    proposal.gameplay.interactions.objects[0].usableInPlace=true;
+    return proposal;
+  }});
+  const source=fixed.entities.find(entity=>entity.id==="fixture-source")!;
+  assert.equal(fixed.entities[0].art,fixed.sourceImage,"Original backdrop pixels are retained exactly");
+  assert.equal(source.art,undefined);assert.equal(source.sourceLayer,undefined);
+  assert.equal(fixed.interactions?.objects[0].usableInPlace,true);
+  const selected=reduceInteraction(fixed,emptyPlayState(),selectInteractionSourceCommand(fixed,source.id));
+  assert.equal(selected.ok,true);assert.equal(selected.state.interactions?.selectedSourceId,source.id);
+  assert.equal(selected.state.interactions?.heldEntityId,null);
+  const supplied=reduceInteraction(fixed,selected.state,{type:"perform",actionId:"supply"});
+  assert.equal(supplied.ok,true);assert.equal(goalProgress(fixed,supplied.state).ready,true);
+  const rebuilt=await prepareSourceInteractionReview(fixed,{enabled:false,apiKey:""},new AbortController().signal);
+  assert.equal(rebuilt.interactions?.objects[0].usableInPlace,true);
+  assert.equal(rebuilt.entities[0].art,rebuilt.sourceImage);
+  assert.equal(rebuilt.entities.find(entity=>entity.id===source.id)!.art,undefined);
+  const legacy=await compile();
+  const carried=legacy.entities.find(entity=>entity.id===source.id)!;
+  assert.ok(carried.art&&carried.sourceLayer);
+  assert.equal(legacy.interactions?.objects[0].usableInPlace,undefined);
+  const prepared=structuredClone(legacy);
+  Object.assign(prepared.interactions!.objects[0],{carryable:false,usableInPlace:true});
+  const preserved=applyPlannedInteractions(prepared,prepared.interactions,["supply"],false,{validateGeneratedChoices:false});
+  assert.equal(preserved.entities.find(entity=>entity.id===source.id)!.art,carried.art,"Existing independent artwork is not removed from a reconstructed scene");
+});
+
+test("stationary sources admit a generated retryable allocation and never silently infer the flag",async()=>{
+  const world=await compile({move:true,resourceGoal:true,carryable:false,rewrite:value=>{
+    const proposal=structuredClone(value) as any,interactions=proposal.gameplay.interactions;
+    interactions.completionPolicy="retryable";interactions.objects[0].usableInPlace=true;
+    interactions.objects.push({entityId:"dock",carryable:false,resource:{type:"water",initial:0,capacity:2}});
+    interactions.actions[0].effects=[];
+    interactions.actions.push({id:"other-allocation",kind:"transfer",label:"Fill the other receiver",toolId:"fixture-source",targetId:"dock",amount:2});
+    return proposal;
+  }});
+  assert.equal(world.entities[0].art,world.sourceImage);
+  assert.ok(world.entities.slice(1).every(entity=>!entity.art&&!entity.sourceLayer));
+  const selected=reduceInteraction(world,emptyPlayState(),selectInteractionSourceCommand(world,"fixture-source"));
+  assert.equal(reduceInteraction(world,selected.state,{type:"perform",actionId:"other-allocation"}).ok,true);
+  await assert.rejects(compile({carryable:false}),/explicitly set usableInPlace:true/);
+  assert.throws(()=>readPlannedInteractions({version:1,objects:[{entityId:"source",usableInPlace:"yes"},{entityId:"target"}],actions:[{id:"fill",kind:"transfer",label:"Fill",toolId:"source",targetId:"target",amount:1}]}),/incomplete/);
+  assert.equal(interactionsSchema.anyOf[1].properties!.objects.items.required.includes("usableInPlace"),false);
+});
+
+
+test("direct operation compiles a visible consequence without extracting or selecting its controller",async()=>{
+  for(const movesSelf of [false,true]){
+    const world=await compile({move:true,carryable:false,rewrite:value=>{
+      const proposal=structuredClone(value) as any,plan=proposal.gameplay.interactions;
+      plan.objects.forEach((object:any)=>{object.carryable=false;object.resource=null;});
+      plan.actions=[{id:"supply",kind:"operate",label:"Move to the dock",toolId:"fixture-source",targetId:"fixture-source",requires:[],effects:[{kind:"moveObject",entityId:movesSelf?"fixture-source":"fixture-target",destinationId:"dock",durationMs:900}]}];
+      return proposal;
+    }});
+    const controller=world.entities.find(entity=>entity.id==="fixture-source")!;
+    assert.equal(Boolean(controller.art),movesSelf,"Only the explicitly moved controller gets an independent cutout");
+    assert.equal(Boolean(controller.sourceLayer),movesSelf);
+    assert.equal(world.interactions!.objects[0].carryable,false);
+    assert.equal(world.interactions!.objects[0].usableInPlace,undefined);
+    const result=reduceInteraction(world,emptyPlayState(),{type:"perform",actionId:"supply"});
+    assert.equal(result.ok,true);assert.equal(goalProgress(world,result.state).ready,true);
+    assert.equal(result.state.interactions?.heldEntityId,null);
+    const rebuilt=await prepareSourceInteractionReview(world,{enabled:false,apiKey:""},new AbortController().signal);
+    assert.equal(rebuilt.interactions!.actions[0].kind,"operate");
+    assert.equal(Boolean(rebuilt.entities.find(entity=>entity.id===controller.id)!.sourceLayer),movesSelf);
+  }
+  assert.match(interactionInstructions,/Do not add a redundant Start chore/);
+});
+
+test("direct-operation transport accepts a lone control and diagnoses identity or carryability errors",()=>{
+  const plan:any={version:1,objects:[{entityId:"control",carryable:false}],actions:[{id:"operate",label:"Boost",kind:"operate",toolId:"control",targetId:"control",effects:[{kind:"jumpBoost",multiplier:1.4}]}]};
+  assert.equal(readPlannedInteractions(plan)!.actions[0].kind,"operate");
+  assert.deepEqual(plannedInteractionDiagnostics(plan),[]);
+  plan.objects[0].carryable=true;plan.actions[0].targetId="other";
+  const diagnostics=plannedInteractionDiagnostics(plan).join("\n");
+  assert.match(diagnostics,/same visible controller/);assert.match(diagnostics,/carryable:false/);
+  plan.actions[0].effects=[];
+  assert.throws(()=>readPlannedInteractions(plan),/incomplete/);
+});
+
+
+test("operation admission names both legacy-control bypass and undeclared attachment recipient",()=>{
+  const world:WorldDefinition={id:"control-admission",name:"Control admission",description:"Synthetic structural regression",theme:"grove",source:"manual",sourceImage:"",width:800,height:600,revision:1,
+    gameplay:{movement:"platform",objectiveTitle:"Reach the goal",instructions:"Prepare the control"},
+    entities:[{id:"control",kind:"lever",targetId:"gate",x:100,y:100,width:30,height:30},{id:"gate",kind:"gate",x:300,y:100,width:30,height:100},{id:"part",kind:"decoration",x:60,y:100,width:20,height:20},{id:"avatar",kind:"player",x:10,y:100,width:30,height:50}],
+    interactions:{version:1,objects:[{entityId:"control"},{entityId:"part",carryable:true}],actions:[
+      {id:"press",kind:"operate",label:"Open",toolId:"control",targetId:"control",effects:[{kind:"openGate",entityId:"gate"}]},
+      {id:"fit",kind:"attach",label:"Fit",toolId:"part",targetId:"avatar",effects:[{kind:"jumpBoost",multiplier:1.6}]},
+    ]}};
+  assert.throws(()=>applyPlannedInteractions(world,world.interactions),error=>{
+    assert.match((error as Error).message,/source kind:"decoration".*targetId:null/);
+    assert.match((error as Error).message,/avatar.*declared in interactions.objects/);
+    return true;
+  });
+  assert.match(interactionInstructions,/including the player/);
+  assert.match(interactionInstructions,/never legacy kind:"lever"/);
+});
+
+
+test("invalid control semantics reach bounded correction before any paid platform refinement",async()=>{
+  const requests:any[]=[];let reservations=0;
+  await assert.rejects(compile({reserve:()=>{reservations++;},onRequest:body=>requests.push(body),rewrite:value=>{
+    const proposal=structuredClone(value) as any;
+    proposal.objects[0].kind="lever";proposal.objects[0].targetId="barrier";
+    proposal.objects.push({id:"avatar",kind:"player",label:"Avatar",targetId:null,bounds:{left:10,top:100,right:70,bottom:200}},
+      {id:"floor",kind:"terrain",label:"Floor",targetId:null,bounds:{left:0,top:500,right:500,bottom:600}},
+      {id:"ledge",kind:"terrain",label:"Ledge",targetId:null,bounds:{left:600,top:400,right:900,bottom:450}},
+      {id:"barrier",kind:"gate",label:"Barrier",targetId:null,bounds:{left:500,top:300,right:530,bottom:500}});
+    proposal.gameplay.movement="platform";proposal.gameplay.avatarId="avatar";
+    proposal.gameplay.interactions.objects[0].carryable=false;
+    proposal.gameplay.interactions.objects[1].carryable=true;
+    proposal.gameplay.interactions.actions=[{id:"supply",kind:"operate",label:"Open",toolId:"fixture-source",targetId:"fixture-source",effects:[{kind:"openGate",entityId:"barrier"}]},
+      {id:"fit",kind:"attach",label:"Fit",toolId:"fixture-target",targetId:"avatar",effects:[{kind:"jumpBoost",multiplier:1.6}]}];
+    return proposal;
+  }}),/declared in interactions.objects|source kind:"decoration"/);
+  assert.equal(reservations,2,"Only initial generation and one semantic correction are reserved");
+  assert.equal(requests.length,2);
+  const correction=requests[1].messages[0].content as string;
+  assert.match(correction,/previous JSON failed local plan validation/);
+  assert.match(correction,/avatar.*declared in interactions.objects/);
+  assert.match(correction,/controller fixture-source.*source kind/);
+  assert.doesNotMatch(correction,/Check provisional source boxes/);
+});
+
+
+test("stationary preflight checks mode, source role, resource, outgoing flow and motion before geometry",()=>{
+  const plan:any={version:1,objects:[{entityId:"source",carryable:false,usableInPlace:true,resource:{type:"water",capacity:2,initial:2}},{entityId:"target",resource:{type:"water",capacity:2,initial:0}}],
+    actions:[{id:"flow",kind:"transfer",label:"Fill",toolId:"source",targetId:"target",amount:2}]};
+  const sources:any[]=[{id:"source",kind:"decoration"},{id:"target",kind:"decoration"}];
+  assert.doesNotThrow(()=>validatePlannedInteractionSources(plan,sources,"discover"));
+  for(const mode of ["platform","roam"] as const)assert.throws(()=>validatePlannedInteractionSources(plan,sources,mode),/requires movement:"discover"/);
+  for(const change of [(p:any)=>{p.objects[0].carryable=true;},(p:any)=>{delete p.objects[0].resource;},(p:any)=>{p.actions=[];},
+    (p:any)=>{p.actions.push({id:"use",kind:"use",label:"Use",toolId:"source",targetId:"target",effects:[{kind:"moveObject",entityId:"source",destinationId:"target"}]});}]){
+    const invalid=structuredClone(plan);change(invalid);
+    assert.throws(()=>validatePlannedInteractionSources(invalid,sources,"discover"),/Fixed source/);
+  }
+  assert.throws(()=>validatePlannedInteractionSources(plan,[{id:"source",kind:"player"},sources[1]],"discover"),/Fixed source.*source kind/);
+  const moving=structuredClone(plan);
+  moving.actions[0].effects=[{kind:"moveObject",entityId:"source",destinationId:"target"}];
+  assert.throws(()=>validatePlannedInteractionSources(moving,sources,"discover"),/cannot be moved/);
+  assert.doesNotThrow(()=>validatePlannedInteractionSources(undefined,[{id:"switch",kind:"lever"}],"platform"),"Classic lever scenes retain their existing path");
 });

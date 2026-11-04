@@ -1,5 +1,5 @@
 import { emptyPlayState, type PlayState, type WorldDefinition } from "../shared/world.js";
-import { reduceInteraction, type InteractionAction } from "../shared/interactions.js";
+import { reduceInteraction, selectInteractionSourceCommand, type InteractionAction } from "../shared/interactions.js";
 import { ModelPlanError } from "./model.js";
 
 /** Generation admission, not a runtime restriction. Explore actual legal receipts
@@ -30,8 +30,8 @@ export function validateGeneratedRetryablePlan(world: WorldDefinition): void {
     if (complete(state)) continue; // Post-completion spending is not an allocation puzzle.
     for (const action of plan.actions) {
       if (state.interactions?.completed.includes(action.id)) continue;
-      const dropped = reduceInteraction(world, state, {type:"drop"});
-      const picked = reduceInteraction(world, dropped.ok ? dropped.state : state, {type:"pickup",entityId:action.toolId});
+      const dropped = action.kind === "operate" ? {ok:true,state:state} : reduceInteraction(world, state, {type:"drop"});
+      const picked = action.kind === "operate" ? {ok:true,state:dropped.ok ? dropped.state : state} : reduceInteraction(world, dropped.ok ? dropped.state : state, selectInteractionSourceCommand(world,action.toolId));
       if (!picked.ok) continue;
       const result = reduceInteraction(world, picked.state, {type:"perform",actionId:action.id});
       if (!result.ok) continue;

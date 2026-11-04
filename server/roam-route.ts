@@ -1,5 +1,5 @@
 import { emptyPlayState, type GoalRules, type PlayState, type WorldEntity } from "../shared/world.js";
-import { interactionEffects, reduceInteraction } from "../shared/interactions.js";
+import { interactionEffects, reduceInteraction, selectInteractionSourceCommand } from "../shared/interactions.js";
 import { applyPlannedInteractions, type PlannedInteractions } from "./interaction-planning.js";
 import { InterpretationError } from "./model.js";
 
@@ -159,8 +159,8 @@ export function checkRoamRoute(width: number, height: number, guide: WorldEntity
     if (!behaviorWorld) break;
     for (const action of routeActions) {
       if (state.interactions?.completed.includes(action.id) || !reachable(currentEntity(action.toolId), cells) || !reachable(currentEntity(action.targetId), cells)) continue;
-      const dropped = reduceInteraction(behaviorWorld, state, { type: "drop" });
-      const picked = reduceInteraction(behaviorWorld, dropped.ok ? dropped.state : state, { type: "pickup", entityId: action.toolId });
+      const dropped = action.kind === "operate" ? {ok:true,state:state} : reduceInteraction(behaviorWorld, state, { type: "drop" });
+      const picked = action.kind === "operate" ? {ok:true,state:dropped.ok ? dropped.state : state} : reduceInteraction(behaviorWorld, dropped.ok ? dropped.state : state, selectInteractionSourceCommand(behaviorWorld,action.toolId));
       if (!picked.ok) continue;
       const performed = reduceInteraction(behaviorWorld, picked.state, { type: "perform", actionId: action.id });
       if (!performed.ok) continue;

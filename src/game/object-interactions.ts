@@ -1,8 +1,11 @@
 import Phaser from "phaser";
+import { carriedArtworkPosition, attachedPlayerArtwork } from "./artwork-raster";
+import { interactionMoveDestination } from "./interaction-move-geometry";
+import { layoutResourceBadges } from "./resource-badge-layout";
 import { objectName } from "../lib/object-name";
 import type { InteractionAction } from "../../shared/interactions";
-import { playerAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
-import { inspectInteractionTarget, incompatibleTargetReason, interactionOutcomeMessage, type ActionPreview } from "../../shared/interaction-preview";
+import { activeInteractionSource, selectInteractionSourceCommand, playerAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
+import { canSelectInteractionSource, previewInteraction, inspectInteractionTarget, incompatibleTargetReason, interactionOutcomeMessage, type ActionPreview } from "../../shared/interaction-preview";
 import type { PlayState, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 
@@ -12,12 +15,13 @@ interface InteractionHost {
   state(): PlayState;
   change(state: PlayState): void;
   settled(): void;
-  player(): { x: number; y: number; flipX?: boolean } | undefined;
+  player(): { x: number; y: number; flipX?: boolean; body?: {bottom:number} | null } | undefined;
+  playerArtBounds?(): {x:number;y:number;width:number;height:number} | undefined;
   playing(): boolean;
   approach(point: { x: number; y: number }): void;
   stopApproach(): void;
   moment(message: string): void;
-  feedback(kind: "pickup" | "transfer" | "attach" | "use" | "place" | "drop"): void;
+  feedback(kind: "pickup" | "selectSource" | "transfer" | "attach" | "use" | "place" | "operate" | "drop"): void;
 }
 
 /** Deterministic interactions use the real world objects; this layer only owns
@@ -27,6 +31,8 @@ export class ObjectInteractions {
   private resourceLabels = new Map<string, Phaser.GameObjects.Text>();
   private marks: Phaser.GameObjects.Graphics;
   private focus: Phaser.GameObjects.Graphics;
+  private destinationMark: Phaser.GameObjects.Graphics;
+  private externalPreviewAction?: string;
   private prompt: Phaser.GameObjects.Text;
   private e?: Phaser.Input.Keyboard.Key;
   private q?: Phaser.Input.Keyboard.Key;
@@ -42,7 +48,7 @@ export class ObjectInteractions {
   private pendingMotions = 0;
   private actionMenu?: Phaser.GameObjects.Container;
   private menuTarget = "";
-  private menuOptions: { text: Phaser.GameObjects.Text; run: () => void }[] = [];
+  private menuOptions: { text: Phaser.GameObjects.Text; run: () => void; actionId?: string }[] = [];
   private menuIndex = 0;
   private menuInputConsumed = false;
   private hintTarget = "";
@@ -61,6 +67,7 @@ export class ObjectInteractions {
   ) {
     this.marks = scene.add.graphics().setDepth(24);
     this.focus = scene.add.graphics().setDepth(25);
+    this.destinationMark = scene.add.graphics().setDepth(25);
     this.hintMark = scene.add.graphics().setDepth(41);
     this.hintLabel = scene.add.text(0, 0, "", {
       fontFamily: "Manrope, sans-serif", fontSize: "13px", color: "#ffffff",
@@ -99,7 +106,10 @@ export class ObjectInteractions {
       }
     };
     scene.input.keyboard?.on("keydown", navigateChoices);
+    const clearInspection = () => this.clearInspection();
+    window.addEventListener("blur", clearInspection);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener("blur", clearInspection);
       this.e?.off("down", queueUse);
       this.q?.off("down", queueReturn);
       scene.input.keyboard?.off("keydown", navigateChoices);
@@ -217,10 +227,11 @@ export class ObjectInteractions {
     const action = actions.find(action => action.targetId === entity.id);
     if (action) return { entity, action, label: action.label };
     const object = this.world.interactions?.objects.find(o => o.entityId === entity.id);
-    const toolHasActionHere = state.heldEntityId && this.world.interactions?.actions.some(candidate =>
-      candidate.toolId === state.heldEntityId && candidate.targetId === entity.id && !state.completed.includes(candidate.id));
-    if (object?.carryable && state.heldEntityId !== entity.id && !state.attachments[entity.id] && !toolHasActionHere)
-      return { entity, action: undefined, label: `Take ${objectName(this.world, entity.id, 28)}` };
+    const activeSource = activeInteractionSource(state);
+    const toolHasActionHere = activeSource && this.world.interactions?.actions.some(candidate =>
+      candidate.toolId === activeSource && candidate.targetId === entity.id && !state.completed.includes(candidate.id));
+    if (object && canSelectInteractionSource(this.world, this.host.state(), entity.id, state) && !toolHasActionHere)
+      return { entity, action: undefined, label: `${object.usableInPlace ? "Select" : "Take"} ${objectName(this.world, entity.id, 28)}` };
     return undefined;
   }
 
@@ -250,12 +261,15 @@ export class ObjectInteractions {
     if (incompatible) { this.cancelApproach(); this.notice(incompatible, true); return true; }
     const previews = this.inspect(id);
     const selectedPreview = actionId ? previews.find(action => action.id === actionId) : previews.length === 1 ? previews[0] : undefined;
-    if (selectedPreview && !selectedPreview.available) {
+    const selectableController = previews.some(action => this.world.interactions!.actions.some(candidate => candidate.id === action.id && candidate.kind === "operate")) &&
+      this.world.interactions.objects.some(object => object.entityId === id && object.usableInPlace) &&
+      canSelectInteractionSource(this.world, this.host.state(), id);
+    if (selectedPreview && !selectedPreview.available && (actionId || !selectableController)) {
       this.cancelApproach();
       this.notice(selectedPreview.reason || "This action is unavailable.", true);
       return true;
     }
-    if (!actionId && previews.length > 1) {
+    if (!actionId && (previews.length > 1 || selectableController)) {
       this.cancelApproach();
       this.host.stopApproach();
       const actions = this.world.interactions.actions.filter(action => previews.some(preview => preview.id === action.id));
@@ -283,8 +297,8 @@ export class ObjectInteractions {
     this.closeChoices();
     const choice = selected ? { entity, action: selected, label: selected.label } : this.choice(entity);
     if (!choice) {
-      const held = interactionState(this.world, this.host.state()).heldEntityId;
-      const action = this.world.interactions.actions.find(a => a.toolId === held && a.targetId === id);
+      const held = activeInteractionSource(interactionState(this.world, this.host.state()));
+      const action = this.world.interactions.actions.find(a => (a.kind === "operate" || a.toolId === held) && a.targetId === id);
       if (action) {
         const attempt = reduceInteraction(this.world, this.host.state(), { type: "perform", actionId: action.id });
         const prerequisite = action.requires?.find(required => !interactionState(this.world, this.host.state()).completed.includes(required));
@@ -294,12 +308,12 @@ export class ObjectInteractions {
         const state = interactionState(this.world, this.host.state());
         const next = this.world.interactions.actions.find(candidate => candidate.targetId === id && !state.completed.includes(candidate.id));
         const tool = next && this.entity(next.toolId);
-        this.notice(tool ? `Use ${objectName(this.world, tool.id, 28)} here.` : held ? "Q puts this object back." : "This object is ready.");
+        this.notice(tool ? `Use ${objectName(this.world, tool.id, 28)} here.` : state.selectedSourceId ? "Q clears this selection." : held ? "Q puts this object back." : "This object is ready.");
       }
       return true;
     }
     const current = this.host.state();
-    const held = interactionState(this.world, current).heldEntityId;
+    const held = activeInteractionSource(interactionState(this.world, current));
     // A deliberate click on another loose tool switches hands in one state
     // change. Both commands validate before publishing; neither consumes stock.
     const dropping = !choice.action && held && held !== id
@@ -307,7 +321,7 @@ export class ObjectInteractions {
     if (dropping && !dropping.ok) { this.notice(dropping.reason || "Try another object."); return true; }
     const result = reduceInteraction(this.world, dropping?.state ?? current, choice.action
       ? { type: "perform", actionId: choice.action.id }
-      : { type: "pickup", entityId: id });
+      : selectInteractionSourceCommand(this.world, id));
     if (!result.ok) { this.notice(result.reason || "Try another object."); return true; }
     this.syncMoves(true, result.state);
     this.host.change(result.state);
@@ -315,7 +329,7 @@ export class ObjectInteractions {
       this.host.feedback(result.event.kind);
       if (choice.action) {
         this.pulse(entity);
-        if (result.event.toolId) this.toolGesture(result.event.toolId, result.event.kind);
+        if (result.event.toolId && result.event.kind !== "operate") this.toolGesture(result.event.toolId, result.event.kind);
         if (result.event.kind === "transfer" && result.event.toolId) this.transferTrail(result.event.toolId, entity);
         this.notice(interactionOutcomeMessage(this.world, current, result.state, choice.action), true);
       }
@@ -333,6 +347,20 @@ export class ObjectInteractions {
     this.host.change(result.state);
     this.host.feedback("drop");
     this.render();
+  }
+
+  /** A fixed controller can also supply a resource. Choose that role explicitly
+   * rather than treating selection as an operation or spending anything. */
+  selectFixedSource(id: string) {
+    if (!this.host.playing() || this.hasPendingMotion()) return false;
+    const entity = this.entity(id);
+    if (!entity || !this.world.interactions?.objects.some(object => object.entityId === id && object.usableInPlace)) return false;
+    if (!canSelectInteractionSource(this.world, this.host.state(), id)) { this.notice("This source has no remaining action to select.", true); return false; }
+    const result = reduceInteraction(this.world, this.host.state(), {type: "selectSource", entityId: id});
+    if (!result.ok) { this.notice(result.reason || "This source cannot be selected.", true); return false; }
+    this.cancelApproach(); this.host.stopApproach(); this.closeChoices();
+    this.host.change(result.state); this.host.feedback("selectSource"); this.render();
+    return true;
   }
 
   /** A new movement intent must cancel a previous click-to-use command. */
@@ -375,6 +403,18 @@ export class ObjectInteractions {
     return Boolean(active?.matches('input, textarea, select, button, [contenteditable="true"]') || active?.closest('[role="dialog"], dialog'));
   }
 
+  clearInspection() {
+    this.hover = "";
+    this.externalPreviewAction = undefined;
+    this.destinationMark.clear();
+    this.closeChoices();
+  }
+
+  previewAction(actionId?: string) {
+    this.externalPreviewAction = actionId;
+    this.destinationMark.clear();
+  }
+
   private highlightChoice() {
     this.menuOptions.forEach(({ text }, index) => {
       text.setColor(index === this.menuIndex ? "#ffffff" : "#d7e0e4");
@@ -399,25 +439,30 @@ export class ObjectInteractions {
     const backdrop = this.scene.add.graphics();
     container.add(backdrop);
     let y = 10;
-    const addButton = (label: string, action: () => void) => {
+    const addButton = (label: string, action: () => void, actionId?: string) => {
       const text = this.scene.add.text(12, y, label, { fontFamily: "Manrope, sans-serif", fontSize: "14px", color: "#ffffff", wordWrap: { width: 240 }, padding: { x: 6, y: 9 } })
         .setInteractive({ useHandCursor: true });
       text.setFixedSize(252, text.height);
       text.on("pointerdown", (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => { this.tap = undefined; event.stopPropagation(); });
       text.on("pointerup", (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => { this.tap = undefined; event.stopPropagation(); action(); });
       const index = this.menuOptions.length;
-      this.menuOptions.push({ text, run: action });
+      this.menuOptions.push({ text, run: action, actionId });
       text.on("pointerover", () => { this.menuIndex = index; this.highlightChoice(); });
       container.add(text);
       y += text.height + 3;
     };
     const previews = this.inspect(entity.id);
     const pageSize = camera.worldView.height / unit < 480 ? 1 : 2;
+    if (page === 0 && actions.some(action => action.kind === "operate") &&
+        this.world.interactions?.objects.some(object => object.entityId === entity.id && object.usableInPlace) &&
+        canSelectInteractionSource(this.world, this.host.state(), entity.id)) {
+      addButton(`Select ${objectName(this.world, entity.id, 32)} as a source`, () => this.selectFixedSource(entity.id));
+    }
     for (const action of actions.slice(page * pageSize, page * pageSize + pageSize)) {
       const preview = previews.find(candidate => candidate.id === action.id);
       const fullDetail = preview?.available ? preview.consequence : preview?.reason;
       const detail = fullDetail && fullDetail.length > 160 ? `${fullDetail.slice(0,157)}…` : fullDetail;
-      addButton(`${action.label}${detail ? `\n${detail}` : ""}`, () => this.interact(entity.id, action.id));
+      addButton(`${action.label}${detail ? `\n${detail}` : ""}`, () => this.interact(entity.id, action.id), action.id);
     }
     if (page > 0) addButton("‹ Previous", () => this.showChoices(entity, actions, page - 1));
     if ((page + 1) * pageSize < actions.length) addButton("More ›", () => this.showChoices(entity, actions, page + 1));
@@ -452,7 +497,7 @@ export class ObjectInteractions {
   }
   private toolGesture(toolId: string, kind: string) {
     const art = this.art.get(toolId);
-    if (!art || this.reducedMotion || (kind === "attach" || kind === "place")) return;
+    if (!art || this.reducedMotion || this.world.interactions?.objects.some(object => object.entityId === toolId && object.usableInPlace) || (kind === "attach" || kind === "place")) return;
     this.scene.tweens.killTweensOf(art);
     art.setRotation(0);
     this.scene.tweens.add({ targets: art, angle: kind === "transfer" ? -24 : 12,
@@ -470,7 +515,7 @@ export class ObjectInteractions {
       if (!entity || !art) continue;
       const home = art.getData("home") as { x: number; y: number; width: number; height: number };
       const position = { x: art.x, y: art.y, width: art.displayWidth, height: art.displayHeight, actionId: move.actionId };
-      const destination = { x: home.x + move.x - entity.x, y: home.y + move.y - entity.y, width: home.width, height: home.height };
+      const destination = interactionMoveDestination(entity, home, move);
       this.movedObjects.set(id, position);
       if (!animate || this.reducedMotion) Object.assign(position, destination);
       else {
@@ -537,7 +582,12 @@ export class ObjectInteractions {
       if (state.heldEntityId === id) {
         const heldScale = Math.min(1, 86 * unit / Math.max(home.width, home.height));
         art.setDisplaySize(home.width * heldScale, home.height * heldScale).setDepth(26);
-        if (player) art.setPosition(player.x + (player.flipX ? -1 : 1) * 42, player.y - 34);
+        if (player) {
+          const hero = this.world.entities.find(entity => entity.kind === "player");
+          const bounds = this.host.playerArtBounds?.() ?? {x:player.x-(hero?.width??0)/2,y:player.y-(hero?.height??0)/2,width:hero?.width??0,height:hero?.height??0};
+          const at = carriedArtworkPosition(bounds,{width:art.displayWidth,height:art.displayHeight},Boolean(player.flipX),unit);
+          art.setPosition(at.x,at.y);
+        }
         else art.setPosition(camera.worldView.centerX, camera.worldView.bottom - 58 * unit);
       } else if (state.attachments[id]) {
         // Attached art is placed after all moving targets have updated below.
@@ -552,19 +602,23 @@ export class ObjectInteractions {
       if (!art || !target) continue;
       const home = art.getData("home") as { width: number; height: number };
       const point = this.point(target);
-      const scale = Math.min(1, Math.max(target.width, target.height) * 0.5 / Math.max(home.width, home.height));
-      const targetSize = this.size(target);
-      const attachedHeight = home.height * scale;
-      // Keep equipment on the player; mount independent inventions above the
-      // receiving object's silhouette so thin original ink remains legible.
-      art.setDisplaySize(home.width * scale, attachedHeight)
-        .setPosition(point.x + targetSize.width * 0.15,
-          target.kind === "player" ? point.y + target.height * 0.2
-            : point.y - attachedHeight / 2)
-        .setDepth(23);
+      if (target.kind === "player" && player) {
+        const bounds=this.host.playerArtBounds?.()??{x:player.x-target.width/2,y:player.y-target.height/2,width:target.width,height:target.height};
+        const mount=attachedPlayerArtwork(bounds,home,player.body?.bottom??bounds.y+bounds.height,Boolean(player.flipX));
+        art.setDisplaySize(mount.width,mount.height).setPosition(mount.x,mount.y).setDepth(23);
+      } else {
+        const scale = Math.min(1, Math.max(target.width, target.height) * 0.5 / Math.max(home.width, home.height));
+        const targetSize = this.size(target);
+        const attachedHeight = home.height * scale;
+        // Independent inventions retain their mount above the receiving object.
+        art.setDisplaySize(home.width * scale, attachedHeight)
+          .setPosition(point.x + targetSize.width * 0.15,point.y - attachedHeight / 2)
+          .setDepth(23);
+      }
     }
     this.marks.clear();
     this.focus.clear();
+    this.destinationMark.clear();
     this.hintMark.clear();
     this.hintLabel.setVisible(false);
     if (this.host.playing() && this.scene.time.now < this.hintUntil) {
@@ -588,28 +642,45 @@ export class ObjectInteractions {
         }
       }
     }
-    for (const object of this.world.interactions?.objects ?? []) {
+    const badgeView = {x:0,y:0,width:camera.worldView.width/unit,height:camera.worldView.height/unit};
+    const badgeObjects = (this.world.interactions?.objects ?? []).filter(object => object.resource && state.heldEntityId !== object.entityId);
+    const reservedBadgeSpace = [this.prompt,this.hintLabel].filter(label=>label.visible).map(label=>{
+      const bounds=label.getBounds();
+      return {x:(bounds.x-camera.worldView.left)/unit,y:(bounds.y-camera.worldView.top)/unit,width:bounds.width/unit,height:bounds.height/unit};
+    });
+    const placements = layoutResourceBadges(badgeObjects.flatMap(object => {
+      const entity = this.entity(object.entityId), text = this.resourceLabels.get(object.entityId);
+      if (!entity || !text || !object.resource) return [];
+      const point = this.point(entity), size = this.size(entity);
+      // Capacity is fixed. Reserve its full width so spending never moves labels.
+      if (!text.getData("badgeWidth")) {
+        const capacity = resourceNumber.format(object.resource.capacity);
+        text.setText(`${capacity} / ${capacity}`);
+        text.setData("badgeWidth",Math.max(56,text.width+16));
+      }
+      return [{id:entity.id,width:text.getData("badgeWidth") as number,height:32,
+        bounds:{x:(point.x-size.width/2-camera.worldView.left)/unit,y:(point.y-size.height/2-camera.worldView.top)/unit,
+          width:size.width/unit,height:size.height/unit}}];
+    }),badgeView,reservedBadgeSpace);
+    for (const text of this.resourceLabels.values()) text.setVisible(false);
+    for (const placement of placements) {
+      const object = badgeObjects.find(object => object.entityId === placement.id)!;
+      const entity = this.entity(placement.id)!;
       if (!object.resource) continue;
-      const entity = this.entity(object.entityId);
-      if (!entity) continue;
       const actual = state.quantities[entity.id] ?? 0;
-      const point = this.point(entity), text = this.resourceLabels.get(entity.id)!;
-      text.setText(`${resourceNumber.format(actual)} / ${resourceNumber.format(object.resource.capacity)}`).setScale(unit);
-      const badgeWidth = Math.max(56, text.width + 16) * unit, badgeHeight = 32 * unit;
-      const view = camera.worldView;
-      const centerX = Phaser.Math.Clamp(point.x, view.left + badgeWidth / 2 + 4 * unit, view.right - badgeWidth / 2 - 4 * unit);
-      const badgeY = state.heldEntityId === entity.id
-        ? point.y - this.size(entity).height / 2 - badgeHeight - 8 * unit
-        : point.y + Math.min(this.size(entity).height / 2, 52 * unit) + 8 * unit;
-      const y = Phaser.Math.Clamp(badgeY,
-        view.top + 4 * unit, view.bottom - badgeHeight - 4 * unit);
-      // Never turn off-screen objects into a pile of edge labels. The badges
-      // stay readable at the fitted image scale and while zooming/panning.
-      text.setVisible(view.contains(point.x, point.y));
-      if (!text.visible) continue;
+      const text = this.resourceLabels.get(entity.id)!;
+      text.setText(`${resourceNumber.format(actual)} / ${resourceNumber.format(object.resource.capacity)}`).setScale(unit).setVisible(true);
+      const badgeWidth = placement.width * unit, badgeHeight = placement.height * unit;
+      const x = camera.worldView.left + placement.x * unit, y = camera.worldView.top + placement.y * unit;
+      const centerX = x + badgeWidth / 2;
+      if (placement.leader || placement.overlaps) {
+        const anchorX = camera.worldView.left + placement.anchor.x * unit, anchorY = camera.worldView.top + placement.anchor.y * unit;
+        this.marks.lineStyle(1.5 * unit, 0x355b69, .8).beginPath().moveTo(anchorX, anchorY)
+          .lineTo(Phaser.Math.Clamp(anchorX,x,x+badgeWidth),Phaser.Math.Clamp(anchorY,y,y+badgeHeight)).strokePath();
+        this.marks.fillStyle(0x355b69,.8).fillCircle(anchorX,anchorY,2*unit);
+      }
       const full = actual >= object.resource.capacity;
       const delivered = full && this.world.interactions!.actions.some(action => action.kind === "transfer" && action.targetId === entity.id && state.completed.includes(action.id));
-      const x = centerX - badgeWidth / 2;
       if (delivered) this.marks.lineStyle(6 * unit, 0x5bd6bb, 0.13)
         .strokeRoundedRect(x - 2 * unit, y - 2 * unit, badgeWidth + 4 * unit, badgeHeight + 4 * unit, 10 * unit);
       this.marks.fillStyle(delivered ? 0xf0faf6 : 0xffffff, 0.97)
@@ -649,6 +720,7 @@ export class ObjectInteractions {
         .moveTo(x - 3 * unit, y).lineTo(x - unit, y + 2 * unit).lineTo(x + 3 * unit, y - 2 * unit).strokePath();
     }
     if (!this.host.playing()) { this.prompt.setVisible(false); this.closeChoices(); return; }
+    this.renderDestinationPreview(unit);
     if (this.actionMenu) {
       const target = this.entity(this.menuTarget);
       if (!target) this.closeChoices();
@@ -668,7 +740,9 @@ export class ObjectInteractions {
       if (!entity) continue;
       this.targetCorners(entity, unit, 0x218b77, 0.8);
     }
-    const focused = (this.hover !== state.heldEntityId ? this.entity(this.hover) : undefined) ?? context.nearby?.entity;
+    const selectedSource = state.selectedSourceId ? this.entity(state.selectedSourceId) : undefined;
+    if (selectedSource) this.targetCorners(selectedSource, unit, 0x264eb4, 1);
+    const focused = (this.hover !== activeInteractionSource(state) ? this.entity(this.hover) : undefined) ?? context.nearby?.entity;
     if (focused && !available.some(action => action.targetId === focused.id)) {
       this.targetCorners(focused, unit, 0x355b69, 0.8);
     }
@@ -693,22 +767,62 @@ export class ObjectInteractions {
     }
     if (context.nearby) {
       const point = this.point(context.nearby.entity);
-      this.prompt.setText(`E  ${context.label}`).setScale(unit);
+      const discovery = this.world.gameplay?.movement === "discover";
+      const previews = discovery && context.nearby.action ? this.inspect(context.nearby.entity.id) : [];
+      const preview = discovery && context.nearby.action
+        ? previews.find(candidate => candidate.id === context.nearby!.action!.id) ?? previewInteraction(this.world,this.host.state(),context.nearby.action)
+        : undefined;
+      const cue = discovery ? "Click" : "E";
+      const detail = previews.length > 1 ? `${cue} · Choose action\n${previews.filter(candidate => candidate.available).length} of ${previews.length} available`
+        : preview ? `${cue} · ${preview.label}\n${preview.available ? preview.consequence : preview.reason ?? "Unavailable"}`
+        : `${cue} · ${context.label}`;
+      this.prompt.setText(detail).setScale(unit);
       const half = Math.min(camera.worldView.width / 2, (this.prompt.width / 2 + 12) * unit);
       this.prompt.setPosition(
         Phaser.Math.Clamp(point.x, camera.worldView.left + half, camera.worldView.right - half),
         Math.max(camera.worldView.top + (this.prompt.height + 12) * unit,
           point.y - this.size(context.nearby.entity).height / 2 - 12 * unit),
       ).setVisible(true);
-    } else if (state.heldEntityId && !available.length) {
-      const tool = this.entity(state.heldEntityId);
+    } else if (activeInteractionSource(state) && !available.length) {
+      const tool = this.entity(activeInteractionSource(state)!);
       if (tool) {
         const point = this.point(tool);
-        this.prompt.setText("Q  Put back").setScale(unit).setPosition(
+        this.prompt.setText(state.selectedSourceId ? "Q  Clear selection" : "Q  Put back").setScale(unit).setPosition(
           Phaser.Math.Clamp(point.x, camera.worldView.left + 75 * unit, camera.worldView.right - 75 * unit),
           Math.max(camera.worldView.top + 45 * unit, point.y - 55 * unit)).setVisible(true);
       }
     } else this.prompt.setVisible(false);
+  }
+
+  /** Only an explicitly inspected, executable action gets an endpoint. No
+   * route planning, inferred positions, animation, or persistent overlay. */
+  private renderDestinationPreview(unit: number) {
+    if (!document.hasFocus() || this.hasPendingMotion() || this.host.state().completed) return;
+    let actionId = this.actionMenu ? this.menuOptions[this.menuIndex]?.actionId : this.externalPreviewAction;
+    if (!this.actionMenu && !actionId && this.hover && !this.inputOutsideGame()) {
+      const previews = this.inspect(this.hover).filter(preview => preview.available);
+      if (previews.length === 1) actionId = previews[0].id;
+    }
+    const action = this.world.interactions?.actions.find(candidate => candidate.id === actionId);
+    if (!action || !this.inspect(action.targetId).some(preview => preview.id === action.id && preview.available)) return;
+    for (const effect of action.effects ?? []) {
+      if (effect.kind !== "moveObject") continue;
+      const entity = this.entity(effect.entityId), art = this.art.get(effect.entityId);
+      if (!entity || !art) continue;
+      const destination = interactionMoveDestination(entity, art.getData("home"), effect);
+      const length = Math.min(12 * unit, destination.width / 3, destination.height / 3);
+      // Two quiet strokes remain legible on light and dark source artwork.
+      // Corners follow the exact rendered rectangle, including cutout padding.
+      for (const [width, color, alpha] of [[4, 0xffffff, .72], [2, 0x218b77, .95]]) {
+        this.destinationMark.lineStyle(width * unit, color, alpha);
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+          const x = destination.x + sx * destination.width / 2;
+          const y = destination.y + sy * destination.height / 2;
+          this.destinationMark.beginPath().moveTo(x - sx * length, y).lineTo(x, y)
+            .lineTo(x, y - sy * length).strokePath();
+        }
+      }
+    }
   }
 
   private targetCorners(entity: WorldEntity, unit: number, color: number, alpha: number, graphics = this.focus) {

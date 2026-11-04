@@ -150,3 +150,13 @@ test("individually useful members cannot hide a losing combination across choice
   // pairings still strand the player and must not be accepted as choices.
   assert.throws(() => checkRoamRoute(1000, 600, f.guide, f.entities, { ...rules, requiredChoiceGroupIds:["first","second"] }, f.interactions), /choice route/);
 });
+
+
+test("a stationary controller can open a physical route after its resource preparation",()=>{
+  const f=fixture();
+  f.interactions.actions.find(action=>action.id==="open")!.effects=[];
+  f.interactions.actions.push({id:"operate",kind:"operate",label:"Open passage",toolId:"control",targetId:"control",requiresResourceIds:["control"],effects:[{kind:"openGate",entityId:"door"}]});
+  assert.doesNotThrow(()=>checkRoamRoute(1000,600,f.guide,f.entities,rules,f.interactions));
+  f.entities.find(entity=>entity.id==="control")!.x=800;
+  assert.throws(()=>checkRoamRoute(1000,600,f.guide,f.entities,rules,f.interactions),/obstacles block the route/);
+});

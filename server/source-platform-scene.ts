@@ -8,7 +8,7 @@ import { extractArtwork, segmentationConfigured, type SegmentationConnection } f
 import type { SourceSelection, GameplayPlan } from "./creative-adaptation.js";
 import type { GoalRules, InputKind, WorldDefinition, WorldEntity } from "../shared/world.js";
 import { emptyPlayState } from "../shared/world.js";
-import { interactionEffects, reduceInteraction, validateInteractions } from "../shared/interactions.js";
+import { interactionEffects, reduceInteraction, selectInteractionSourceCommand, validateInteractions } from "../shared/interactions.js";
 import { setupFeedback } from "../shared/setup.js";
 
 interface Options {
@@ -23,7 +23,7 @@ interface Options {
   signal: AbortSignal;
   transport: typeof fetch;
   requested: GoalRules;
-  onReject?: (reason: string) => void;
+  onReject?: (reason: string, objectId?: string) => void;
   finishRules: (entities: WorldEntity[], defaults: GoalRules) => GoalRules;
 }
 type Surface = WorldEntity & { kind: "terrain" | "bridge" };
@@ -40,7 +40,7 @@ const overlaps = (a: { x: number; y: number; width: number; height: number }, b:
  */
 export async function sourcePlatformScene(options: Options): Promise<WorldDefinition | null> {
   const { source, plan, signal, inputKind } = options;
-  const reject = (reason: string): null => { options.onReject?.(reason); return null; };
+  const reject = (reason: string, objectId?: string): null => { options.onReject?.(reason, objectId); return null; };
   const actor = options.objects.find(object => object.id === plan.avatarId) ??
     (options.objects.filter(object => object.kind === "player").length === 1 ? options.objects.find(object => object.kind === "player") : undefined);
   const sourceSurfaces = options.objects.filter(object => ["terrain", "bridge"].includes(object.kind));
@@ -273,8 +273,8 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
         if (progress.interactions?.completed.includes(action.id)) continue;
         const tool = anchors.get(action.toolId), target = anchors.get(action.targetId);
         if (!tool || !target || !reached.has(tool.id) || !reached.has(target.id)) continue;
-        const putBack = reduceInteraction(behaviorWorld, progress, { type: "drop" });
-        const picked = reduceInteraction(behaviorWorld, putBack.ok ? putBack.state : progress, { type: "pickup", entityId: action.toolId });
+        const putBack = action.kind === "operate" ? {ok:true,state:progress} : reduceInteraction(behaviorWorld, progress, { type: "drop" });
+        const picked = action.kind === "operate" ? {ok:true,state:putBack.ok ? putBack.state : progress} : reduceInteraction(behaviorWorld, putBack.ok ? putBack.state : progress, selectInteractionSourceCommand(behaviorWorld,action.toolId));
         if (!picked.ok) continue;
         const used = reduceInteraction(behaviorWorld, picked.state, { type: "perform", actionId: action.id });
         if (!used.ok) continue;
@@ -365,8 +365,8 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
       for (const action of orderedActions) {
         if (progress.interactions?.completed.includes(action.id)) continue;
         if (!reachableEntityIds.has(action.toolId) || !reachableEntityIds.has(action.targetId)) continue;
-        const dropped = reduceInteraction(behaviorWorld, progress, { type: "drop" });
-        const picked = reduceInteraction(behaviorWorld, dropped.ok ? dropped.state : progress, { type: "pickup", entityId: action.toolId });
+        const dropped = action.kind === "operate" ? {ok:true,state:progress} : reduceInteraction(behaviorWorld, progress, { type: "drop" });
+        const picked = action.kind === "operate" ? {ok:true,state:dropped.ok ? dropped.state : progress} : reduceInteraction(behaviorWorld, dropped.ok ? dropped.state : progress, selectInteractionSourceCommand(behaviorWorld,action.toolId));
         if (!picked.ok) continue;
         const used = reduceInteraction(behaviorWorld, picked.state, { type: "perform", actionId: action.id });
         if (!used.ok) continue;
@@ -481,7 +481,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     entity.sourceLayer = { x: entity.x, y: entity.y, width: entity.width, height: entity.height };
   }
   try { await prepareMovingSourceArt(source, entities.filter(entity => movingBehaviorIds.has(entity.id)), options.segmentation, signal, options.transport, inputKind); }
-  catch(error) { if(error instanceof MovableArtworkReviewError)return reject(error.message); throw error; }
+  catch(error) { if(error instanceof MovableArtworkReviewError)return reject(error.message, error.objectId); throw error; }
   world.interactions = applyPlannedInteractions(world, plan.interactions, plan.requiredInteractionIds).interactions;
   const placement = setupFeedback(world);
   if (placement.errors.length) return reject(placement.errors.join(" "));

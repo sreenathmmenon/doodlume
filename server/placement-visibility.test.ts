@@ -94,3 +94,25 @@ test("retryable visibility admission still checks moves reached after a losing a
   validateInteractions(world);
   await assert.rejects(validateGeneratedPlacementVisibility(world),/place-mat would hide 100% of Piece/);
 });
+
+
+test("visibility traversal executes a fixed-source transfer before its dependent placement",async()=>{
+  const world=await fixture();
+  Object.assign(world.entities[0],{x:100,y:100});
+  Object.assign(world.interactions!.objects[0],{carryable:false,usableInPlace:true,resource:{type:"water",initial:2,capacity:2}});
+  world.interactions!.objects[2].resource={type:"water",initial:0,capacity:2};
+  world.interactions!.actions[0]={id:"place-piece",kind:"transfer",label:"Supply receiver",toolId:"piece",targetId:"anchor",amount:1};
+  validateInteractions(world);
+  await assert.rejects(validateGeneratedPlacementVisibility(world),/place-mat would hide 100% of Piece/);
+});
+
+
+test("directly operating a stationary object still checks its resulting occlusion",async()=>{
+  const world=await fixture();
+  world.interactions!.objects.find(object=>object.entityId==="mat")!.carryable=false;
+  Object.assign(world.interactions!.actions[1],{kind:"operate",toolId:"mat",targetId:"mat"});
+  validateInteractions(world);
+  await assert.rejects(validateGeneratedPlacementVisibility(world),/place-mat would hide 100% of Piece/);
+  world.interactions!.objects.find(object=>object.entityId==="mat")!.layer="surface";
+  await validateGeneratedPlacementVisibility(world);
+});

@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { MAX_WORLD_ARTWORK_PIXELS } from "../shared/artwork-validation.js";
 import { emptyPlayState, type PlayState, type WorldDefinition, type WorldEntity } from "../shared/world.js";
-import { interactionEffects, reduceInteraction } from "../shared/interactions.js";
+import { interactionEffects, reduceInteraction, selectInteractionSourceCommand } from "../shared/interactions.js";
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../shared/source-scenery.js";
 import { ModelPlanError } from "./model.js";
 
@@ -14,7 +14,7 @@ type Placed = {entity:WorldEntity; x:number; y:number; width:number; height:numb
 export async function validateGeneratedPlacementVisibility(world: WorldDefinition): Promise<void> {
   const plan=world.interactions;
   if (!plan?.actions.some(action=>action.effects?.some(effect=>effect.kind==="moveObject"))) return;
-  const protectedIds=new Set([...plan.objects.filter(object=>object.carryable).map(object=>object.entityId), ...(world.goalRules?.requiredResourceIds??[])]);
+  const protectedIds=new Set([...plan.objects.filter(object=>object.carryable||object.usableInPlace).map(object=>object.entityId), ...plan.actions.filter(action=>action.kind==="operate").map(action=>action.toolId), ...(world.goalRules?.requiredResourceIds??[])]);
   const required=new Set([...(world.goalRules?.requiredInteractionIds??[]),
     ...(world.goalRules?.requiredChoiceGroupIds??[]).flatMap(id=>plan.choiceGroups?.find(group=>group.id===id)?.actionIds??[])]);
   const include=(id:string)=>{
@@ -86,8 +86,8 @@ export async function validateGeneratedPlacementVisibility(world: WorldDefinitio
   const frontier=[emptyPlayState()],seen=new Set([""]);
   for(let head=0;head<frontier.length;head++)for(const action of plan.actions){
     const state=frontier[head];if(state.interactions?.completed.includes(action.id))continue;
-    const dropped=reduceInteraction(world,state,{type:"drop"});
-    const picked=reduceInteraction(world,dropped.ok?dropped.state:state,{type:"pickup",entityId:action.toolId});
+    const dropped=action.kind==="operate"?{ok:true,state}:reduceInteraction(world,state,{type:"drop"});
+    const picked = action.kind === "operate" ? {ok:true,state:dropped.ok?dropped.state:state} : reduceInteraction(world, dropped.ok?dropped.state:state, selectInteractionSourceCommand(world,action.toolId));
     if(!picked.ok)continue;
     const performed=reduceInteraction(world,picked.state,{type:"perform",actionId:action.id});
     if(!performed.ok)continue;

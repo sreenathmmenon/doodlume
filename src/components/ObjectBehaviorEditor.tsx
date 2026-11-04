@@ -7,7 +7,7 @@ import "./object-behavior-editor.css";
 
 interface AbilityDraft {
   targetId: string; behavior: string; label: string; resourceType: string;
-  amount: number; supply: number; capacity: number;
+  amount: number; supply: number; capacity: number; useInPlace?: boolean;
   destination?: {x:number;y:number}; prerequisites: string[]; resourcePrerequisites?: string[]; alternativeTo?: string; dirty: boolean;
 }
 const abilityDrafts = new Map<string, AbilityDraft>();
@@ -35,39 +35,47 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   const cacheKey = `${world.id}:${world.revision}:${item.id}`;
   const draft = abilityDrafts.get(cacheKey);
   const [targetId, setTargetId] = useState(draft?.targetId ?? "");
-  const [behavior, setBehavior] = useState(draft?.behavior ?? "transfer");
   const [label, setLabel] = useState(draft?.label ?? "");
   const [resourceType, setResourceType] = useState(() => draft?.resourceType ?? plan?.objects.find(object => object.entityId === item.id)?.resource?.type ?? "energy");
   const [amount, setAmount] = useState(draft?.amount ?? 1);
   const [supply, setSupply] = useState(draft?.supply ?? 1);
   const [capacity, setCapacity] = useState(draft?.capacity ?? 1);
+  const canCarry = !item.artSource || !world.entities.some(isSourceBackdrop) || Boolean(item.sourceLayer && item.art);
+  const existingSource = plan?.objects.find(object => object.entityId === item.id);
+  const hasOperation = Boolean(plan?.actions.some(action => action.toolId === item.id && action.kind === "operate"));
+  const defaultBehavior = movementMode(world) !== "discover" && (!canCarry || hasOperation) ? "" : "transfer";
+  const [behavior, setBehavior] = useState(draft?.behavior ?? defaultBehavior);
+  const initialUseInPlace = existingSource?.usableInPlace ?? (hasOperation || !canCarry);
+  const [useInPlace, setUseInPlace] = useState(draft?.useInPlace ?? initialUseInPlace);
   const [destination, setDestination] = useState<{x: number; y: number} | undefined>(draft?.destination);
   const [prerequisites, setPrerequisites] = useState<string[]>(draft?.prerequisites ?? []);
   const [resourcePrerequisites, setResourcePrerequisites] = useState<string[]>(draft?.resourcePrerequisites ?? []);
   const [alternativeTo, setAlternativeTo] = useState(draft?.alternativeTo ?? "");
   const originalResource = plan?.objects.find(object => object.entityId === item.id)?.resource?.type ?? "energy";
-  const dirty = Boolean(alternativeTo || targetId || label.trim() || destination || prerequisites.length || resourcePrerequisites.length || behavior !== "transfer" || resourceType !== originalResource || amount !== 1 || supply !== 1 || capacity !== 1);
+  const dirty = Boolean((!plan?.actions.some(action => action.toolId === item.id) && useInPlace !== initialUseInPlace) || alternativeTo || targetId || label.trim() || destination || prerequisites.length || resourcePrerequisites.length || behavior !== defaultBehavior || resourceType !== originalResource || amount !== 1 || supply !== 1 || capacity !== 1);
   useEffect(() => {
-    abilityDrafts.set(cacheKey, {targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, dirty});
+    abilityDrafts.set(cacheKey, {targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, useInPlace, dirty});
     const prefix = `${world.id}:${world.revision}:`;
     onDraftChange?.([...abilityDrafts].some(([key, value]) => key.startsWith(prefix) && value.dirty));
-  }, [cacheKey, targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, dirty, onDraftChange, world.id, world.revision]);
-  const movesObject = behavior === "move" || behavior === "attach-move";
+  }, [cacheKey, targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, useInPlace, dirty, onDraftChange, world.id, world.revision]);
+  const operates = behavior.startsWith("operate-");
+  const effectBehavior = operates ? behavior.slice(8) : behavior;
+  const movesObject = effectBehavior === "move" || effectBehavior === "attach-move";
   const [error, setError] = useState("");
   const sourceResource = plan?.objects.find(object => object.entityId === item.id)?.resource;
   const targetResource = plan?.objects.find(object => object.entityId === targetId)?.resource;
   const actions = plan?.actions.filter(a => a.toolId === item.id) ?? [];
   const mode = movementMode(world);
   if (item.kind !== "decoration") return null;
-  // Existing embedded scenery must first be separated by the source preparation pipeline.
-  const canCarry = !item.artSource || !world.entities.some(isSourceBackdrop) || Boolean(item.sourceLayer);
-  if (!canCarry) return null;
-  if (!item.art) return onDraw ? <button className="secondary-button" onClick={onDraw}>Draw this object</button> : null;
+  // Stationary sources can use embedded art without moving it out of the scene.
+  const embeddedArtwork = Boolean(item.artSource) && world.entities.some(entity => isSourceBackdrop(entity) && Boolean(entity.art));
+  if (!item.art && !embeddedArtwork) return onDraw ? <button className="secondary-button" onClick={onDraw}>Draw this object</button> : null;
   const openingTargets = world.entities.filter(e => e.kind === "gate" && (!e.artSource || Boolean(e.sourceLayer) || (world.entities.some(isSourceAlignedScenery) && Boolean(e.art))));
-  const movingTargets = world.entities.filter(e => e.kind === "decoration" && e.art && (!e.artSource || e.sourceLayer) && !isSourceBackdrop(e) && !plan?.objects.some(o => o.entityId === e.id && o.carryable));
-  const targets = world.entities.filter(e => e.id !== item.id &&
-    (behavior === "place" ? !isSourceBackdrop(e) : movesObject ? movingTargets.some(target => target.id === e.id) : behavior === "open" ? openingTargets.some(gate => gate.id === e.id) : behavior === "jump" || behavior === "speed" ? e.kind === "player" : !isSourceBackdrop(e) && e.kind !== "terrain" && e.kind !== "bridge"));
+  const movingTargets = world.entities.filter(e => e.kind === "decoration" && e.art && (!e.artSource || e.sourceLayer) && !isSourceBackdrop(e) && !plan?.objects.some(o => o.entityId === e.id && (o.carryable || o.usableInPlace)));
+  const targets = world.entities.filter(e => (e.id !== item.id || operates && movesObject) &&
+    (behavior === "place" ? !isSourceBackdrop(e) : movesObject ? movingTargets.some(target => target.id === e.id) : effectBehavior === "open" ? openingTargets.some(gate => gate.id === e.id) : effectBehavior === "jump" || effectBehavior === "speed" ? e.kind === "player" : !isSourceBackdrop(e) && e.kind !== "terrain" && e.kind !== "bridge"));
   function addAction() {
+    if (!behavior) { setError("Choose an ability for this object."); return; }
     if (!targets.some(e => e.id === targetId)) { setError("Choose what your object works with."); return; }
     if (movesObject && !destination) { setError("Choose where the object should go on the scene."); return; }
     if (!label.trim()) { setError("Name the action players will take."); return; }
@@ -86,9 +94,18 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       setError("This object would extend beyond the scene. Choose another target."); return;
     }
     const next: InteractionPlan = structuredClone(plan ?? { version: 1, objects: [], actions: [] });
-    const source = next.objects.find(o => o.entityId === item.id) ?? { entityId: item.id, carryable: true };
+    const source = next.objects.find(o => o.entityId === item.id) ?? { entityId: item.id };
     const target = next.objects.find(o => o.entityId === targetId) ?? { entityId: targetId };
-    source.carryable = true;
+    const stationary = Boolean(source.usableInPlace) || behavior === "transfer" && (hasOperation || (!actions.length && useInPlace));
+    if (operates) {
+      if (source.carryable) { setError("This object is carried. Direct operation needs an object that stays in the scene."); return; }
+    } else {
+      if (hasOperation && (behavior !== "transfer" || mode !== "discover")) { setError("This controller stays in place. Add another operation, or a resource transfer used in place in a discovery game."); return; }
+      if (stationary && behavior !== "transfer") { setError("This source stays in place. Choose an operation or Transfer a resource."); return; }
+      if (stationary) { source.usableInPlace = true; delete source.carryable; }
+      else { source.carryable = true; delete source.usableInPlace; }
+      if (!stationary && !canCarry) { setError("This artwork stays in the scene. Choose an operation or a transfer used in place."); return; }
+    }
     if (behavior === "transfer") {
       if ([source, target].some(o => o.resource && o.resource.type !== resourceType)) {
         setError("These objects already hold a different resource. Use the same resource name."); return;
@@ -105,12 +122,12 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     }
     if (!next.objects.some(o => o.entityId === source.entityId)) next.objects.push(source);
     if (!next.objects.some(o => o.entityId === target.entityId)) next.objects.push(target);
-    const base = { id: `action-${crypto.randomUUID()}`, label: label.trim(), toolId: item.id, targetId, ...(prerequisites.length ? {requires: prerequisites.filter(id => next.actions.some(action => action.id === id))} : {}), ...(resourcePrerequisites.length ? {requiresResourceIds:resourcePrerequisites.filter(id=>next.objects.some(object=>object.entityId===id && object.resource))} : {}) };
+    const base = { id: `action-${crypto.randomUUID()}`, label: label.trim(), toolId: item.id, targetId: operates ? item.id : targetId, ...(prerequisites.length ? {requires: prerequisites.filter(id => next.actions.some(action => action.id === id))} : {}), ...(resourcePrerequisites.length ? {requiresResourceIds:resourcePrerequisites.filter(id=>next.objects.some(object=>object.entityId===id && object.resource))} : {}) };
     const action: InteractionAction = behavior === "transfer" ? { ...base, kind: "transfer", amount } :
       behavior === "place" ? { ...base, kind: "place", effects: [{kind: "moveObject", entityId: item.id, ...placement, durationMs: 900}] } :
-      movesObject ? { ...base, kind: behavior === "attach-move" ? "attach" : "use", effects: [{ kind: "moveObject", entityId: targetId, x: destination!.x, y: destination!.y, durationMs: 1600 }] } :
-      behavior === "open" ? { ...base, kind: "use", effects: [{ kind: "openGate", entityId: targetId }] } :
-      { ...base, kind: "attach", effects: [{ kind: behavior === "jump" ? "jumpBoost" : "moveSpeedBoost", multiplier: 1.5 }] };
+      movesObject ? { ...base, kind: operates ? "operate" : behavior === "attach-move" ? "attach" : "use", effects: [{ kind: "moveObject", entityId: targetId, x: destination!.x, y: destination!.y, durationMs: 1600 }] } :
+      effectBehavior === "open" ? { ...base, kind: operates ? "operate" : "use", effects: [{ kind: "openGate", entityId: targetId }] } :
+      { ...base, kind: operates ? "operate" : "attach", effects: [{ kind: effectBehavior === "jump" ? "jumpBoost" : "moveSpeedBoost", multiplier: 1.5 }] };
     next.actions.push(action);
     let requirements: Pick<GoalRules, "requiredInteractionIds" | "requiredChoiceGroupIds"> | undefined;
     if (alternativeTo) {
@@ -136,7 +153,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
           ? [...new Set([...requiredGroups, group.id])] : [...requiredGroups],
       };
     }
-    if (behavior === "place" || alternativeTo) {
+    {
       try { validateInteractions({...world, interactions: next, goalRules: {
         ...(world.goalRules ?? {requiredCollectedIds: [], requiredActivatedIds: []}), ...requirements,
       }}); }
@@ -152,7 +169,8 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     }
     onChange(next, requirements);
     setAlternativeTo("");
-    setTargetId(""); setBehavior("transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
+    setTargetId(""); setBehavior(mode !== "discover" && (!canCarry || hasOperation || operates) ? "" : "transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
+    setUseInPlace(Boolean(source.usableInPlace));
     setAmount(1); setSupply(1); setCapacity(1); setPrerequisites([]); setResourcePrerequisites([]); setDestination(undefined); setError("");
   }
   function removeAction(id: string) {
@@ -161,16 +179,31 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     if (plan?.actions.some(a => a.requires?.includes(id))) { setError("Another action needs this one. Remove that action first."); return; }
     const remaining = plan?.actions.filter(a => a.id !== id) ?? [];
     const requiredResources = world.goalRules?.requiredResourceIds ?? [];
+    const remainingObjects = plan?.objects.map(object => {
+      if (!object.usableInPlace || remaining.some(action => action.toolId === object.entityId && action.kind === "transfer")) return object;
+      const receiver = {...object}; delete receiver.usableInPlace; return receiver;
+    }) ?? [];
     if (!remaining.length) {
       onChange((mode === "discover" && !world.entities.some(e => e.kind === "goal")) || requiredResources.length
-        ? { ...plan!, actions: [] } : undefined);
+        ? { ...plan!, objects: remainingObjects, actions: [] } : undefined);
       return;
     }
     const used = new Set([
       ...requiredResources,
       ...remaining.flatMap(a => [a.toolId, a.targetId, ...(a.requiresResourceIds ?? []), ...(a.effects ?? []).flatMap(effect => "entityId" in effect ? [effect.entityId] : [])]),
     ]);
-    onChange({ ...plan!, actions: remaining, objects: plan!.objects.filter(o => used.has(o.entityId)) });
+    onChange({ ...plan!, actions: remaining, objects: remainingObjects.filter(o => used.has(o.entityId)) });
+  }
+  function changeSourceHandling(stationary: boolean) {
+    if (!plan) return;
+    if (!stationary && !canCarry) { setError("Separate this artwork before making it carryable."); return; }
+    const next = structuredClone(plan), object = next.objects.find(object => object.entityId === item.id);
+    if (!object) return;
+    if (stationary) { object.usableInPlace = true; delete object.carryable; }
+    else { object.carryable = true; delete object.usableInPlace; }
+    try { validateInteractions({...world, interactions: next}); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "This source cannot be changed."); return; }
+    setUseInPlace(stationary); setError(""); onChange(next);
   }
   function changeLayer(layer: "object" | "surface") {
     if (!plan) return;
@@ -187,6 +220,12 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     {actions.length > 0 && <ul>{actions.map(a => <li key={a.id}><strong>{a.label}</strong><span>{world.entities.find(e => e.id === a.targetId)?.label ?? "Object"}</span><button className="text-button" aria-label={`Remove ability ${a.label}`} onClick={() => removeAction(a.id)}>Remove</button></li>)}</ul>}
     {plan?.objects.some(object => object.entityId === item.id) && <details className="purpose-sequence">
       <summary>Arrangement</summary>
+      {mode === "discover" && existingSource?.resource && actions.some(action => action.kind === "transfer") && <label>Source handling
+        <select aria-label="Source handling" value={existingSource.usableInPlace ? "fixed" : "carry"} onChange={event => changeSourceHandling(event.target.value === "fixed")}>
+          <option value="carry" disabled={!canCarry || hasOperation}>Carry</option><option value="fixed">Use in place</option>
+        </select>
+        <span>{existingSource.usableInPlace ? "Select this source, then choose where its resource goes." : "Take this source to use its resource."}</span>
+      </label>}
       <label>Arrangement layer<select aria-label="Arrangement layer" value={plan.objects.find(object => object.entityId === item.id)?.layer ?? "object"} onChange={event => changeLayer(event.target.value as "object" | "surface")}>
         <option value="object">Object</option>
         <option value="surface">Under other objects</option>
@@ -195,15 +234,22 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     <details className="purpose-new" open={!actions.length}><summary>{actions.length ? "Add another ability" : "New ability"}</summary>
     <label>What can it do?
       <select aria-label="Object ability" value={behavior} onChange={e => { onCancelDestination?.(); setBehavior(e.target.value); setTargetId(""); setDestination(undefined); setError(""); }}>
-        <option value="transfer">Transfer a resource</option>
-        <option value="place">Place this object</option>
-        {movingTargets.length > 0 && <><option value="move">Make an object move</option><option value="attach-move">Fit a part to make it move</option></>}
-        {mode !== "discover" && openingTargets.length > 0 && <option value="open">Open a gate</option>}
-        {mode === "platform" && <option value="jump">Attach · jump higher</option>}
-        {mode !== "discover" && <option value="speed">Attach · move faster</option>}
+        {!defaultBehavior && <option value="">Choose an ability…</option>}
+        <option value="transfer" disabled={!canCarry && mode !== "discover" || hasOperation && mode !== "discover"}>Transfer a resource</option>
+        <option value="place" disabled={!canCarry || hasOperation || Boolean(existingSource?.usableInPlace)}>Place this object</option>
+        {!existingSource?.carryable && <optgroup label="Operate this object">
+          {movingTargets.length > 0 && <option value="operate-move">Operate → move an object</option>}
+          {mode !== "discover" && openingTargets.length > 0 && <option value="operate-open">Operate → open a gate</option>}
+          {mode === "platform" && <option value="operate-jump">Operate → jump higher</option>}
+          {mode !== "discover" && <option value="operate-speed">Operate → move faster</option>}
+        </optgroup>}
+        {canCarry && !hasOperation && !existingSource?.usableInPlace && movingTargets.length > 0 && <><option value="move">Make an object move</option><option value="attach-move">Fit a part to make it move</option></>}
+        {canCarry && !hasOperation && !existingSource?.usableInPlace && mode !== "discover" && openingTargets.length > 0 && <option value="open">Open a gate</option>}
+        {canCarry && !hasOperation && !existingSource?.usableInPlace && mode === "platform" && <option value="jump">Attach · jump higher</option>}
+        {canCarry && !hasOperation && !existingSource?.usableInPlace && mode !== "discover" && <option value="speed">Attach · move faster</option>}
       </select>
     </label>
-    <label>{behavior === "place" ? "Place at" : "Works with"}
+    <label>{behavior === "place" ? "Place at" : operates ? effectBehavior === "open" ? "Gate to open" : movesObject ? "Object to move" : "Character" : "Works with"}
       <select aria-label="Action target" value={targetId} onChange={e => { onCancelDestination?.(); setTargetId(e.target.value); setDestination(undefined); }}>
         <option value="">Choose an object…</option>
         {targets.map(e => <option key={e.id} value={e.id}>{e.label || e.kind}</option>)}
@@ -216,6 +262,11 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       }}>{destination ? "Change destination on scene" : "Choose destination on scene"}</button>
       {destination && <span role="status">Destination set</span>}
     </div>}
+    {behavior === "transfer" && mode === "discover" && !actions.length && <label>Source handling
+      <select aria-label="New source handling" value={useInPlace ? "fixed" : "carry"} onChange={event => setUseInPlace(event.target.value === "fixed")}>
+        <option value="carry" disabled={!canCarry || hasOperation}>Carry</option><option value="fixed">Use in place</option>
+      </select>
+    </label>}
     {behavior === "transfer" && <div className="purpose-resource">
       <label>Resource<input aria-label="Resource name" maxLength={60} value={resourceType} onChange={e => setResourceType(e.target.value)} /></label>
       <label>Amount<input aria-label="Transfer amount" type="number" min="1" max="10000" value={amount} onChange={e => { const next = Number(e.target.value); setAmount(next); setSupply(value => Math.max(value, next)); setCapacity(value => Math.max(value, next)); }} /></label>
