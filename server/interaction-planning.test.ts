@@ -5,9 +5,10 @@ import { prepareSourceInteractionReview, readGameplayPlan, gameplaySchema } from
 import { readPlannedInteractions, interactionsSchema, interactionInstructions, plannedInteractionDiagnostics, applyPlannedInteractions, validatePlannedInteractionSources } from "./interaction-planning.js";
 import { interpretDrawing, RecognitionReviewError } from "./interpret.js";
 import { modelConnection } from "./provider.js";
-import { MalformedModelJSONError } from "./model.js";
+import { ModelPlanError, MalformedModelJSONError } from "./model.js";
 import { imageData } from "./images.js";
 import { interactionEffects, reduceInteraction, selectInteractionSourceCommand } from "../shared/interactions.js";
+import { validateGeneratedPlacementVisibility } from "./placement-visibility.js";
 import { emptyPlayState, goalProgress, type WorldDefinition } from "../shared/world.js";
 
 const connection = modelConnection({ MODEL_PROVIDER: "meta", MODEL_API_KEY: "synthetic-test-only" });
@@ -783,4 +784,121 @@ test("misnested gameplay fields name their exact paths without promoting or disc
   assert.deepEqual(world.goalRules?.requiredInteractionIds,["supply"]);
   // Even optional requirements cannot silently disappear into a valid interaction object.
   assert.throws(()=>readGameplayPlan({...rejected.gameplay,reason:"A valid task",path:[{x:1,y:1,label:"a"},{x:2,y:2,label:"b"},{x:3,y:3,label:"c"}]}),/Wrong JSON nesting/);
+});
+
+// Minimized from the fresh staged photo responses: an arrangement attempted
+// to move two separately carried objects in one place action, then repeated it.
+test("multi-object place failures report every affected action without repairing model data",()=>{
+  const move=(entityId:string)=>({kind:"moveObject",entityId,destinationId:"surface",durationMs:700});
+  const plan={version:1,objects:[{entityId:"left",carryable:true},{entityId:"right",carryable:true},{entityId:"surface",carryable:false}],actions:[
+    {id:"center_pair",kind:"place",label:"Center pair",toolId:"left",targetId:"surface",effects:[move("left"),move("right")]},
+    {id:"arrange_pair",kind:"place",label:"Arrange pair",toolId:"right",targetId:"surface",effects:[move("right"),move("left")]},
+  ]};
+  const original=JSON.stringify(plan);
+  assert.throws(()=>readPlannedInteractions(plan),error=>{
+    const message=(error as Error).message;
+    assert.match(message,/Action center_pair: place requires exactly one moveObject/);
+    assert.match(message,/Action arrange_pair: place requires exactly one moveObject/);
+    assert.match(message,/entityId=toolId and destinationId=targetId/);
+    assert.match(message,/separate.*place actions/);
+    assert.ok(message.length<=1500);
+    return true;
+  });
+  assert.equal(JSON.stringify(plan),original);
+  plan.actions[0].effects=[move("left")];plan.actions[1].effects=[move("right")];
+  assert.equal(readPlannedInteractions(plan)?.actions.length,2);
+});
+
+test("interaction structural diagnostics accumulate independent fields and references within bounds",()=>{
+  const plan={version:1,objects:[{entityId:"prop",carryable:"yes"},{entityId:"surface"}],actions:[
+    {id:"arrange",kind:"place",label:"",toolId:"prop",targetId:"surface",requires:["missing"],effects:[{kind:"moveObject",entityId:"prop",destinationId:"elsewhere",durationMs:1}]},
+    {id:"operate",kind:"operate",label:"Operate",toolId:"missing",targetId:"missing"},
+  ]};
+  assert.throws(()=>readPlannedInteractions(plan),error=>{
+    const message=(error as Error).message;
+    for(const part of [/objects\[0\].carryable/,/arrange.label/,/arrange.requires.*missing/,/place requires exactly one/,/durationMs/,/operate.*no supported visible effect/,/missing.*declared in interactions.objects/])assert.match(message,part);
+    assert.ok(message.length<=1500);return true;
+  });
+  assert.throws(()=>readPlannedInteractions({version:1,objects:[null],actions:[null]}),/objects\[0\].*declaration[\s\S]*actions\[0\].*action object/);
+});
+
+test("generated action schemas constrain place effects while retaining transfer capabilities",()=>{
+  const variants=(interactionsSchema.anyOf[1] as any).properties.actions.items.anyOf;
+  const place=variants.find((variant:any)=>variant.properties.kind.const==="place");
+  assert.equal(place.properties.effects.minItems,1);assert.equal(place.properties.effects.maxItems,1);
+  for(const shape of place.properties.effects.items.anyOf)assert.equal(shape.properties.kind.const,"moveObject");
+  const other=variants.find((variant:any)=>variant.properties.kind.enum);
+  assert.deepEqual(other.properties.kind.enum,["attach","use","operate"]);
+  assert.equal(other.properties.effects.minItems,1);assert.equal(other.properties.effects.maxItems,4);
+  const transfer=variants.find((variant:any)=>variant.properties.kind.const==="transfer");
+  assert.equal(transfer.properties.effects.maxItems,4);
+  assert.equal(transfer.properties.effects.minItems,undefined);
+  assert.equal(readPlannedInteractions({version:1,objects:[{entityId:"source",carryable:true,resource:{type:"water",capacity:1,initial:1}},{entityId:"receiver",resource:{type:"water",capacity:1,initial:0}}],actions:[{id:"fill",kind:"transfer",label:"Fill",toolId:"source",targetId:"receiver",amount:1,effects:[{kind:"jumpBoost",multiplier:1.5}]}]})?.actions[0].effects?.length,1);
+});
+
+test("malformed action kind stays a typed correction diagnostic without coercing model objects",()=>{
+  const plan={version:1,objects:[{entityId:"source"},{entityId:"target"}],actions:[{id:"act",kind:{toString:null},label:"Act",toolId:"source",targetId:"target"}]};
+  assert.throws(()=>readPlannedInteractions(plan),error=>error instanceof ModelPlanError&&/Action act.kind/.test(error.message));
+});
+
+async function anchoredPlacementFixture(){
+  const art=imageData(await sharp({create:{width:40,height:40,channels:4,background:"#b85a32"}}).png().toBuffer());
+  const world:WorldDefinition={id:"inset-fixture",name:"Inset fixture",description:"Synthetic placement contract",theme:"grove",source:"manual",sourceImage:"",revision:1,width:400,height:300,
+    gameplay:{movement:"discover",objectiveTitle:"Arrange",instructions:"Arrange the pieces on the surface"},
+    entities:[{id:"first",kind:"decoration",label:"First",x:0,y:0,width:40,height:40,art},
+      {id:"second",kind:"decoration",label:"Second",x:50,y:0,width:40,height:40,art},
+      {id:"surface",kind:"decoration",label:"Surface",x:100,y:100,width:200,height:150,art}]};
+  const plan={version:1,objects:[{entityId:"first",carryable:true},{entityId:"second",carryable:true},{entityId:"surface",layer:"surface"}],actions:[
+    {id:"arrange-first",kind:"place",label:"Place first at top left",toolId:"first",targetId:"surface",effects:[{kind:"moveObject",entityId:"first",destinationId:"surface",destinationAnchor:{x:0,y:0}}]},
+    {id:"arrange-second",kind:"place",label:"Place second at bottom right",toolId:"second",targetId:"surface",requires:["arrange-first"],effects:[{kind:"moveObject",entityId:"second",destinationId:"surface",destinationAnchor:{x:1,y:1}}]},
+  ]};
+  return {world,plan};
+}
+
+test("interior anchors arrange two source objects on one surface without center-stack occlusion",async()=>{
+  const {world,plan}=await anchoredPlacementFixture();
+  const compiled=applyPlannedInteractions(world,readPlannedInteractions(plan),["arrange-second"]);
+  const moves=compiled.interactions!.actions.map(action=>action.effects![0]);
+  assert.deepEqual(moves,[{kind:"moveObject",entityId:"first",x:100,y:100},{kind:"moveObject",entityId:"second",x:260,y:210}]);
+  await validateGeneratedPlacementVisibility(compiled);
+  let state=emptyPlayState();
+  for(const [entityId,actionId] of [["first","arrange-first"],["second","arrange-second"]]){
+    const picked=reduceInteraction(compiled,state,{type:"pickup",entityId});assert.equal(picked.ok,true);
+    const placed=reduceInteraction(compiled,picked.state,{type:"perform",actionId});assert.equal(placed.ok,true);state=placed.state;
+  }
+  assert.equal(goalProgress(compiled,state).ready,true);
+  assert.deepEqual(compiled.entities,world.entities,"Source sizes, artwork and original placements stay unchanged");
+  const centered=structuredClone(plan);
+  for(const action of centered.actions)action.effects[0].destinationAnchor={x:.5,y:.5};
+  const centerWorld=applyPlannedInteractions(world,readPlannedInteractions(centered),["arrange-second"]);
+  await assert.rejects(validateGeneratedPlacementVisibility(centerWorld),/hide 100% of First/);
+});
+
+test("anchor fractions preserve exact edge and fractional positions and reject oversized or invalid placements",async()=>{
+  const {world,plan}=await anchoredPlacementFixture();
+  plan.actions=plan.actions.slice(0,1);
+  for(const anchor of [{x:0,y:1},{x:1,y:0},{x:.25,y:.75}]){
+    plan.actions[0].effects[0].destinationAnchor=anchor;
+    const result=applyPlannedInteractions(world,readPlannedInteractions(plan),["arrange-first"]);
+    assert.deepEqual(result.interactions!.actions[0].effects![0],{kind:"moveObject",entityId:"first",x:100+160*anchor.x,y:100+110*anchor.y});
+  }
+  const oversized=structuredClone(world);oversized.entities[0].width=201;
+  assert.throws(()=>applyPlannedInteractions(oversized,readPlannedInteractions(plan),["arrange-first"]),/Action arrange-first: First cannot fit inside Surface.*without resizing/);
+  const outside=structuredClone(world);outside.entities[2].x=350;
+  assert.throws(()=>applyPlannedInteractions(outside,readPlannedInteractions(plan),["arrange-first"]),/cannot fit inside Surface without leaving the image/);
+  for(const anchor of [{x:NaN,y:0},{x:Infinity,y:0},{x:-.01,y:0},{x:0,y:1.01},{x:0},{x:0,y:0,z:1},null]){
+    const malformed=structuredClone(plan) as any;malformed.actions[0].effects[0].destinationAnchor=anchor;
+    assert.throws(()=>readPlannedInteractions(malformed),/destinationAnchor must contain only x\/y finite fractions/);
+  }
+  const conflicting=structuredClone(plan) as any;conflicting.actions[0].effects[0].destinationAlignment="center";
+  assert.throws(()=>readPlannedInteractions(conflicting),/cannot combine destinationAnchor with destinationAlignment/);
+  const shapes=(interactionsSchema.anyOf[1] as any).properties.actions.items.anyOf.find((variant:any)=>variant.properties.kind.const==="place").properties.effects.items.anyOf;
+  const anchored=shapes.find((shape:any)=>shape.properties.destinationAnchor),aligned=shapes.find((shape:any)=>shape.properties.destinationAlignment);
+  assert.ok(anchored.required.includes("destinationAnchor"));
+  assert.equal(anchored.properties.destinationAlignment,undefined);assert.equal(aligned.properties.destinationAnchor,undefined);
+  assert.equal(anchored.additionalProperties,false);assert.equal(aligned.additionalProperties,false);
+  const schema=anchored.properties.destinationAnchor;
+  assert.equal(schema.additionalProperties,false);assert.deepEqual(schema.required,["x","y"]);
+  for(const axis of ["x","y"]){assert.equal(schema.properties[axis].minimum,0);assert.equal(schema.properties[axis].maximum,1);}
+  assert.match(interactionInstructions,/available inset after subtracting the moved object size/);
 });

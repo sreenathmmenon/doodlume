@@ -9,6 +9,8 @@ export interface ModelConnection {
   endpoint: string;
   enforcedSchema: boolean;
   reserveRequest?: () => void;
+  /** Optional orchestration budget; absence preserves ordinary provider behavior. */
+  requestsRemaining?: () => number;
 }
 
 export function modelConnection(

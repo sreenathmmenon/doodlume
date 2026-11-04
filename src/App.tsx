@@ -95,6 +95,7 @@ import {
 import type { WorldTelemetry } from "./game/WorldScene";
 
 type Connection = {
+  hosted?: boolean;
   configured: boolean;
   provider: "meta" | "baseten" | "fireworks";
   label: string;
@@ -2156,6 +2157,7 @@ export default function App({ active = true }: { active?: boolean }) {
       )}
       {dialog === "phone" && (
         <PhonePairing
+          hosted={connection?.hosted}
           context={{ purpose: "create", name: "A new Doodlume world" }}
           onClose={() => setDialog("create")}
           onReceive={(image) => {

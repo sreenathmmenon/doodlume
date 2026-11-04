@@ -84,6 +84,14 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   const movingTargets = world.entities.filter(e => e.kind === "decoration" && e.art && (!e.artSource || e.sourceLayer) && !isSourceBackdrop(e) && !plan?.objects.some(o => o.entityId === e.id && (o.carryable || o.usableInPlace)));
   const targets = world.entities.filter(e => (e.id !== item.id || operates && movesObject) &&
     (behavior === "place" ? !isSourceBackdrop(e) : movesObject ? movingTargets.some(target => target.id === e.id) : effectBehavior === "open" ? openingTargets.some(gate => gate.id === e.id) : effectBehavior === "jump" || effectBehavior === "speed" ? e.kind === "player" : !isSourceBackdrop(e) && e.kind !== "terrain" && e.kind !== "bridge"));
+  function placementError(point: {x:number;y:number}, target: WorldEntity) {
+    if (item.width > target.width || item.height > target.height)
+      return `${item.label || "This object"} is too large to fit inside ${target.label || "this target"}. Choose another target.`;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < target.x || point.y < target.y ||
+        point.x + item.width > target.x + target.width || point.y + item.height > target.y + target.height)
+      return `Keep the whole object inside ${target.label || "the selected target"}. Choose another position.`;
+    return "";
+  }
   function addAction() {
     if (!behavior) { setError("Choose an ability for this object."); return; }
     if (!targets.some(e => e.id === targetId)) { setError("Choose what your object works with."); return; }
@@ -96,10 +104,14 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       setError("This part already has an attachment. Draw another part for a new ability."); return;
     }
     const placementTarget = targets.find(entity => entity.id === targetId)!;
-    const placement = {
+    const placement = behavior === "place" && destination ? destination : {
       x: placementTarget.x + (placementTarget.width - item.width) / 2,
       y: placementTarget.y + (placementTarget.height - item.height) / 2,
     };
+    if (behavior === "place" && destination) {
+      const issue = placementError(destination, placementTarget);
+      if (issue) { setError(issue); return; }
+    }
     if (behavior === "place" && (placement.x < 0 || placement.y < 0 || placement.x + item.width > world.width || placement.y + item.height > world.height)) {
       setError("This object would extend beyond the scene. Choose another target."); return;
     }
@@ -265,7 +277,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       </select>
     </label>
     <label>{behavior === "place" ? "Place at" : operates ? effectBehavior === "open" ? "Gate to open" : movesObject ? "Object to move" : "Character" : "Works with"}
-      <select aria-label="Action target" value={targetId} onChange={e => { onCancelDestination?.(); setTargetId(e.target.value); setDestination(undefined); }}>
+      <select aria-label="Action target" value={targetId} onChange={e => { onCancelDestination?.(); setTargetId(e.target.value); setDestination(undefined); setError(""); }}>
         <option value="">Choose an object…</option>
         {targets.map(e => <option key={e.id} value={e.id}>{e.label || e.kind}</option>)}
       </select>
@@ -276,6 +288,17 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
         if (target) onPickDestination?.(target, point => { setDestination(point); setError(""); });
       }}>{destination ? "Change destination on scene" : "Choose destination on scene"}</button>
       {destination && <span role="status">Destination set</span>}
+    </div>}
+    {behavior === "place" && onPickDestination && <div className="purpose-destination">
+      <button className="secondary-button" disabled={!targetId} onClick={() => {
+        const target = targets.find(entity => entity.id === targetId);
+        if (!target) return;
+        if (item.width > target.width || item.height > target.height) { setError(placementError({x:target.x,y:target.y}, target)); return; }
+        onPickDestination(item, point => { setDestination(point); setError(placementError(point, target)); });
+      }}>{destination ? "Change position on scene" : "Choose position on scene"}</button>
+      {destination && <><span role="status">{targets.some(target => target.id === targetId && !placementError(destination, target)) ? "Position set" : "Choose another position"}</span><button className="text-button" onClick={() => {
+        onCancelDestination?.(); setDestination(undefined); setError("");
+      }}>Use target center</button></>}
     </div>}
     {behavior === "transfer" && mode === "discover" && !actions.length && <label>Source handling
       <select aria-label="New source handling" value={useInPlace ? "fixed" : "carry"} onChange={event => setUseInPlace(event.target.value === "fixed")}>

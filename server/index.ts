@@ -22,6 +22,7 @@ import { closeLocalSegmentationWorkers, localSegmentationConfig } from "./local-
 import { installStudioFallback } from "./static-routing.js";
 import { installSourceRefinement } from "./source-refinement.js";
 import { installSourceScenery } from "./source-scenery-route.js";
+import { hostingConfig, installHostingBoundary } from "./hosting.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: process.env.DOODLUME_ENV_FILE || resolve(root, ".env.local") });
@@ -32,13 +33,14 @@ const maxRequests = Math.max(
   0,
   Math.min(200, Math.floor(Number(process.env.MAX_MODEL_REQUESTS ?? 20) || 0)),
 );
-const port = Number(process.env.API_PORT) || 8787;
+const hosting = hostingConfig(process.env);
+const {port} = hosting;
 let requests = 0,
   inFlight = false;
 function reserveRequest() {
   if (requests >= maxRequests)
     throw new InterpretationError(
-      "The local session model-call limit has been reached.",
+      "The studio's generation allowance has been reached.",
       429,
     );
   requests++;
@@ -52,27 +54,18 @@ const app = Fastify({ bodyLimit: 17_000_000, logger: false });
 app.addHook("onClose", async () => { closeLocalSegmentationWorkers(); });
 for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const)
   process.once(signal, () => { closeLocalSegmentationWorkers(); process.exit(code); });
-app.addHook("onRequest", async (request, reply) => {
-  const origin = request.headers.origin;
-  if (
-    origin &&
-    ![
-      `http://127.0.0.1:${port}`,
-      `http://localhost:${port}`,
-      "http://127.0.0.1:5173",
-      "http://localhost:5173",
-    ].includes(origin)
-  )
-    return reply.code(403).send({
-      error: "This local studio accepts requests from its own page only.",
-    });
-  const host = request.headers.host;
-  if (!host || !new RegExp(`^(127\\.0\\.0\\.1|localhost):${port}$`).test(host))
-    return reply.code(403).send({ error: "Use the local studio address." });
+installHostingBoundary(app, hosting);
+app.get('/healthz',async()=>({ok:true}));
+app.get('/readyz',async(_request,reply)=>{
+  const local=localSegmentationConfig(process.env);
+  const ready=existsSync(resolve(root,'dist/index.html'))&&Boolean(connection.apiKey)&&
+    (!hosting.publicOrigin || (local.configured && Boolean(process.env.LOCAL_LAMA_CHECKPOINT && existsSync(process.env.LOCAL_LAMA_CHECKPOINT))));
+  return reply.code(ready?200:503).header('Cache-Control','no-store').send({ready});
 });
 installSourceScenery(app);
 installSourceRefinement(app);
 app.get("/api/status", async () => ({
+  hosted: Boolean(hosting.publicOrigin),
   configured: Boolean(connection.apiKey),
   provider: connection.provider,
   label: connection.label,
@@ -99,7 +92,7 @@ for (const action of ["interpret", "amend"] as const)
   }>(`/api/${action}`, async (request, reply) => {
     if (!connection.apiKey)
       return reply.code(503).send({
-        error: `Add ${connection.credential} to .env.local and restart the studio to use ${connection.label}.`,
+        error: hosting.publicOrigin ? 'Creation is temporarily unavailable. Your saved worlds can still be played.' : `Add ${connection.credential} to .env.local and restart the studio to use ${connection.label}.`,
       });
     if (inFlight)
       return reply.code(429).send({
@@ -109,7 +102,7 @@ for (const action of ["interpret", "amend"] as const)
     if (requests >= maxRequests)
       return reply.code(429).send({
         error:
-          "The local session request limit has been reached. Your current world is safe.",
+          "The studio's generation allowance has been reached. Your current world is safe.",
       });
     const body = request.body;
     if (!body || typeof body !== "object")
@@ -220,7 +213,7 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 const dist = resolve(root, "dist");
-installCapture(app, dist, port);
+installCapture(app, dist, port, hosting.publicOrigin);
 if (existsSync(dist)) {
   await app.register(fastifyStatic, {
     root: dist,
@@ -236,7 +229,7 @@ if (existsSync(dist)) {
   });
   installStudioFallback(app);
 }
-await app.listen({ host: "127.0.0.1", port });
+await app.listen({ host: hosting.host, port });
 console.log(
-  `Doodlume API ready at http://127.0.0.1:${port} · ${connection.label} ${connection.apiKey ? "key configured" : "key needed"}`,
+  `Doodlume API ready at ${hosting.publicOrigin || `http://127.0.0.1:${port}`} · ${connection.label} ${connection.apiKey ? "key configured" : "key needed"}`,
 );

@@ -1,0 +1,19 @@
+# Allowlisted build context. No credentials, recordings, local data or Git history.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!index.html
+!tsconfig.json
+!vite.config.ts
+!src/
+!src/**
+!server/
+!server/**
+!shared/
+!shared/**
+!public/
+!public/**
+!scripts/
+!scripts/setup-container-runtime.sh
+!scripts/local-sam-worker.py

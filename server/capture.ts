@@ -270,6 +270,7 @@ export function installCapture(
   app: FastifyInstance,
   dist: string,
   port: number,
+  publicOrigin?: string,
 ) {
   const broker = new CaptureBroker();
   phoneRoutes(app, broker);
@@ -348,15 +349,15 @@ export function installCapture(
       if (typeof req.body?.network !== "boolean")
         throw new CaptureError("Choose how to connect your phone.", 400);
       // Wi-Fi listener starts only when the creator explicitly chooses it in the studio.
-      const ips = req.body.network ? await network() : [];
+      const ips = req.body.network && !publicOrigin ? await network() : [];
       let pair;
       try {
-        pair = broker.create(req.body.context, req.body.network);
+        pair = broker.create(req.body.context, req.body.network && !publicOrigin);
       } catch (e) {
         await stopIfIdle();
         throw e;
       }
-      const bases = req.body.network
+      const bases = publicOrigin ? [publicOrigin] : req.body.network
         ? ips.map((ip) => `http://${ip}:${gatewayPort}`)
         : [req.headers.origin ?? `http://127.0.0.1:${port}`];
       const links = await Promise.all(
@@ -380,7 +381,7 @@ export function installCapture(
         ownerToken: pair.ownerToken,
         expiresAt: pair.expiresAt,
         context: pair.context,
-        network: req.body.network,
+        network: req.body.network && !publicOrigin,
         links,
       };
     },

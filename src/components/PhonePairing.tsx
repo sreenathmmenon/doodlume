@@ -13,10 +13,12 @@ export function PhonePairing({
   context,
   onReceive,
   onClose,
+  hosted = false,
 }: {
   context: CaptureContext;
   onReceive: (image: string, context: CaptureContext) => void;
   onClose: () => void;
+  hosted?: boolean;
 }) {
   const [pair, setPair] = useState<PairingDetails | null>(null),
     [busy, setBusy] = useState(false),
@@ -139,38 +141,37 @@ export function PhonePairing({
             <span>paper → phone → your world</span>
           </div>
           <p>
-            Keep your phone and laptop on the same Wi-Fi. The connection accepts
-            one drawing and expires in ten minutes.
+            {hosted ? 'Scan a private link to send one drawing. It expires in ten minutes.' : 'Keep your phone and laptop on the same Wi-Fi. The connection accepts one drawing and expires in ten minutes.'}
           </p>
           <button
             className="primary-button"
             disabled={busy}
-            onClick={() => void connect(true)}
+            onClick={() => void connect(!hosted)}
           >
             {busy ? (
               <LoaderCircle size={17} className="spin" />
             ) : (
-              <Wifi size={17} />
+              hosted ? <Smartphone size={17} /> : <Wifi size={17} />
             )}
-            Connect on Wi-Fi
+            {hosted ? 'Connect your phone' : 'Connect on Wi-Fi'}
           </button>
-          <button
+          {!hosted && <button
             className="text-button"
             disabled={busy}
             onClick={() => void connect(false)}
           >
             Preview pairing on this computer
-          </button>
-          <p className="small-note">
+          </button>}
+          {!hosted && <p className="small-note">
             Wi-Fi mode opens a temporary drawing-only connection on this laptop.
             It closes when you finish or cancel; model access stays private.
-          </p>
+          </p>}
         </div>
       ) : (
         <div className="pair-connected">
           <span className="pair-target">
             <Smartphone size={15} />
-            {pair.network
+            {hosted || pair.network
               ? "Scan with your phone camera"
               : "Preview connection · this computer only"}
           </span>
@@ -242,7 +243,7 @@ export function PhonePairing({
               minute: "2-digit",
             })}
             .{" "}
-            {pair.network
+            {hosted ? 'Keep this window open while sending your drawing.' : pair.network
               ? "Keep this window open and both devices on the same Wi-Fi."
               : "For a physical phone, close this preview and choose Connect on Wi-Fi."}
           </p>

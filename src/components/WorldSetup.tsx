@@ -5,7 +5,7 @@ import { SourceOutlineEditor } from "./SourceOutlineEditor";
 import { prepareSourceArtwork } from "../lib/source-art";
 import { setupFeedback } from "../../shared/setup";
 import { validateRecognitionReview, type RecognitionReview } from "../../shared/recognition-review";
-import { validateWorld } from "../../shared/world";
+import { movementMode, validateWorld } from "../../shared/world";
 import "./WorldSetupRules.css";
 import "./WorldSetup.css";
 import type {
@@ -17,7 +17,7 @@ import type {
   WorldEntity,
 } from "../../shared/world";
 
-const roles: { kind: EntityKind; name: string; help: string }[] = [
+const baseRoles: { kind: EntityKind; name: string; help: string }[] = [
   {
     kind: "player",
     name: "Character",
@@ -115,7 +115,13 @@ export function WorldSetup({
           ? structuredClone(initial)
           : emptyWorld(image, inputKind, intent),
   );
-  const [tool, setTool] = useState<EntityKind>("player"),
+  const mode = movementMode(world);
+  const roles = baseRoles.map(role => mode === "discover" && role.kind === "decoration"
+    ? { ...role, name: "Object", help: "An object from your image for the game." }
+    : role.kind === "player" && mode !== "platform"
+      ? { ...role, help: mode === "roam" ? "The one you move around with." : "A character from your image." }
+      : role);
+  const [tool, setTool] = useState<EntityKind>(() => mode === "discover" ? "decoration" : "player"),
     [selected, setSelected] = useState(
       resume?.entities[0]?.id ||
         recovery?.issues.find(issue => issue.objectId)?.objectId ||

@@ -14,12 +14,15 @@ test('cancelling background repair terminates its process before freeing the nex
   const names=['LOCAL_SAM_PYTHON','LOCAL_SAM_CHECKPOINT','LOCAL_BACKGROUND_REPAIR'] as const;
   const saved=Object.fromEntries(names.map(name=>[name,process.env[name]]));
   process.env.LOCAL_SAM_PYTHON=executable;process.env.LOCAL_SAM_CHECKPOINT=executable;process.env.LOCAL_BACKGROUND_REPAIR='classical';
+  const controller=new AbortController(),reason=new DOMException('Creator closed the source review','AbortError');
+  let pending:Promise<unknown>|undefined;
   try{
     const source=await sharp({create:{width:20,height:20,channels:3,background:'#b8b9ba'}}).png().toBuffer();
-    const controller=new AbortController(),reason=new DOMException('Creator closed the source review','AbortError');
-    const pending=repairSourceBackgroundDetailed(source,source,controller.signal).then(()=>null,error=>error);
+    pending=repairSourceBackgroundDetailed(source,source,controller.signal).then(()=>null,error=>error);
     let pid=0;
-    for(let attempt=0;attempt<100&&!pid;attempt++){try{pid=Number(await readFile(pidFile,'utf8'));}catch{await new Promise(resolve=>setTimeout(resolve,10));}}
+    // Wait for actual readiness; a busy inference worker can delay process startup.
+    const readyDeadline=Date.now()+10_000;
+    while(!pid&&Date.now()<readyDeadline){try{pid=Number(await readFile(pidFile,'utf8'));}catch{await new Promise(resolve=>setTimeout(resolve,20));}}
     assert.ok(pid,'The actual child starts before cancellation.');
     controller.abort(reason);
     assert.equal(await pending,reason);
@@ -31,6 +34,8 @@ test('cancelling background repair terminates its process before freeing the nex
     await assert.rejects(repairSourceBackgroundDetailed(source,source,controller.signal),error=>error===reason);
     await assert.rejects(readFile(pidFile),{code:'ENOENT'},'An already cancelled request never starts a worker.');
   }finally{
+    controller.abort(reason);
+    await pending;
     for(const name of names){if(saved[name]===undefined)delete process.env[name];else process.env[name]=saved[name];}
     await rm(directory,{recursive:true,force:true});
   }
