@@ -78,6 +78,21 @@ The model returns structured data, not executable game code. The application che
 
 The interface uses **React and TypeScript**, gameplay uses **Phaser**, and the Node.js application runs on **Railway**. Additional adapters support direct Meta Muse Wonder or Muse Spark, direct SAM 3.1, and Muse Spark Open through Baseten. Those are integration options; the live demonstration uses the three-model pipeline above.
 
+## Models, API providers and deployment partners
+
+| Technology | Role in Doodlume | Usage |
+| --- | --- | --- |
+| **Meta Muse Spark Open** | Image understanding and structured gameplay planning | Active model in the live creation pipeline. |
+| **Fireworks AI** | Hosts Muse Spark Open and handles image-and-intent API requests | Active inference provider. Calls originate on the server; credentials stay off the browser. |
+| **Meta SAM 2.1 tiny** | Source-object masks and cutouts | Runs on the application server, with no remote segmentation API call. |
+| **LaMa** | Background reconstruction behind moving subjects | Separate non-Meta model running on the application server. |
+| **Railway** | Hosts the application, API server and local model workers | Primary public deployment. |
+| **Modal** | Hosted the containerized application and local model workers during deployment verification | Backup deployment documented in the [deployment record](docs/LIVE-DEPLOYMENT.md). It is not the inference API provider for the filmed Railway runs. |
+| **Baseten** | Alternative API adapter for Muse Spark Open | Implemented integration. The recorded access attempt returned HTTP 403, so no successful inference is claimed for that attempt. |
+| **Direct Meta Model API** | Alternative Muse Wonder/Muse Spark and SAM 3.1 request paths | Implemented options with separate access requirements, rather than additional models claimed to power the filmed run. |
+
+Provider selection is explicit. A failed request does not silently switch to another provider or billing account. **React, TypeScript and Phaser** provide the interface, shared world contracts and game runtime; they are application technologies rather than model inference services.
+
 ## Run locally
 
 Requires **Node.js 22.12 or newer** and credentials for a supported inference provider.
