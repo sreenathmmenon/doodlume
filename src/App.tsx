@@ -1359,10 +1359,7 @@ export default function App({ active = true, entry, onEntryConsumed }: { active?
             aria-label="Make your own game"
           >
             <div>
-              <h1>Make something only you could.</h1>
-              <p>
-                Start with a drawing or photo. Give it a reason to play.
-              </p>
+              <h1>Make your game.</h1>
             </div>
             <div className="creation-invitation-actions">
               <button
