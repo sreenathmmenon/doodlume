@@ -8,7 +8,7 @@ Simulated perspectives inspired by public work. The named people did not partici
 
 ## Brief
 
-Doodlume converts user drawings/photos into playable worlds. Audience: creators across ages, desktop hackathon review. Primary journey: create, review, play, alter same world, undo/save/reopen. Assess post-repair commit 2c0d3b9 against the original 26 findings and D1–D10 acceptance criteria. Preserve restrained neutral/cobalt UI, meaningful art, minimal copy, keyboard desktop controls; mobile optimization is explicitly deferred. User requests honest numeric ratings and no ungrounded deductions or predetermined perfect marks. Three generic interface corrections from this review are included in the final inspected build.
+Doodlume converts user drawings/photos into playable worlds. Audience: creators across ages, desktop product review. Primary journey: create, review, play, alter same world, undo/save/reopen. Assess post-repair commit 2c0d3b9 against the original 26 findings and D1–D10 acceptance criteria. Preserve restrained neutral/cobalt UI, meaningful art, minimal copy, keyboard desktop controls; mobile optimization is explicitly deferred. User requests honest numeric ratings and no ungrounded deductions or predetermined perfect marks. Three generic interface corrections from this review are included in the final inspected build.
 
 ## Execution
 

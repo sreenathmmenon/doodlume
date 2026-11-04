@@ -113,7 +113,7 @@ Each score is a provisional judgment for its stated inspected scope. Scores are 
 
 ## Limits and accountability
 
-- Same-family AI agents can share blind spots. No real UI/UX consultants, game designers or hackathon judges reviewed or endorsed this work.
+- Same-family AI agents can share blind spots. No real UI/UX consultants, game designers or external reviewers reviewed or endorsed this work.
 - This review freezes product revision 0a4e3e9. Decisions are recommended actions, not implemented repairs.
 - No fresh-generation sample, human age-band study, retention study, full screen-reader run, camera/perspective-photo test, storage-failure injection or broad hardware benchmark was performed. Mobile is deferred per user instruction.
 - The prior ten reviewers' narrow repair-scope 10 ratings should not be used as evidence that the overall product meets the requested commercial quality bar. Original records are preserved with a correction, not silently rewritten.

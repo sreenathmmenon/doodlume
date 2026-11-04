@@ -8,7 +8,7 @@ There is a cat on a rooftop, a ladder between buildings and a fish waiting at th
 
 Doodlume starts there. Bring a drawing or photograph, describe what you want to play, and turn it into a world you can enter. Then keep creating inside it.
 
-[Try Doodlume](https://doodlume-production-9df2.up.railway.app/)
+[Watch the demo](https://youtu.be/cUQJPewqZbI) · [Try Doodlume](https://doodlume-production-9df2.up.railway.app/)
 
 ## Give the creator somewhere to take the next idea
 

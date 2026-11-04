@@ -1,6 +1,6 @@
 # Doodlume quality floor
 
-The owner's current required target is 10/10 in every category, with9/10 the earlier minimum floor. A strong average cannot hide a weak category. Ratings describe an evidence-based product assessment, not an actual hackathon judge's score or a prediction of winning. Passing tests is one part of the evidence.
+The owner's current required target is 10/10 in every category, with9/10 the earlier minimum floor. A strong average cannot hide a weak category. Ratings describe an evidence-based product assessment, not an actual external reviewer's score or a prediction of winning. Passing tests is one part of the evidence.
 
 | Category | Evidence needed before assessing it in the 9 range |
 | --- | --- |

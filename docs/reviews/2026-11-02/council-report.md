@@ -8,7 +8,7 @@ Simulated specialist perspectives from25 separately delegated AI agents, not hum
 
 # Independent Doodlume critical review
 Frozen product revision: 0a4e3e9. No product changes during review.
-User goal: a commercially convincing drawing/photo-to-playable-game product with excellent desktop UI/UX, meaningful games, genuine source-driven creation, clear creative editing, and a compelling hackathon demonstration. Mobile improvements are deferred. Review actual quality, not merely whether old bug fixes passed. Do not infer that a working feature is enjoyable, exceptional or commercially validated.
+User goal: a commercially convincing drawing/photo-to-playable-game product with excellent desktop UI/UX, meaningful games, genuine source-driven creation, clear creative editing, and a compelling release demonstration. Mobile improvements are deferred. Review actual quality, not merely whether old bug fixes passed. Do not infer that a working feature is enjoyable, exceptional or commercially validated.
 
 25 separate simulated specialist perspectives: 23 UI/UX and 2 game design. These are AI agents, not human experts. All are from the same model family; this is structured adversarial analysis, not independent human validation.
 
@@ -133,7 +133,7 @@ Frozen revision 0a4e3e9. Twenty-five new role-specific agents performed a blind 
 
 ### Limitations
 
-- Same-family AI agents can share blind spots. No real UI/UX consultants, game designers or hackathon judges reviewed or endorsed this work.
+- Same-family AI agents can share blind spots. No real UI/UX consultants, game designers or external reviewers reviewed or endorsed this work.
 
 - This review freezes product revision 0a4e3e9. Decisions are recommended actions, not implemented repairs.
 

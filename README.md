@@ -10,7 +10,7 @@
 
 </div>
 
-**Review the project:** [Problem, originality and working proof](docs/REVIEW-EVIDENCE.md) · [Rubric and hands-on route](docs/JUDGING-GUIDE.md) · [Structured facts (JSON)](docs/PROJECT-FACTS.json)
+**Explore the product:** [Working examples and implementation](docs/REVIEW-EVIDENCE.md) · [Hands-on guide](docs/JUDGING-GUIDE.md) · [Technical facts (JSON)](docs/PROJECT-FACTS.json)
 
 A cat on a notebook page can become a character you control. A photograph can become a challenge built around the things in it. Draw a spring, give it an ability, and change how high your character can jump.
 
@@ -110,18 +110,11 @@ The interface uses **React and TypeScript**, gameplay uses **Phaser**, and the N
 
 Provider selection is explicit. A failed request does not silently switch to another provider or billing account. **React, TypeScript and Phaser** provide the interface, shared world contracts and game runtime; they are application technologies rather than model inference services.
 
-## For hackathon reviewers
+## See Doodlume in action
 
-Doodlume addresses **Build for Your World**: it gives people a way to turn their pictures and game ideas into interactive creations they can keep developing.
+[Watch the product demo](https://youtu.be/cUQJPewqZbI) to see drawing and photograph creation, a drawn ability changing gameplay, a connected rescue mission and saved progress. [Open the live product](https://doodlume-production-9df2.up.railway.app/) to try the examples or create your own world.
 
-| Judging criterion | Weight | What to look for |
-| --- | --- | --- |
-| Impact | 30% | A creator can start with a picture and continue building through drawing and editing. |
-| Use of Meta AI tooling | 25% | Muse connects image details to game rules; SAM separates original subjects for movement. |
-| Technical depth and execution | 20% | Validated world contracts, source-aligned artwork, interactions, undo and saved progress. |
-| Demo | 25% | Real creation, a drawn ability changing gameplay, photo interaction and save/reopen. |
-
-The [reviewer guide](docs/JUDGING-GUIDE.md) maps the rubric to code and hands-on examples. The [submission package](docs/SUBMISSION-PACKAGE.md) contains the current project description, Meta usage, partner feedback and contribution notes. [Watch the published product demo](https://youtu.be/cUQJPewqZbI), featuring drawing and photograph creation, a drawn ability changing gameplay, a connected rescue mission, saved progress and the model pipeline.
+The [hands-on guide](docs/JUDGING-GUIDE.md) connects the examples to their implementation. The [technical facts](docs/PROJECT-FACTS.json) describe the active model pipeline, supported capabilities and current limits.
 
 ## Where this can go next
 
@@ -193,4 +186,4 @@ Checks cover world and interaction contracts, source-art processing, provider re
 
 Doodlume creates editable 2D experiences within its movement, interaction and discovery systems. Unclear or obscured subjects can need creator correction, and generation time depends on the input and provider. Photo resource transfers change game quantities; they do not simulate physical liquid or plant growth. Saved worlds live in the browser's IndexedDB, with portable export and import for moving them between installations.
 
-Built by [Sreenath Menon](https://github.com/sreenathmmenon) for the Meta Global AI Developer Hackathon.
+Built by [Sreenath Menon](https://github.com/sreenathmmenon).

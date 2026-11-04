@@ -166,48 +166,6 @@
       "source_provenance": "AI-generated illustration with authored rules"
     }
   ],
-  "judging_criteria": [
-    {
-      "criterion": "Impact",
-      "weight_percent": 30,
-      "project_evidence": [
-        "source-to-play workflow",
-        "continued authoring without writing game code",
-        "save/reopen"
-      ],
-      "evidence_document": "docs/REVIEW-EVIDENCE.md"
-    },
-    {
-      "criterion": "Use of Meta AI Tooling",
-      "weight_percent": 25,
-      "project_evidence": [
-        "Muse image-to-game semantic planning",
-        "SAM original-art movement"
-      ],
-      "evidence_document": "docs/REVIEW-EVIDENCE.md"
-    },
-    {
-      "criterion": "Technical Depth & Execution",
-      "weight_percent": 20,
-      "project_evidence": [
-        "world and interaction validation",
-        "source geometry",
-        "progress-preserving revisions",
-        "bounded provider recovery"
-      ],
-      "evidence_document": "docs/REVIEW-EVIDENCE.md"
-    },
-    {
-      "criterion": "Demo",
-      "weight_percent": 25,
-      "project_evidence": [
-        "continuous spring proof GIF",
-        "live playable examples",
-        "fresh generation and persistence recordings"
-      ],
-      "evidence_document": "docs/REVIEW-EVIDENCE.md"
-    }
-  ],
   "verification_commands": [
     "npm run check",
     "npm test",
@@ -231,15 +189,8 @@
     "Unclear or obscured source subjects can require creator correction.",
     "Provider stalls remain possible.",
     "Photo resource transfers are game-state changes, not physical liquid or growth simulation.",
-    "Packaged examples do not issue a fresh model request on launch.",
-    "A final public replacement film has not yet been published."
+    "Packaged examples do not issue a fresh model request on launch."
   ],
-  "rubric_source": {
-    "url": "https://cerebralvalley.ai/e/meta-ai-developer-hackathon/details",
-    "basis": "Authenticated guide captured on 2 November 2026; documentation reconciliation on 5 November 2026.",
-    "official_scores": null
-  },
-  "event_work_document": "docs/SUBMISSION-PACKAGE.md",
   "product_direction": {
     "status": "Planned direction, not demonstrated capabilities",
     "goals": [
