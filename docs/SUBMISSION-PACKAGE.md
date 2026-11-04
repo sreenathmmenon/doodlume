@@ -1,88 +1,88 @@
 # Doodlume submission package
 
-Prepared 3 November 2026. The local 178-second demo has now been recorded and rendered. This package includes submission copy and the original recording plan; the project has not been submitted. The current application is local; repository visibility is still private.
+Updated 5 November 2026, IST. The application is live on Railway. The replacement film has real product recordings, an animated model explanation and a revised narration plan; the final combined film and public video link remain pending. Repository visibility remains private at the owner's request until the owner changes it.
 
-## Positioning and submission selections
+[Live product](https://doodlume-production-9df2.up.railway.app/) · [Reviewer guide and weighted rubric](JUDGING-GUIDE.md) · [Release checklist](SUBMISSION-CHECKLIST.md)
 
-**One line:** Turn your own drawing or photograph into a game, then keep shaping what happens inside it.
+## Project positioning
 
-**Description:** Doodlume lets a creator turn a drawing, illustration or photograph into a playable world while keeping their own artwork recognizable. Meta Muse Spark Open interprets the image and the creator's idea; a validated game engine turns those interpretations into an adventure, an exploration or an image-based discovery game. Creators review the result, play it, and change objects or finishing rules in the same world. Original artwork, meaningful control and continued authorship are the product—not a one-off generated animation.
+**Name:** Doodlume
 
-**Problem:** People can imagine a game long before they can program one. Existing drawing and game-making workflows separate the thing they created from the systems needed to play it. Doodlume makes an existing image the starting point for interactive authorship. It is intended for people who draw, invent stories or want to play with a familiar photograph; audience adoption and retention have not been measured.
+**Tagline:** Your imagination, now playable.
 
-**Recommended problem statement:** Build for Your World. **Track:** retain the entrant's actual registered track; the supplied registration screenshot selected Indie Dev. Confirm the final form rather than implying a track change.
+**Short description:** Turn your drawings and photographs into playable worlds. Then invent what happens next.
 
-## Paste-ready: Describe your use of Meta products
+**Description:** Doodlume connects visual imagination to game creation. Start with a drawing, illustration or photograph and an idea. Meta Muse Spark Open interprets pictured details and proposes objects, actions and goals. Doodlume turns the reviewed plan into a playable adventure, exploration or discovery experience while preserving recognizable artwork. Creation continues inside the same world: draw a new part, give an object an ability, change the finishing rules, play the result and save it for later. The spring demonstration shows that loop directly: a part drawn in the studio becomes a usable ability that increases the character's jump.
 
-Doodlume uses Meta Muse Spark Open, served through Fireworks AI as `accounts/fireworks/models/muse-spark-open`, to interpret an uploaded image and a creator's play idea. The model identifies source objects and their positions and proposes structured gameplay within our supported 2D mechanics. We validate those outputs before they become a playable world, preserving the distinction between visible source artwork and introduced game elements. For supported source-aligned adventures, Meta SAM 2.1 tiny runs locally to mask moving subjects using their original pixels. The editor then lets the creator alter objects and finishing requirements while retaining world identity and surviving play progress. The demonstrated runtime uses Muse Spark Open and local SAM 2.1; it does not use SAM 3.1, Muse Image, Muse Voice or a generative 3D world model.
+**Problem:** People can imagine games before they can program them. Doodlume lets them begin with their existing pictures and creative ideas, then use drawing and an editor to develop playable interactions. Its current impact evidence is the working creation and authoring journey; audience adoption and retention have not been measured.
 
-## Paste-ready: Why Meta's models matter
+**Problem statement:** Build for Your World.
 
-The central challenge is connecting a person's imperfect, unfamiliar image to something they can actually play and keep authoring. Muse Spark Open supplies the semantic interpretation: which visible marks or photographed details can act as characters, objects, destinations and clues, and how the requested idea relates to them. SAM 2.1 supplies source-pixel masks where a subject must move independently of its original page. Together, these models let the creator's artwork stay recognizable while becoming interactive. Our deterministic validation, source-coordinate processing and game runtime turn model suggestions into bounded, inspectable behavior; the creator can correct the result instead of accepting an opaque generated scene. This is demonstrated on inspected drawings, illustrations and photographs, not a claim that every image produces a finished game automatically.
+**Track:** The supplied registration screenshot selected Indie Dev. Retain the actual registered track and confirm it on the final form.
 
-## Paste-ready: Feedback on partner technologies
+## Describe your use of Meta products
 
-Fireworks AI enabled our working hosted Meta Muse Spark Open path. Its chat-completions interface accepted the image-and-intent requests, and we exercised the real provider during creation and repair trials. We used an explicit JSON contract and local validation because our Fireworks adapter does not request strict provider-enforced JSON Schema. Some source-to-play results required correction: a recorded repeat of a detailed illustration needed route review rather than reaching play automatically. Clearer structured-output guarantees and more predictable source-coordinate grounding would reduce that repair work. We also implemented a Baseten adapter, but the recorded access attempt returned HTTP 403, so we cannot report a successful Baseten deployment or compare its performance. A private Modal SAM experiment did not produce a usable inference result and was stopped; Modal is not in the demonstrated runtime. We ultimately ran SAM 2.1 locally. These are observations from our integration, not a general ranking of the partners.
+Doodlume uses Meta Muse Spark Open through Fireworks AI to interpret an image and the creator's intended experience. The model identifies pictured objects and relationships and proposes structured game rules within our supported 2D mechanics. Doodlume validates the plan, source geometry, artwork and completion requirements before it becomes playable. Meta SAM 2.1 tiny runs on the application server to isolate supported source subjects using their original pixels. The creator can then draw additional parts, author abilities, edit goals, play the changes and retain the same world across saves and revisions. The demonstrated Meta models are Muse Spark Open and SAM 2.1 tiny. LaMa supplies separate, non-Meta background repair.
 
-## What actually ran
+## Why Meta's models are important
 
-| Component | Actual role and evidence | Submission wording |
-|---|---|---|
-| Meta Muse Spark Open on Fireworks | Current safe status inspection at 02:46 UTC on 3 November reports Fireworks and `accounts/fireworks/models/muse-spark-open`. Earlier real request/play records are in [live validation](LIVE-VALIDATION.md) and [desktop repair verification](QUALITY-REPAIR-VERIFICATION.md). | Used. Configuration alone is not a successful call; retain the final filmed run's outcome separately. |
-| Meta SAM 2.1 tiny, local | Selected and configured in current status. `scripts/local-sam-worker.py` loads `configs/sam2.1/sam2.1_hiera_t.yaml`; documented repaired adventures used actual local masks. | Used locally for supported cutouts. Not SAM 3.1 and not a Meta Model API segmentation call. |
-| Meta SAM 3.1 API | Remote adapter exists; no successful live SAM 3.1 result established in current evidence. | Implemented option, not demonstrated usage. |
-| Baseten | Meta-family adapter exists. Historical live attempt: HTTP 403. | Integration attempted; not the running provider. |
-| Modal | Historical private segmentation experiment stopped without usable inference output. | Experiment only; not hosting the submitted application. |
-| Muse Wonder / Muse Image / Glimmer / Voice | Direct adapter has a Muse Wonder default, but it is not selected. No demonstrated use of these other models established here. | Do not list as used or claim the creative-model bonus from them. |
-| Game runtime and editor | Source processing, validation, movement, rule enforcement, edits, undo and local saves are application code. | Do not attribute deterministic game physics or arbitrary game-code generation to the model. |
+Muse connects visible marks and photographic details to playable meaning: a character, destination, clue, tool or interaction. SAM separates source subjects so their original artwork can move independently. Together, these models preserve the connection between the creator's picture and the world they play. The application adds rule validation, game execution and continued authoring. The result remains inspectable and editable: the creator can review the interpretation, correct selections and decide what happens next.
 
-Safe, local configuration evidence: `outputs/submission/model-status-safe.json`. No API-key values were printed, copied into documentation or added to this package. The credential scan compares configured secrets internally without disclosing them. Provider contract: [server/provider.ts](../server/provider.ts). Image interpretation: [server/interpret.ts](../server/interpret.ts). Local masking: [scripts/local-sam-worker.py](../scripts/local-sam-worker.py). Edit/progress contract: [shared/revisions.ts](../shared/revisions.ts).
+## Feedback from partner technologies
 
-The six recorded pipeline-acceptance outcomes in `outputs/pipeline-repair/verification-results.json` took 21.8–55.8 seconds under their recorded conditions; their `playCompleted` fields are false because that ledger records generation, not subsequent play. Later browser play evidence is separate. A repeat detailed-illustration attempt in `final-live-results.json` required review. Do not combine these records into an invented universal success rate, instant-generation claim or latency SLA.
+Fireworks AI supplies the live Muse Spark Open inference path. We send image-and-intent requests through its chat-completions interface, use JSON output and validate the returned game contract locally. Recorded creation runs produced playable worlds, while other inputs required review or encountered provider delays. The application bounds request time and recovery rather than treating every model response as a completed game. More predictable latency and stronger source-coordinate grounding would improve the creation experience.
 
-## Showcase image provenance
+Railway hosts the current application, API server and CPU model workers. Modal also hosted the complete containerized application during deployment verification and remains the documented backup deployment. This is separate from an earlier unsuccessful Modal segmentation experiment. Baseten has an implemented Muse Spark Open adapter; the recorded access attempt returned HTTP 403, so it is not described as successful inference.
 
-The homepage uses recorded generated worlds, not a live model request on every example launch. Its world IDs match the retained pipeline records: `clockwork` → `verified-clockwork-final-live-recompiled-world.json`, `dino` → `verified-crayon-platform-recompiled-world.json`, and `kitchen` → `verified-kitchen-roam-world.json` under `outputs/pipeline-repair/`.
+## Actual model and service roles
 
-- **Clockwork and dinosaur:** user-supplied images from `Downloads/Inkling-sample-drawings`, mapped by `recompile.mts` to `06-adult-20-years-ink-watercolor-platformer.png` and `03-kindergarten-5-years-crayon-platformer.png`. Those filenames do not establish the creator's age, authorship, physical drawing process or publication rights. No age or child-authorship claim should accompany the demo.
-- **Kitchen:** an AI-generated test image, not a verified photograph of a real room. `verify-variety.mts` maps this world to `generated-kitchen`; the existing private corpus manifest records it as “AI generated for varied-input testing.” The homepage calls it a room image, and its alternative text identifies the generated scene.
+| Component | Demonstrated role |
+| --- | --- |
+| Meta Muse Spark Open | Image understanding and structured gameplay planning, served through Fireworks AI. |
+| Meta SAM 2.1 tiny | Server-local source-object masks and cutouts. |
+| LaMa | Separate non-Meta server-local background repair, recorded in the source-art diagnostics. |
+| Fireworks AI | Active inference API provider for the filmed creation runs. |
+| Railway | Primary live application hosting. |
+| Modal | Verified application deployment and documented backup hosting, not the inference API provider for the Railway recordings. |
+| Baseten | Implemented API adapter; recorded access attempt unsuccessful. |
+| Direct Muse Wonder/Muse Spark and SAM 3.1 | Implemented alternative paths, not additional usage claimed for the filmed run. |
+| React, TypeScript and Phaser | Interface, shared world contracts and game runtime. |
 
-These records establish the local source chain and reported origin only. They do not establish a license or rights clearance for the supplied drawings, or identify the kitchen image's generator and applicable publication terms. Resolve those external-asset declarations before public submission. Do not package private corpus manifests or personal filesystem paths as public evidence.
+See [provider code](../server/provider.ts), [interpretation](../server/interpret.ts), [segmentation](../server/segmentation.ts), [background repair](../server/source-background.ts), and [deployment evidence](LIVE-DEPLOYMENT.md).
 
-## Event-period contribution statement
+## Film and public demonstration
 
-**Draft grounded in repository history:** Doodlume's recorded implementation history begins with commit `4aa12f5` on 30 October 2026. Subsequent event-period commits add same-world editing and progress-preserving undo (`9661272`), revised-page comparison (`d40a09a`), capture/alignment (`2cd02b6`), segmentation integration (`1a4bf86`), picture-based worlds (`eb763db`), the live Meta drawing path (`c2ba8c8`), image-native discovery/exploration (`4dd8469`) and source-artwork/desktop repairs (`2c0d3b9`). The 3 November working changes add the new homepage and demo entry, applied-edit save/discard/stay protection, explicit editor reset/undo behavior, library layout fixes and clearer discovery completion. These product changes are recorded in commit `5fbd5b8` (3 November 2026). Earlier concept research and planning preceded this implementation history.
+The current plan is a 2:58 film covering image-to-world creation, continued invention, a continuous spring before/after, real-photo interaction, a connected rescue mission, save/reopen, and a 24-second model explanation. Narration and footage names are prepared locally. The final edit must be timed against the owner's generated voice and reviewed end to end before publishing.
 
-**Unresolved author declaration:** commit timestamps establish when work was committed, not when every line was first written. This repository audit does not establish that there was no pre-event code. Before submission, the entrant must accurately identify any pre-existing implementation and external assets. Do not substitute “built entirely from scratch during the event” for this qualified statement without evidence. Preserve the existing history rather than rewriting dates. The authenticated guide gives a 27 October–4 November build period and requires the demo to identify event-created features.
+Product scenes use real browser recordings. The model explanation is motion graphics with a live gameplay excerpt. The fresh rooftop generation took 109.375 seconds and the fresh patio-photo generation took 50.790 seconds in the recorded runs; shortened waiting must be labelled. These are individual observations, not advertised latency guarantees.
 
-## Recorded 178-second film
+The earlier dinosaur-based 178-second export was rejected by the owner. Its historical export checks do not approve the replacement film. Do not submit it or link it as the current demo.
 
-Local export: `outputs/submission/video/Doodlume-2m58s-demo.mp4`. The same folder retains the final edit manifest, narration, reproducible render script and export checks. A continuous fresh request produced Dino’s Purple Leap, followed by real keyboard completion, original-platform widening/movement, replay, Save and open, and reopening the edited world. Interrupted footage was excluded. The generation wait is explicitly shortened; stored examples and the AI-generated room image are labelled. Narration is locally synthesized.
+## Public example provenance
 
-## Original 178-second storyboard
+The current examples are documented in the [showcase catalogue and credits](../public/art/showcase/README.md):
 
-This is an edit decision list. The intervals total **2:58 (178 seconds)**. Record genuine interactions first; choose the clearest verified source, then edit to these boundaries. The narration below leaves space for visible actions and pauses. A shorter clip or a homepage animation is not the finished film.
+- **Rooftop run and Rooftop springs:** AI-generated rough drawing; Meta-generated game, with the spring and its ability authored through the studio.
+- **A little care:** real photograph by Shixart1985, CC BY 2.0; Meta-generated game. Its interaction transfers a game water quantity, without physical pouring or growth simulation.
+- **Lunar rescue:** AI-generated illustration and authored game using the same runtime.
 
-| Time | Picture and action | Narration / readable caption |
-|---|---|---|
-| **0:00–0:10** · 10s | Original drawing fills the frame; match-cut to its recognizable subject moving under real control. Reach a visible object. Tiny caption identifies a recorded Doodlume result. | “This was a drawing. Now its character moves, its objects matter, and its creator decides what happens next.” |
-| **0:10–0:25** · 15s | Brief homepage proposition, then choose the creator's own image. Keep the creation action visible; no long brand introduction. | “Doodlume turns your own drawings and photographs into games you can keep shaping. You can begin with an idea and an image, without first programming a game.” |
-| **0:25–1:05** · 40s | One real upload or drawing → concise intent → actual model request → review original image/object correspondence → accept → movement and objective. Shorten generation only with a visible time-cut caption showing that run's measured duration. | “Here is the source and the idea. Meta Muse Spark Open interprets the image. I review the objects and the goal, then play. The art is still mine, and the rules are visible.” |
-| **1:05–1:35** · 30s | One meaningful edit: add a crossing in original ink, or reposition a reachable ledge; apply; immediately take the changed route. Show previously earned collection still present. Use the option actually verified in the recorded world. | “The first result is only the beginning. I can create a new route, apply it, and use it in the same world. My earlier discoveries remain while I change what is possible.” |
-| **1:35–1:55** · 20s | Two other real recorded worlds: photo discovery with an actual clue interaction, then photo exploration or crayon adventure. Each includes input and consequence, not a static gallery. Label them recorded examples. | “Different images invite different kinds of play: an adventure through a drawing, a search through a photograph, or a place to explore. These examples use the same engine.” |
-| **1:55–2:20** · 25s | Clear source→interpretation→mask→play visual using actual captured data. Show Muse Spark Open / Fireworks and local Meta SAM 2.1 accurately. Spend 3–4 seconds on readable source code/contract for the event-built interpretation or revision step. | “Muse Spark Open connects visible details to game objects and goals. Local Meta SAM 2.1 separates moving subjects from their source. Our validation and game engine turn that interpretation into controlled, editable play.” |
-| **2:20–2:43** · 23s | Apply a meaningful edit, open another world, choose Save and open, then reopen the original and show the saved change. Include a short Undo beat only if readable; prioritize the complete save/reopen proof. | “A world stays something you own and revise. Save it, leave it, and return to the change you made. Unsaved edits are explicit; switching worlds asks you to save, discard, or stay.” |
-| **2:43–2:58** · 15s | Finish on memorable real gameplay, original image beside it, then a clean product name and working public destination once available. Small end caption lists event-built feature scope. | “Your image is not just an inspiration for a game. It becomes the place where you play—and keep creating. Doodlume. Your imagination, now playable.” |
+Packaged examples are labelled and do not perform new inference on launch. Preserve source credits and distinguish authored examples, fresh generation and replay in the film. Older private test-drawing filenames do not establish an artist's age or publication rights.
 
-**Capture rules:** 1920×1080 target if the actual screen capture supports it; legible UI beats artificial upscaling. Keep speech/captions readable and source art central. Play footage stays real-time. Mark accelerated generation or discontinuous edits; never replace a failed request with an unrelated stored result while implying continuity. Use only accurate model identities from the filmed path. Do not include keys, private support pages, participant chats or diagnostic clutter. Verify the exported file's duration, every caption, audio, opening/closing frames and link access before calling it finished.
+## Event-period contributions
 
-## Submission gates still open
+The recorded repository history begins with implementation commit `4aa12f5` on 30 October 2026. Subsequent commits implement same-world editing, progress-preserving undo, capture/alignment, segmentation, picture-based worlds, the live Meta creation path, discovery/exploration and source-art repairs. Later work adds resource interactions, ability authoring, hosted execution and source-supported planning.
 
-- **Public repository:** `gh repo view` confirmed `PRIVATE` on 3 November. The guide requires public access. Preparing documentation does not change visibility; owner authorization and a final secret/asset review precede publication.
-- **Public product access:** only loopback operation is verified. The server intentionally restricts host/origin to local addresses; a public interactive deployment needs an explicit hosting/configuration change and its own verification. A static homepage alone does not make new-image generation publicly usable.
-- **Public video:** the local 178-second film is exported. Public hosting and signed-out playback remain to be completed. Technical audio checks and inspected frames are separate from a human listening review.
-- **Contribution and asset attribution:** identify pre-existing work and rights-cleared public demo assets; the current product implementation commit is `5fbd5b8`. Initial concept planning predates the repository's recorded implementation.
-- **Current-build evidence:** the fresh request, meaningful edit→play result and save/reopen proof are included in the local film. Broader arbitrary-image reliability is not established.
-- **Form completion:** confirm track/problem statement, list all actual human contributors, public repository, public video and any required live URL. Submit only after the owner requests the final submission; retain a receipt.
+The 4 November homepage and studio changes include `567afc0`, `660bb0b`, `8738d5e` and `b1d07bb`. Follow-up fixes include `bbfdc1d`, `c7537f6` and `b901c10`. These commits remain intact. Deployment and verification records identify the running source separately from later documentation changes.
 
-The authenticated [participant guide](https://cerebralvalley.ai/e/meta-ai-developer-hackathon/details) states **4 November, 9 PM EST** as the deadline: **5 November, 7:30 AM IST**. Its rubric is impact 30%, Meta tooling 25%, technical execution 20%, demo 25%. Judging runs 5–8 November and live finals are 9 November at noon ET. See [research ledger](SUBMISSION-RESEARCH-2026-11-02.md) for source distinctions and the public-page date discrepancy. No later judging period is treated as extra build time.
+Commit dates identify recorded commits, not when every line was originally written. The entrant must declare any pre-existing code and external assets accurately. Preserve history and identify event-built features in the film rather than claiming every component was built from scratch without evidence.
+
+## Remaining submission steps
+
+- Owner changes repository visibility when ready. No visibility change is authorized by this document.
+- Generate the owner-voice narration, finish the replacement film, and verify all audio, captions, cuts and source continuity.
+- Publish the final video and verify playback without the owner's login.
+- Verify fresh signed-out product access and the required form fields: description, problem statement, track, repository, video, Meta usage, model importance, partner feedback and human contributors.
+- Confirm contribution and asset declarations.
+- Submit only on the owner's explicit instruction and retain the receipt.
+
+Rubric weights and bonus-model requirements are recorded in the [reviewer guide](JUDGING-GUIDE.md). These documents explain the evidence; they do not assign official scores, claim prize eligibility has been approved, or establish a winning outcome.

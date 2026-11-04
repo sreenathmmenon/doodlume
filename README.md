@@ -93,6 +93,19 @@ The interface uses **React and TypeScript**, gameplay uses **Phaser**, and the N
 
 Provider selection is explicit. A failed request does not silently switch to another provider or billing account. **React, TypeScript and Phaser** provide the interface, shared world contracts and game runtime; they are application technologies rather than model inference services.
 
+## For hackathon reviewers
+
+Doodlume addresses **Build for Your World**: it gives people a way to turn their pictures and game ideas into interactive creations they can keep developing.
+
+| Judging criterion | Weight | What to look for |
+| --- | --- | --- |
+| Impact | 30% | A creator can start with a picture and continue building through drawing and editing. |
+| Use of Meta AI tooling | 25% | Muse connects image details to game rules; SAM separates original subjects for movement. |
+| Technical depth and execution | 20% | Validated world contracts, source-aligned artwork, interactions, undo and saved progress. |
+| Demo | 25% | Real creation, a drawn ability changing gameplay, photo interaction and save/reopen. |
+
+The [reviewer guide](docs/JUDGING-GUIDE.md) maps the rubric to code and hands-on examples. The [submission package](docs/SUBMISSION-PACKAGE.md) contains the current project description, Meta usage, partner feedback and contribution notes. The final replacement film is being edited from real product recordings; its public link will be added when ready.
+
 ## Run locally
 
 Requires **Node.js 22.12 or newer** and credentials for a supported inference provider.
