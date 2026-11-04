@@ -47,8 +47,8 @@ test("rover rules merge crystals and offer can't first", () => {
   const crystals = sentences.find(s => s.subject === "crystals");
   assert.ok(crystals);
   assert.deepEqual(crystals.verbs[0], { label: "can't power", actionIds: [] });
-  assert.ok(crystals.verbs.some(v => v.label === "powers" && v.actionIds.length > 0));
-  assert.ok(sentences.some(s => s.verbs.some(v => v.label === "fits")));
+  assert.ok(crystals.verbs.some(v => v.label === "can power" && v.actionIds.length > 0));
+  assert.ok(sentences.some(s => s.verbs.some(v => v.label === "can fit")));
 });
 
 test("rooftop-run beats name the cat and the fish", () => {

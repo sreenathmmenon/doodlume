@@ -31,7 +31,7 @@ export function HomeRules({ sentences, boxes, links, src, alt, onChanged }: {
           return <g key={id}><path className="rules-ink halo" d={`M${p.x} ${p.y} L${q.x} ${q.y}`}/><path className="rules-ink draw" d={`M${p.x} ${p.y} L${q.x} ${q.y}`}/><circle className="rules-mark pop" cx={q.x} cy={q.y} r="2.4"/></g>;
         }) : []))}
       </svg>
-      <figcaption className={`rules-status ${on ? "is-on" : ""}`}><i/>{on ? `${on} of ${sentences.length} rules on. ${active.length} ways to play.` : "Every rule is off. Nothing can happen yet."}</figcaption>
+      <figcaption className={`rules-status ${on ? "is-on" : ""}`}><i/>{on ? `Preview · ${active.length} possible connections shown.` : "Rule preview · Tap a highlighted word."}</figcaption>
     </figure>
   </div>;
 }

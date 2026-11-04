@@ -160,7 +160,7 @@ export default function Home({ onContinueInStudio }: { onContinueInStudio?: (ent
     <header className="home-header">
       <a href="#" className="home-brand" aria-label="Doodlume home"><Brand/></a>
       <nav aria-label="Main navigation">
-        <div className={`home-score ${scoreN === MOVES.length ? "is-done" : ""}`} role="status" aria-label={`${scoreN} of ${MOVES.length} moves made`}><span className="home-score-n"><b key={scoreN} className="is-tick">{scoreN}</b>/{MOVES.length}</span><span className="home-score-t">{nextMove === -1 ? "You made a game" : MOVES[nextMove]}</span></div>
+        <div className={`home-score ${scoreN === MOVES.length ? "is-done" : ""}`} role="status" aria-label={`${scoreN} of ${MOVES.length} moves made`}><span className="home-score-n"><b key={scoreN} className="is-tick">{scoreN}</b>/{MOVES.length}</span><span className="home-score-t">{nextMove === -1 ? "Four moves explored" : MOVES[nextMove]}</span></div>
         <a href="#read">Worlds</a>
         <a href="#studio" className="home-studio-link">Open studio <ArrowUpRight size={16}/></a>
       </nav>
@@ -169,7 +169,7 @@ export default function Home({ onContinueInStudio }: { onContinueInStudio?: (ent
       <section className="home-hero" aria-labelledby="home-title">
         <div className="home-intro">
           <h1 id="home-title">Draw the missing part.</h1>
-          <p className="home-description">Whatever you draw gets a job in the world you already have.</p>
+          <p className="home-description">Draw a part. Choose its ability. Change how your world plays.</p>
           <div className="home-create-options">
             <a className="home-cta" href="#studio?create=upload">Make your game <ArrowUpRight size={18}/></a>
             <a className="home-draw-link" href="#studio?create=sketch"><Pencil size={16}/> Draw instead</a>
@@ -204,7 +204,7 @@ export default function Home({ onContinueInStudio }: { onContinueInStudio?: (ent
           </div>
           {displayNotice && <p className="home-display-notice" role="status">{displayNotice}</p>}
           {world && <div className="home-example-tools" style={{ visibility: showSource ? "hidden" : "visible" }} aria-hidden={showSource} inert={showSource}>
-            {invention && !inventionUsed && <button className="home-invent-button" onClick={() => void drawPart()}><Pencil size={14}/>Draw your own part</button>}
+            {invention && !inventionUsed && <button className="home-invent-button" onClick={() => void drawPart()}><Pencil size={14}/>Redraw {invention.label?.toLowerCase() || "this part"}</button>}
             {onContinueInStudio && <button className="home-keep-creating" onClick={keepCreating}>{complete ? "Make it yours" : "Keep creating in studio"}<ArrowUpRight size={15}/></button>}
             <div ref={setControlsHost} className="home-object-controls"/>
           </div>}
@@ -224,7 +224,7 @@ export default function Home({ onContinueInStudio }: { onContinueInStudio?: (ent
       <section className="home-beat" id="rule" aria-labelledby="rule-title">
         <div className="home-beat-head"><h2 id="rule-title">Same picture. Your rules.</h2><span className={`home-move ${score.done[2] ? "is-done" : ""}`}><b>3</b>Change a highlighted word</span></div>
         <HomeRules sentences={reading.rover.sentences} boxes={reading.rover.boxes} links={reading.rover.links} src={art("rover", "preview")} alt="An illustrated rover among orange mesas, glowing crystals and a beacon" onChanged={ruleChanged}/>
-        <div className="home-beat-foot"><span>Rules are editable in the studio, object by object.</span><a className="home-play-link" href="#studio?example=rover"><Play size={14} fill="currentColor"/>Play with the real rules</a></div>
+        <div className="home-beat-foot"><span>Preview only. Edit real rules in the studio.</span><a className="home-play-link" href="#studio?example=rover"><Play size={14} fill="currentColor"/>Open game in studio</a></div>
       </section>
 
       <section className="home-beat" id="count" aria-labelledby="count-title">
@@ -238,6 +238,6 @@ export default function Home({ onContinueInStudio }: { onContinueInStudio?: (ent
       </section>
     </main>
     <footer className="home-footer"><a className="home-brand" href="#" aria-label="Doodlume home"><Brand/></a><p>Powered by Meta Muse Spark Open.</p><a href="#studio">Enter the studio <ArrowUpRight size={15}/></a></footer>
-    {drawing && <Suspense fallback={<div className="home-stage-loading">Opening your drawing…</div>}><SketchPad title="Draw your part" useLabel="Add to this game" resumeImage={drawingDraft} onPause={setDrawingDraft} onClose={() => { setDrawing(false); setPlaying(wasPlaying.current); }} onUse={image => void useInvention(image)}/></Suspense>}
+    {drawing && <Suspense fallback={<div className="home-stage-loading">Opening your drawing…</div>}><SketchPad title="Redraw this part · keep its ability" useLabel="Use this drawing" resumeImage={drawingDraft} onPause={setDrawingDraft} onClose={() => { setDrawing(false); setPlaying(wasPlaying.current); }} onUse={image => void useInvention(image)}/></Suspense>}
   </div>;
 }

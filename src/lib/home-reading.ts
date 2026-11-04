@@ -124,7 +124,7 @@ export function ruleSentences(world: WorldDefinition): RuleSentence[] {
       object,
       verbs: [
         { label: `can't ${first}`, actionIds: [] },
-        ...[...verbs].map(([verb, actionIds]) => ({ label: thirdPerson(verb), actionIds })),
+        ...[...verbs].map(([verb, actionIds]) => ({ label: `can ${verb}`, actionIds })),
       ],
     };
   });
