@@ -1,0 +1,28 @@
+ID,Milestone,Priority,Status,Task,Acceptance,Dependencies
+AUD01,M0,P1,Verified,Audit live flows and source capability inventory,Current/limited/absent capabilities distinguished; actual observations retained,
+AUD02,M0,P1,Verified,Complete four-round ten-perspective critique,40 contributions and full decision coverage validated; revisions/dissent preserved,AUD01
+DES01,M1,P1,Planned,Design cohesive home/create-review/play/editor/completion states,Three desktop sizes; all original and advanced controls accounted for,AUD01
+DES02,M1,P1,Planned,Specify control and typography state matrix,Default/hover/focus/selected/disabled/busy/error inspected; source art central,DES01
+CRT01,M2,P1,Planned,Clarify Drawing/Photo beside source preview,User override retained; JPEG drawing and ordinary photo choose deliberate route,DES01
+CRT02,M2,P1,Planned,Replace misleading cutout precision wording,Method described accurately; review/correction safeguards unchanged,AUD01
+CRT03,M2,P1,Planned,Improve truthful creation and busy recovery,No fake progress; cancellation and failure retain source/idea/active world,CRT01
+GEN01,M3,P1,Planned,Define source-specific activity quality review,Goal/action/consequence/creative control judged separately from schema validity,AUD01
+GEN02,M3,P1,Planned,Inspect mixed unfamiliar drawing/photo holdouts,"Attempts, reviews, failures and completed sessions all reported",GEN01
+GEN03,M3,P1,Planned,Repair dominant automatic-design failures,Distinct source-supported activities; no arbitrary complexity or identity templates,GEN02
+GEN04,M3,P2,Planned,Assess need for generic new state/effect capabilities,Only add when repeated source-supported needs exceed current engine,GEN02
+EDT01,M4,P1,Planned,Improve first selection and linked feedback,Creator discovers a pictured object and existing ability; no redundant headings,DES01
+EDT02,M4,P1,Planned,Design and implement sentence rule authoring,Source/target/effect/condition understandable; advanced controls retained,EDT01
+EDT03,M4,P1,Planned,Preview supported effects before Apply,Predictable visible result; illegal placement caught; no hidden draft loss,EDT02
+EDT04,M4,P1,Planned,Verify play/edit/resume and undo,"Identity, valid progress and old-save compatibility preserved",EDT03
+PLY01,M5,P1,Planned,Strengthen contextual source/action feedback,Clear cause/effect; no unnecessary scene-covering controls or labels,GEN03
+PLY02,M5,P1,Planned,Distinguish alternative action names in completion rules,Source→verb→target differentiates repeated labels,AUD01
+PLY03,M5,P2,Planned,Review sound/motion/completion payoff,Audio opt-in; reduced motion equivalent; final effect precedes completion,PLY01
+REL01,M6,P1,Planned,Exercise full unfamiliar input sessions,Fresh generation/review/play/edit/save/reopen; failures counted,"GEN03,EDT04"
+REL02,M6,P1,Planned,Protect existing worlds and backups,Old save and import/edit/undo/reopen pass after every relevant increment,EDT04
+REL03,M6,P2,Planned,"Measure loading, frames and hidden-session lifecycle","Repeated declared-device baseline, no invented performance claims",AUD01
+REL04,M6,P2,Deferred,Decide whether contention requires queue,Measure429frequency/resourceheadroom; queue deferred until evidence,"CRT03,REL03"
+REL05,M6,P2,Deferred,Extract state/CSS boundaries only for proven change pressure,No framework or wholesale rewrite; targeted transition checks preserved,REL03
+PRE01,M7,P1,Planned,Add actual-photo proof within current example stage,"Verified playable consequence, correct source license and provenance","GEN03,PLY01"
+PRE02,M7,P1,Planned,Clarify authored-part drawing behavior,One concise adjacent line distinguishes changed art and retained ability,AUD01
+PRE03,M7,P2,Planned,Design useful world cards and save status,Personal source recognizable; local ownership and completion clear,DES01
+PRE04,M7,P2,Deferred,Assess opt-in read-only published snapshot sharing,Separate source privacy/remix/account concerns; not required for core loop,REL01
