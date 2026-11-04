@@ -31,3 +31,6 @@ __pycache__/
 .playwright-cli/
 output/
 outputs/
+
+# TypeScript incremental build cache.
+*.tsbuildinfo

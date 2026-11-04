@@ -1,4 +1,4 @@
-import type { ModelConnection } from "./provider.js";
+import type { ModelConnection, ModelCallTiming } from "./provider.js";
 export class InterpretationError extends Error {
   constructor(
     message: string,
@@ -24,7 +24,41 @@ export class MalformedModelJSONError extends ModelPlanError {
   }
 }
 
+/** A completed HTTP busy rejection, never an ambiguous network timeout or
+ * partial model result. Only this response can receive one budgeted retry. */
+class ProviderBusyError extends InterpretationError {
+  constructor(label:string,readonly retryAfterMs:number|undefined){
+    super(`${label} is busy right now. Your image and current world are unchanged. Try again shortly.`,503);
+  }
+}
+
 export async function modelJSON(
+  connection: ModelConnection,payload:unknown,signal:AbortSignal,transport:typeof fetch=fetch,
+):Promise<unknown>{
+  try{return await executeModelCall(connection,payload,signal,transport);}
+  catch(error){
+    signal.throwIfAborted();
+    // A busy HTTP rejection has no usable interpretation. Keep the same model,
+    // account and exact request; do not retry timeouts, malformed outputs or
+    // billing/auth failures. Existing unbudgeted callers keep their behavior.
+    if(!(error instanceof ProviderBusyError)||error.retryAfterMs===undefined||!connection.executionBudget?.canStartCall())throw error;
+    await pauseBeforeBusyRetry(error.retryAfterMs,signal);
+    if(!connection.executionBudget.canStartCall())throw error;
+    return executeModelCall(connection,payload,signal,transport);
+  }
+}
+
+function pauseBeforeBusyRetry(ms:number,signal:AbortSignal):Promise<void>{
+  signal.throwIfAborted();
+  return new Promise((resolve,reject)=>{
+    const onAbort=()=>{clearTimeout(timer);signal.removeEventListener('abort',onAbort);reject(signal.reason);};
+    const timer=setTimeout(()=>{signal.removeEventListener('abort',onAbort);resolve();},ms);
+    signal.addEventListener('abort',onAbort,{once:true});
+    if(signal.aborted)onAbort();
+  });
+}
+
+async function executeModelCall(
   connection: ModelConnection,
   payload: unknown,
   signal: AbortSignal,
@@ -33,18 +67,40 @@ export async function modelJSON(
   signal.throwIfAborted();
   const lease = connection.executionBudget?.acquireCall(signal);
   const callSignal = lease?.signal ?? signal;
+  const started=performance.now();
+  let requested=false;
+  const timing:ModelCallTiming={provider:connection.provider,durationMs:0,outcome:'failed',
+    ...(connection.provider==='fireworks'?{serviceTier:connection.serviceTier??'default'}:{})};
   try {
     // The scheduler rejects unaffordable repairs before consuming paid quota.
     connection.reserveRequest?.();
-    return await abortableModelResponse(
-      readModelResponse(connection, payload, callSignal, transport), callSignal,
+    requested=true;
+    const value=await abortableModelResponse(
+      readModelResponse(connection, payload, callSignal, transport,(response)=>{
+        timing.status=response.status;
+        if(connection.provider!=='fireworks')return;
+        for(const [header,field,multiplier,maximum] of [
+          ['fireworks-server-time-to-first-token','firstTokenMs',1000,3_600_000],
+          ['fireworks-server-processing-time','processingMs',1000,3_600_000],
+          ['fireworks-prompt-tokens','promptTokens',1,100_000_000],
+          ['fireworks-cached-prompt-tokens','cachedPromptTokens',1,100_000_000],
+        ] as const){
+          const raw=response.headers?.get(header);if(!raw?.trim())continue;
+          const n=Number(raw)*multiplier;
+          if(Number.isFinite(n)&&n>=0&&n<=maximum)timing[field]=Math.round(n);
+        }
+      }), callSignal,
     );
+    timing.outcome='completed';return value;
   } catch (error) {
+    timing.outcome=signal.aborted?'cancelled':callSignal.aborted?'deadline':'failed';
     // A disconnected client or whole-request cancellation retains its identity.
     signal.throwIfAborted();
     throw error;
   } finally {
     lease?.dispose();
+    timing.durationMs=Math.round(performance.now()-started);
+    if(requested)try{connection.onTiming?.({...timing});}catch{/* Diagnostics cannot change creation results. */}
   }
 }
 
@@ -68,6 +124,7 @@ async function readModelResponse(
   payload: unknown,
   signal: AbortSignal,
   transport: typeof fetch,
+  observe:(response:Response)=>void,
 ): Promise<unknown> {
   signal.throwIfAborted();
   let response: Response;
@@ -85,8 +142,17 @@ async function readModelResponse(
     signal.throwIfAborted();
     throw new InterpretationError(`${connection.label} could not be reached. Check the connection and try again; your image is unchanged.`, 502);
   }
+  observe(response);
   if (!response.ok) {
     await response.body?.cancel();
+    if(response.status===503){
+      const raw=response.headers?.get('retry-after');
+      const seconds=raw?.trim()?Number(raw):.5;
+      // Long or date-form retry instructions are returned to the caller rather
+      // than consuming the request's compilation reserve by waiting.
+      const retryAfterMs=Number.isFinite(seconds)&&seconds>=0&&seconds<=2?Math.ceil(seconds*1000):undefined;
+      throw new ProviderBusyError(connection.label,retryAfterMs);
+    }
     if ([401, 403].includes(response.status))
       throw new InterpretationError(
         `${connection.label} could not authorize this request. Check the selected provider's key and model access.`,

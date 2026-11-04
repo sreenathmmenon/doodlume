@@ -131,7 +131,7 @@ test('investigation cannot invent its finishing source or replace failed object 
 });
 
 
-test('physical inventory precedes gameplay, is frozen in design context and never retries provider or malformed inventory',async()=>{
+test('physical inventory precedes gameplay, stays frozen in design context and invalid inventory gets no planner retry',async()=>{
   const requests:any[]=[];let factInputs:any[]=[];
   await runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,transport:transport([plan],requests),correctionFacts:async candidate=>{factInputs.push(candidate);return {initialGeometry:'synthetic geometry fact'};},compile:async()=>true});
   assert.equal(requests.length,2);assert.match(requests[0].messages[0].content,/No game design/);
@@ -188,4 +188,85 @@ test('photo design prefix stays identical across source inventories and correcti
   }
   assert.equal(captures[0][1].messages[0].content,captures[1][1].messages[0].content);
   assert.equal(captures[0][2].messages[0].content,captures[1][2].messages[0].content);
+});
+
+test('compact transport preserves earned preparation, paid consequence and a real alternative outcome',async()=>{
+  const {applyPlannedInteractions}=await import('./interaction-planning.js');
+  const {reduceInteraction,interactionEffects}=await import('../shared/interactions.js');
+  const {emptyPlayState,goalProgress}=await import('../shared/world.js');
+  const objects=[...plan.objects,
+    {id:'subject',label:'Movable subject',bounds:{left:100,top:600,right:160,bottom:660}},
+    {id:'destination',label:'Visible destination',bounds:{left:600,top:600,right:700,bottom:700}},
+  ];
+  const rich={...plan,interactions:{version:1,objects:[
+    {entityId:'source',carryable:false,usableInPlace:true,resource:{type:'charge',capacity:2,initial:2}},
+    {entityId:'receiver',carryable:false,resource:{type:'charge',capacity:2,initial:0}},
+    {entityId:'subject',carryable:false},{entityId:'destination',carryable:false},
+  ],actions:[
+    {id:'prepare',kind:'transfer',label:'Supply the controller',toolId:'source',targetId:'receiver',amount:2,effects:[]},
+    ...['left','right'].map(side=>({id:`release-${side}`,kind:'operate',label:`Release ${side}`,toolId:'receiver',targetId:'receiver',requiresResourceIds:['receiver'],costs:[{entityId:'receiver',amount:2}],
+      effects:[{kind:'moveObject',entityId:'subject',destinationId:'destination',destinationAlignment:side,durationMs:500}]})),
+  ],choiceGroups:[{id:'outcome',label:'Choose the visible outcome',actionIds:['release-left','release-right']}]},finish:{requiredInteractionIds:[],requiredResourceIds:[],requiredChoiceGroupIds:['outcome']}};
+  const {objects:_,...richDesign}=rich;
+  const world:any=await runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,
+    transport:rawTransport([{kind:'inventory',objects},richDesign]),compile:async(candidate:any)=>{
+      const base:any={id:'synthetic-causal-protocol',name:candidate.name,description:'Synthetic runtime contract test, not generated-photo proof.',theme:'grove',width:1000,height:1000,source:'manual',sourceImage:'',revision:1,
+        entities:candidate.objects.map((object:any)=>({id:object.id,label:object.label,kind:object.kind,x:object.bounds.left,y:object.bounds.top,width:object.bounds.right-object.bounds.left,height:object.bounds.bottom-object.bounds.top})),
+        gameplay:{movement:'discover',objectiveTitle:candidate.gameplay.objectiveTitle,instructions:candidate.gameplay.instructions,clues:[]},goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],requiredChoiceGroupIds:candidate.gameplay.requiredChoiceGroupIds}};
+      return applyPlannedInteractions(base,candidate.gameplay.interactions,candidate.gameplay.requiredInteractionIds,true);
+    }});
+  for(const side of ['left','right']){
+    const initial=emptyPlayState();assert.equal(reduceInteraction(world,initial,{type:'perform',actionId:`release-${side}`}).ok,false,'The visible payoff cannot precede preparation.');
+    const selected=reduceInteraction(world,initial,{type:'selectSource',entityId:'source'});assert.equal(selected.ok,true);
+    const prepared=reduceInteraction(world,selected.state,{type:'perform',actionId:'prepare'});assert.equal(prepared.ok,true);
+    const released=reduceInteraction(world,prepared.state,{type:'perform',actionId:`release-${side}`});assert.equal(released.ok,true);
+    assert.equal(released.state.interactions?.quantities.receiver,0,'The earned consequence spends its actual authored resource.');
+    assert.equal(goalProgress(world,released.state).ready,true);
+    assert.equal(reduceInteraction(world,released.state,{type:'perform',actionId:`release-${side==='left'?'right':'left'}`}).ok,false);
+    assert.ok(interactionEffects(world,released.state).objectMoves.subject);
+  }
+});
+
+
+test('investigation can omit scenery roles without inferring any interactive source or finish',async()=>{
+  const context={id:'context',label:'Stationary background detail',bounds:{left:800,top:50,right:900,bottom:150}};
+  const objects=[...plan.objects,context];
+  const {objects:_,...design}=investigation;
+  const result=await runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,transport:rawTransport([{kind:'inventory',objects},design]),compile:async(candidate:any)=>candidate});
+  assert.equal(result.objects.length,3);assert.equal(result.objects[2].id,'context');assert.equal(result.objects[2].kind,'decoration');
+  assert.deepEqual(result.goalRules,investigation.goalRules);assert.deepEqual(result.gameplay.clues,investigation.clues);
+  for(const roles of [
+    [...investigation.roles,{id:'invented',kind:'decoration'}],
+    [investigation.roles[0],investigation.roles[0]],
+  ])await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection:{...connection,requestsRemaining:()=>0},signal:new AbortController().signal,transport:rawTransport([{kind:'inventory',objects},{...design,roles}]),compile:async()=>true}),/distinct existing source IDs/);
+});
+
+test('ordered investigation steps map losslessly to the legacy runtime contract without duplicate declarations',async()=>{
+  const {objects:_,roles,clues,goalRules,...metadata}=investigation;
+  const steps=clues.map(clue=>({...clue,kind:roles.find(role=>role.id===clue.entityId)?.kind==='goal'?'finish':'collect'}));
+  const decode=async(value:unknown)=>runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,transport:transport([value]),compile:async(candidate:any,_connection,compact)=>{assert.equal(compact,false);assert.doesNotThrow(()=>readGameplayPlan(candidate.gameplay));return candidate;}});
+  const modern=await decode({...metadata,steps});
+  const legacy=await decode(investigation);
+  assert.deepEqual(modern,legacy,'Explicit step kinds preserve all source roles, required IDs, clues and finish.');
+  assert.deepEqual(modern.gameplay.clues,clues);
+  assert.deepEqual(modern.goalRules,goalRules);
+  const schema:any=photoPlanningSchema.anyOf.find((branch:any)=>branch.properties.kind.const==='investigation');
+  assert.ok(schema.properties.steps);
+  for(const field of ['roles','clues','goalRules'])assert.ok(!Object.hasOwn(schema.properties,field),'Outgoing model contract declares a target only once.');
+});
+
+test('ordered investigation rejects unknown or duplicate targets and any implicit, early or repeated finish',async()=>{
+  const {objects:_,roles:__,clues:___,goalRules:____,...metadata}=investigation;
+  const collect={entityId:'source',kind:'collect',text:'A source-grounded visible relation.'};
+  const finish={entityId:'receiver',kind:'finish',text:'The real pictured final detail.'};
+  for(const steps of [
+    [collect,{...finish,entityId:'invented'}],
+    [collect,{...finish,entityId:'source'}],
+    [{...collect,kind:'finish'},finish],
+    [collect,{...finish,kind:'collect'}],
+    [{...collect,kind:'finish'},{...finish,kind:'collect'}],
+    [collect,{...finish,text:'x'.repeat(161)}],
+    [collect],
+  ])await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection:{...connection,requestsRemaining:()=>0},signal:new AbortController().signal,transport:transport([{...metadata,steps}]),compile:async()=>{throw Error('Invalid steps must never compile.');}}),ModelPlanError);
+  await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection:{...connection,requestsRemaining:()=>0},signal:new AbortController().signal,transport:transport([{...metadata,steps:[collect,finish],goalRules:investigation.goalRules}]),compile:async()=>true}),/never mix steps/);
 });

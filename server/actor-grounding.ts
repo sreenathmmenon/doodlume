@@ -2,6 +2,7 @@ import sharp from 'sharp';
 import { pixelBox } from './images.js';
 import { localSegmentationArtwork, type LocalSegmentationConfig, type LocalMaskBox } from './local-segmentation.js';
 import type { SourceSelection } from './creative-adaptation.js';
+import { uniqueActorContexts } from './actor-contexts.js';
 
 /** A box prompt needs context to recover a limb that the language model's box
  * clipped. Use real local SAM pixels to bound the principal connected subject,
@@ -76,19 +77,20 @@ async function groundWholeActorPass(source: Buffer, actor: SourceSelection, conf
     const x=Math.max(0,actor.x+actor.width*shift-actor.width*.12), y=Math.max(0,actor.y-actor.height*.12);
     regions.push(pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+shift+.12))-x,height:Math.min(1000,actor.y+actor.height*1.5)-y},iw,ih));
   }
+  const contexts=uniqueActorContexts(regions);
   // Keep the worker's per-request pixel bound when extra tight contexts are
   // needed for a large photograph; its image embedding stays cached across batches.
   const masks=new Map<string,string>();
   let batch:LocalMaskBox[]=[],pixels=0;
   const flush=async()=>{if(!batch.length)return;for(const [id,art] of await localSegmentationArtwork(source,batch,config,signal,{selectPrincipalComponent:true}))masks.set(id,art);batch=[];pixels=0;};
-  for(const [index,box] of regions.entries()){
+  for(const [index,box] of contexts.entries()){
     if(batch.length && (pixels+box.width*box.height>8_000_000 || batch.length>=24))await flush();
     batch.push({id:`actor-context-${index}`,left:box.left,top:box.top,right:box.left+box.width,bottom:box.top+box.height,
       ...(box.prompt?{prompt:{left:box.prompt.left,top:box.prompt.top,right:box.prompt.left+box.prompt.width,bottom:box.prompt.top+box.prompt.height}}:{})});pixels+=box.width*box.height;
   }
   await flush();
   const candidates: {subject: SourceSelection; score:number; sparse:boolean; pixels:Uint32Array; context:string}[]=[];
-  for (const [index, box] of regions.entries()) {
+  for (const [index, box] of contexts.entries()) {
   const art = masks.get(`actor-context-${index}`); if (!art) continue;
   const { data, info } = await sharp(Buffer.from(art.split(',')[1], 'base64')).raw().toBuffer({ resolveWithObject: true });
   const seen = new Uint8Array(info.width * info.height), queue = new Int32Array(seen.length);

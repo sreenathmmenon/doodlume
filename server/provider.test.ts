@@ -84,3 +84,11 @@ test("provider output modes retain local schema instructions and use only docume
   assert.deepEqual(fireworks.response_format, {type:"json_object",schema});
   assert.match(fireworks.messages[0].content as string, /JSON Schema/);
 });
+
+test('Fireworks capacity tier is explicit and never leaks into another provider',()=>{
+  const request=(env:Record<string,string>)=>drawingRequest(modelConnection(env),'image','intent','instructions',{});
+  assert.equal('service_tier' in request({MODEL_PROVIDER:'fireworks'}),false);
+  assert.equal(request({MODEL_PROVIDER:'fireworks',FIREWORKS_SERVICE_TIER:'priority'}).service_tier,'priority');
+  assert.equal('service_tier' in request({MODEL_PROVIDER:'meta',FIREWORKS_SERVICE_TIER:'priority'}),false);
+  assert.throws(()=>modelConnection({MODEL_PROVIDER:'fireworks',FIREWORKS_SERVICE_TIER:'unsupported'}));
+});

@@ -1,5 +1,10 @@
 import type { PlanningExecutionBudget } from "./planning-budget.js";
 export type Provider = "meta" | "baseten" | "fireworks";
+export interface ModelCallTiming {
+  provider:Provider; durationMs:number; outcome:'completed'|'failed'|'cancelled'|'deadline';
+  serviceTier?:'default'|'priority'; status?:number; firstTokenMs?:number;
+  processingMs?:number; promptTokens?:number; cachedPromptTokens?:number;
+}
 
 export interface ModelConnection {
   provider: Provider;
@@ -14,6 +19,10 @@ export interface ModelConnection {
   requestsRemaining?: () => number;
   /** One request shares inference time with extraction and final validation. */
   executionBudget?: PlanningExecutionBudget;
+  /** Explicit same-provider capacity choice; never changes model or account. */
+  serviceTier?: 'default'|'priority';
+  /** Numeric timing only; no source content, keys or raw provider messages. */
+  onTiming?: (timing:ModelCallTiming)=>void;
 }
 
 export function modelConnection(
@@ -24,6 +33,10 @@ export function modelConnection(
     env.MODEL_PROVIDER?.trim() ||
     (env.MODEL_API_KEY?.trim() ? "meta" : "baseten");
   if (provider === "fireworks") {
+    const serviceTier=env.FIREWORKS_SERVICE_TIER?.trim();
+    if(serviceTier && serviceTier!=='default' && serviceTier!=='priority')
+      throw new Error('FIREWORKS_SERVICE_TIER must be default or priority.');
+    const configuredTier=serviceTier==='priority'?'priority' as const:serviceTier==='default'?'default' as const:undefined;
     const model =
       env.FIREWORKS_MODEL?.trim() ||
       "accounts/fireworks/models/muse-spark-open";
@@ -42,6 +55,7 @@ export function modelConnection(
       endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
       // Use the same prompt schema and local checks as the hosted Baseten path.
       enforcedSchema: false,
+      ...(configuredTier?{serviceTier:configuredTier}:{}),
     };
   }
   if (provider === "baseten") {
@@ -116,5 +130,6 @@ export function drawingRequest(
           response_format: { type: "json_object" as const, schema },
         } : {}) }),
     max_tokens: 5000,
+    ...(connection.provider==='fireworks' && connection.serviceTier?{service_tier:connection.serviceTier}:{}),
   };
 }

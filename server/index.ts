@@ -47,6 +47,7 @@ function reserveRequest() {
   requests++;
 }
 connection.reserveRequest = reserveRequest;
+connection.onTiming = timing => console.info(JSON.stringify({event:'model-call',...timing}));
 const segmentation = {
   ...segmentationConnection(process.env, connection),
   reserveRequest,
