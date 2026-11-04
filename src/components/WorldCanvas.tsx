@@ -26,7 +26,7 @@ import {
 import "./world-canvas-controls.css";
 import { objectName } from "../lib/object-name";
 import { activeInteractionSource, interactionState } from "../../shared/interactions";
-import { nextInteractionHint } from "../lib/interaction-guide";
+import { nextInteractionHint, selectedSourceTargets } from "../lib/interaction-guide";
 import { canSelectInteractionSource, inspectInteractionTarget, incompatibleTargetReason } from "../../shared/interaction-preview";
 import {
   diagnosticsEnabled,
@@ -525,6 +525,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     // Frame reports update position frequently. Re-plan an open hint only when
     // actual progress changes; revealing it is deliberately opt-in.
     const progressKey = JSON.stringify([discoveryProgress.interactions, discoveryProgress.collected, discoveryProgress.activated, discoveryProgress.completed, discoveryProgress.exploring]);
+    const sourceTargets = useMemo(() => selectedSourceTargets(props.world, discoveryProgress), [props.world, progressKey]);
+    const sourceTargetNames = sourceTargets.map(id => objectName(props.world, id, 70));
+    const sourceTargetSummary = sourceTargetNames.slice(0, 2).join(" / ") + (sourceTargetNames.length > 2 ? ` +${sourceTargetNames.length - 2}` : "");
     const targetPreviews = useMemo(() => selectedDiscovery ? inspectInteractionTarget(props.world, discoveryProgress, selectedDiscovery) : [],
       [props.world, progressKey, selectedDiscovery]);
     const selectedPreview = targetPreviews.length === 1 ? targetPreviews[0] : targetPreviews.find(preview => preview.id === selectedObjectAction);
@@ -612,7 +615,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
             </select>
           </label>
-          {selectedObject?.resource && !simpleTransfer && <p className="object-resource-detail">{quantityLabel.format(interactionProgress.quantities[selectedObject.entityId] ?? 0)} / {quantityLabel.format(selectedObject.resource.capacity)}</p>}
+          {selectedObject?.resource && !simpleTransfer && <p className="object-resource-detail">{selectedObject.resource.type} · {quantityLabel.format(interactionProgress.quantities[selectedObject.entityId] ?? 0)} / {quantityLabel.format(selectedObject.resource.capacity)}</p>}
           {targetPreviews.length > 1 && <label>Choose an action
             <select aria-label="Choose object action" aria-describedby={selectedPreview ? objectPreviewId : undefined} value={selectedPreview?.id ?? ""} onChange={event => setSelectedObjectAction(event.target.value)}>
               <option value="">Choose an action…</option>
@@ -643,8 +646,8 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         <div className="object-play-strip">
           {sourceObject && <div className="carried-object" role="status">
             {!sourceIsFixed && sourceObject.art && <img src={sourceObject.art} alt="" />}
-            <span><small>{sourceIsFixed ? "Selected" : "Holding"}</small><strong>{objectName(props.world, sourceObject.id, 42)}</strong></span>
-            {sourceResource && <span className="carried-quantity" aria-label={`${quantityLabel.format(interactionProgress.quantities[sourceObject.id])} of ${quantityLabel.format(sourceResource.capacity)} remaining`}>{quantityLabel.format(interactionProgress.quantities[sourceObject.id])}/{quantityLabel.format(sourceResource.capacity)}</span>}
+            <span><small title={sourceTargetNames.length ? `Use with ${sourceTargetNames.join(" / ")}` : undefined}>{sourceIsFixed ? "Selected" : "Holding"}{sourceTargetSummary && <> · Use with {sourceTargetSummary}</>}</small><strong title={sourceObject.label}>{objectName(props.world, sourceObject.id, 42)}</strong></span>
+            {sourceResource && <span className="carried-quantity" title={`${sourceResource.type}: ${quantityLabel.format(interactionProgress.quantities[sourceObject.id] ?? 0)} of ${quantityLabel.format(sourceResource.capacity)} remaining`}>{sourceResource.type} · {quantityLabel.format(interactionProgress.quantities[sourceObject.id] ?? 0)}/{quantityLabel.format(sourceResource.capacity)} left</span>}
             {!objectControlsOpen && <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`${releaseLabel} ${objectName(props.world, sourceObject.id, 42)}`} title={`${releaseLabel} (Q)`}>{releaseLabel}</button>}
           </div>}
           {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}

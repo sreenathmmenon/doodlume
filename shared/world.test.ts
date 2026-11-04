@@ -7,9 +7,10 @@ import {
   emptyPlayState,
   withGoalRules,
 } from "./world.js";
-import { EXAMPLES, freshExample } from "../src/lib/examples.js";
+import catalog from "../public/art/showcase/catalog.json";
+import { EXAMPLES, PRESENTED_EXAMPLES, freshExample } from "../src/lib/examples.js";
 
-test("all three authored worlds satisfy the same world contract", () => {
+test("all saved example worlds satisfy the same world contract", () => {
   for (const example of EXAMPLES)
     assert.equal(validateWorld(example).id, example.id);
   const first = freshExample(EXAMPLES[0].id);
@@ -17,6 +18,18 @@ test("all three authored worlds satisfy the same world contract", () => {
   assert.notEqual(first.id, second.id);
   assert.equal(first.exampleId, EXAMPLES[0].id);
   assert.equal(validateWorld(first).id, first.id);
+});
+
+test("featured play links resolve to validated examples before the legacy gallery", () => {
+  for (const entry of catalog.examples) {
+    const id = new URLSearchParams(entry.href.split("?")[1]).get("example");
+    const found = EXAMPLES.find(world => world.id === id || world.exampleId === id);
+    assert.ok(found, `Missing playable example: ${id}`);
+    assert.equal(found.source, "example", "Browsing a featured world must not create unsaved work");
+    assert.equal(validateWorld(found).id, found.id);
+  }
+  assert.deepEqual(PRESENTED_EXAMPLES.slice(0, catalog.examples.length).map(world => world.exampleId ?? world.id), catalog.examples.map(entry => entry.id));
+  assert.equal(EXAMPLES[0].id, "willow-grove");
 });
 
 test("ambiguous object IDs and missing gate targets cannot enter the engine", () => {

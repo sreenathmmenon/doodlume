@@ -27,10 +27,11 @@ export function removeObjectAbilityDraft(worldId: string, revision: number, obje
 }
 
 /** Author executable object relationships; no source names select mechanics. */
-export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPickDestination, onCancelDestination, onDraftChange }: {
+export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPickDestination, onCancelDestination, onDraftChange, requireAbilityChoice = false }: {
   world: WorldDefinition; item: WorldEntity; plan?: InteractionPlan;
   onChange: (plan: InteractionPlan | undefined, requirements?: Pick<GoalRules, "requiredInteractionIds" | "requiredChoiceGroupIds">) => void;
   onDraw?: () => void;
+  requireAbilityChoice?: boolean;
   onCancelDestination?: () => void;
   onDraftChange?: (dirty: boolean) => void;
   onPickDestination?: (target: WorldEntity, choose: (point: {x: number; y: number}) => void) => void;
@@ -46,7 +47,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   const canCarry = !item.artSource || !world.entities.some(isSourceBackdrop) || Boolean(item.sourceLayer && item.art);
   const existingSource = plan?.objects.find(object => object.entityId === item.id);
   const hasOperation = Boolean(plan?.actions.some(action => action.toolId === item.id && action.kind === "operate"));
-  const defaultBehavior = movementMode(world) !== "discover" && (!canCarry || hasOperation) ? "" : "transfer";
+  const defaultBehavior = requireAbilityChoice || movementMode(world) !== "discover" && (!canCarry || hasOperation) ? "" : "transfer";
   const [behavior, setBehavior] = useState(draft?.behavior ?? defaultBehavior);
   const initialUseInPlace = existingSource?.usableInPlace ?? (hasOperation || !canCarry);
   const [useInPlace, setUseInPlace] = useState(draft?.useInPlace ?? initialUseInPlace);
@@ -204,7 +205,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     setPreview(undefined);
     onChange(next, requirements);
     setAlternativeTo("");
-    setTargetId(""); setBehavior(mode !== "discover" && (!canCarry || hasOperation || operates) ? "" : "transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
+    setTargetId(""); setBehavior(requireAbilityChoice || mode !== "discover" && (!canCarry || hasOperation || operates) ? "" : "transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
     setUseInPlace(Boolean(source.usableInPlace));
     setCosts([]); setAmount(1); setSupply(1); setCapacity(1); setPrerequisites([]); setResourcePrerequisites([]); setDestination(undefined); setError("");
   }
@@ -291,7 +292,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       </select>
     </label>
     <label>{behavior === "place" ? "Place at" : operates ? effectBehavior === "open" ? "Gate to open" : movesObject ? "Object to move" : "Character" : "Works with"}
-      <select aria-label="Action target" title={targets.find(entity => entity.id === targetId)?.label} value={targetId} onChange={e => { onCancelDestination?.(); setTargetId(e.target.value); setDestination(undefined); setError(""); }}>
+      <select aria-label="Action target" disabled={!behavior} title={targets.find(entity => entity.id === targetId)?.label} value={targetId} onChange={e => { onCancelDestination?.(); setTargetId(e.target.value); setDestination(undefined); setError(""); }}>
         <option value="">Choose an object…</option>
         {targets.map(e => <option key={e.id} value={e.id}>{e.label || e.kind}</option>)}
       </select>
@@ -354,7 +355,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       </label>)}
     </details>}
     <div className="purpose-draft-actions"><button className="secondary-button" aria-label="Preview effect" disabled={!behavior || !targetId} onClick={() => addAction(true)}>Preview</button>
-    <button className="secondary-button" onClick={() => addAction()}>Add ability</button></div>
+    <button className="secondary-button" disabled={!behavior || !targetId} onClick={() => addAction()}>Add ability</button></div>
     {preview && <div className="purpose-preview" role="status"><strong>{preview.available ? "Effect in a fresh run" : "Not ready in a fresh run"}</strong><span>{preview.text}</span><small>Preview only · Add ability, then Apply to try it.</small></div>}
     {dirty && <button className="text-button" onClick={cancelAbilityDraft}>Cancel ability draft</button>}
     </details>

@@ -1,11 +1,22 @@
 import type { PlayState, WorldDefinition } from "../../shared/world";
-import { activeInteractionSource, selectInteractionSourceCommand, reduceInteraction, interactionChoiceBlockedReason, interactionCompletionStatus, interactionState, safeAvailableInteractions } from "../../shared/interactions";
+import { activeInteractionSource, selectInteractionSourceCommand, reduceInteraction, interactionChoiceBlockedReason, interactionCompletionStatus, interactionState, safeAvailableInteractions, playerAvailableInteractions } from "../../shared/interactions";
 import { objectName } from "./object-name";
 
 export interface InteractionHint {
   entityId: string;
   text: string;
   recovery?: boolean;
+}
+
+/** Show the selected tool's present affordances, not a route or a guaranteed
+ * solution. In retryable games this deliberately preserves legal risky choices. */
+export function selectedSourceTargets(world: WorldDefinition, state: PlayState): string[] {
+  if (state.completed && !state.exploring) return [];
+  const source = activeInteractionSource(interactionState(world, state));
+  if (!source) return [];
+  return [...new Set(playerAvailableInteractions(world, state)
+    .filter(action => action.kind !== "operate" && action.toolId === source)
+    .map(action => action.targetId))];
 }
 
 /** An optional hint uses the same legal actions as play. It never spends a

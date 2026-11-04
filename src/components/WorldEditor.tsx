@@ -228,6 +228,7 @@ function WorldEditorSession({
   } | null>(null);
   const [error, setError] = useState("");
   const [drawing, setDrawing] = useState(false);
+  const drawingRequest = useRef(0);
   const [customArt, setCustomArt] = useState<string | null>(savedDraft?.customArt ?? null);
   const [customArtAspect, setCustomArtAspect] = useState(savedDraft?.customArtAspect ?? 1);
   const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
@@ -766,6 +767,26 @@ function WorldEditorSession({
     setError("");
     requestAnimationFrame(() => canvas.current?.focus());
   }
+  function addDrawnPart(art: string, aspectRatio: number) {
+    // A drawing becomes an editor draft immediately, not an invisible pending brush.
+    // Abilities and the live world remain unchanged until explicitly authored/applied.
+    const ratio = Math.max(.04, Math.min(25, aspectRatio));
+    const height = Math.min(bounds.height, Math.max(12, Math.round(180 / Math.max(1, ratio))));
+    const width = Math.min(bounds.width, Math.max(12, Math.round(height * ratio)));
+    const entity: WorldEntity = {
+      id: `drawn-${crypto.randomUUID()}`, kind: "decoration", label: "My new part", art,
+      x: Math.round(limit(view.x + view.width / 2 - width / 2, 0, bounds.width - width)),
+      y: Math.round(limit(view.y + view.height / 2 - height / 2, 0, bounds.height - height)),
+      width, height,
+    };
+    setAdditions(items => [...items, entity]);
+    selectObject(entity.id);
+    setTool("move");
+    setPanMode(false);
+    setReviewed(false);
+    setError("");
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Object name"]')?.focus({preventScroll: true}));
+  }
   function canvasKey(event: KeyboardEvent<SVGSVGElement>) {
     if (destinationPick) {
       const shift: Record<string, [number, number]> = {ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1]};
@@ -1238,6 +1259,7 @@ function WorldEditorSession({
               <div className="editor-art-action">
                 <button
                   className="secondary-button"
+                  disabled={world.entities.length + additions.length >= 160}
                   onClick={() => { selectObject(null); setDrawing(true); }}
                 >
                   <ImagePlus size={15} /> Draw object
@@ -1537,6 +1559,7 @@ function WorldEditorSession({
                     onChange={(e) => update({ label: e.target.value })}
                   />
                 </label>
+                {!existingSelected && item.art && <p className="editor-scope">New part · move it on the scene and choose what it does.</p>}
                 <ObjectBehaviorEditor key={`${item.id}:${abilityFormReset}`} world={{...world, ...bounds, goalRules: patch.goalRules ?? world.goalRules, entities: [...currentEntities, ...additions]}} item={item} plan={interactions} onChange={(plan, requirements) => {
                     setInteractions(plan);
                     if (requirements) {
@@ -1544,6 +1567,7 @@ function WorldEditorSession({
                       setRequiredChoiceGroupIds([...(requirements.requiredChoiceGroupIds ?? [])]);
                     }
                   }} onDraw={!existingSelected ? () => setDrawing(true) : undefined}
+                  requireAbilityChoice={!existingSelected}
                   onDraftChange={setAbilityDraftDirty} onCancelDestination={() => setDestinationPick(undefined)}
                   onPickDestination={(target, choose) => {
                     destinationOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1721,13 +1745,17 @@ function WorldEditorSession({
         }} />}
       {drawing && (
         <SketchPad
-          title="Draw an object"
+          title={item ? "Draw this object" : "Draw a new part"}
+          useLabel={item ? "Update object art" : "Add this part"}
           resumeImage={sketchDraft}
           onPause={setSketchDraft}
-          onClose={() => setDrawing(false)}
+          onClose={() => { drawingRequest.current++; setDrawing(false); }}
           onUse={(image) => {
+            const request = ++drawingRequest.current;
+            setSketchDraft(image);
             void extractSketchInk(image)
               .then((ink) => {
+                if (request !== drawingRequest.current) return;
                 if (item)
                   update({
                     art: ink.art,
@@ -1735,11 +1763,12 @@ function WorldEditorSession({
                     sourceOutline: undefined,
                     artNote: undefined,
                   });
-                else { setCustomArt(ink.art); setCustomArtAspect(ink.aspectRatio); setTool("decoration"); }
+                else addDrawnPart(ink.art, ink.aspectRatio);
                 setSketchDraft(undefined);
                 setDrawing(false);
               })
               .catch((e) => {
+                if (request !== drawingRequest.current) return;
                 setError(
                   e instanceof Error
                     ? e.message

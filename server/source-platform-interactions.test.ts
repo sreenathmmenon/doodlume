@@ -140,3 +140,21 @@ let pending='';process.stdin.on('data',chunk=>{pending+=chunk;let end;while((end
     });
   } finally { closeLocalSegmentationWorkers(); await rm(directory,{recursive:true,force:true}); }
 });
+
+test("thin actual ground is retained and a wide floor starts beside the pictured actor", async () => {
+  const source = await sharp({create:{width:1440,height:820,channels:3,background:'#fff8ee'}}).png().toBuffer();
+  const objects=[object('hero','player',20,480,90,300),object('ground','terrain',4,792,992,8),
+    object('switch','lever',542,548,50,258),object('gate','gate',663,324,176,485),
+    object('threshold','terrain',663,796,177,10),object('door','goal',840,262,75,544)];
+  objects.find(e=>e.id==='switch')!.targetId='gate';
+  const plan:GameplayPlan={mode:'source-layout',movement:'platform',avatarId:'hero',objective:'activate',objectiveLabel:'Activate switch',objectiveTitle:'Open the drawn gate',instructions:'Move and jump to the switch, open the gate and reach the doorway.',reason:'Geometry regression fixture.',destinationLabel:'Door',finishDestination:{kind:'source',entityId:'door'},path:[{x:65,y:780,label:'Hero'},{x:570,y:790,label:'Switch'},{x:880,y:790,label:'Door'}],clues:[],obstacleIds:[]};
+  let reason='';
+  const world=await sourcePlatformScene({source,inputKind:'drawing',name:'Thin-floor fixture',description:'Synthetic geometry verification, not model inference.',theme:'grove',objects,plan,segmentation:{enabled:false,apiKey:''},signal:new AbortController().signal,transport:fetch,requested:{requiredCollectedIds:[],requiredActivatedIds:['switch']},finishRules:(_e,d)=>d,onReject:m=>{reason=m;}});
+  assert.ok(world,reason);
+  const ground=world.entities.find(e=>e.id==='ground')!;
+  assert.equal(ground.height,6.56);assert.equal(ground.y,649.4399999999999);
+  const hero=world.entities.find(e=>e.id==='hero')!;
+  assert.ok(Math.abs(hero.x+hero.width/2-65*1.44)<1e-6,'Use the actual subject center when the stance is clear.');
+  assert.equal(world.entities.some(e=>e.id.startsWith('introduced-connector')),false);
+  validateWorld(world);
+});

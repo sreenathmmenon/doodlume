@@ -72,7 +72,7 @@ import {
   type WorldPatch,
   type RevisionCheckpoint,
 } from "../shared/revisions";
-import { EXAMPLES, freshExample } from "./lib/examples";
+import { EXAMPLES, PRESENTED_EXAMPLES, freshExample } from "./lib/examples";
 import { copyExample } from "./lib/example-copy";
 import type { StudioEntry } from "./lib/studio-entry";
 import { isSourceAlignedScenery } from "../shared/source-scenery";
@@ -357,7 +357,16 @@ export default function App({ active = true, entry, onEntryConsumed }: { active?
   useEffect(() => {
     if (libraryLoading || !active) return;
     const enterCreation = () => {
-      const entry = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("create");
+      const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+      const exampleId = params.get("example");
+      if (window.location.hash.startsWith("#studio") && exampleId) {
+        const template = EXAMPLES.find(value => value.id === exampleId || value.exampleId === exampleId);
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#studio`);
+        if (!template) { tell("That example is unavailable. Your world is unchanged."); return; }
+        requestWorldOpen(() => { loadWorld(freshExample(template.id)); setStarted(true); setFocusedPlay(true); setPlaying(true); previousPlaying.current = true; setDialog(null); });
+        return;
+      }
+      const entry = params.get("create");
       if (!window.location.hash.startsWith("#studio") || (entry !== "upload" && entry !== "sketch")) return;
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#studio`);
       openCreation(entry);
@@ -1792,7 +1801,7 @@ export default function App({ active = true, entry, onEntryConsumed }: { active?
             <ChevronRight size={15} />
           </summary>
           <div className="example-grid">
-            {EXAMPLES.map((example, i) => (
+            {PRESENTED_EXAMPLES.map((example, i) => (
               <button
                 key={example.id}
                 className={`example-card example-${example.theme} ${(world.exampleId ?? world.id) === example.id ? "selected" : ""}`}
@@ -1812,15 +1821,7 @@ export default function App({ active = true, entry, onEntryConsumed }: { active?
               >
                 <div className="example-art">
                   <span className="example-number">0{i + 1}</span>
-                  <div className="mini-sun" />
-                  <div className="mini-hill back" />
-                  <div className="mini-hill front" />
-                  <img
-                    className="mini-hero"
-                    src={example.entities.find((e) => e.kind === "player")!.art}
-                    alt=""
-                  />
-                  <img className="mini-seed" src="/art/seed.svg" alt="" />
+                  <img className="example-source-preview" src={example.sourceImage} alt="" loading="lazy" />
                   <span className="example-open">
                     {(world.exampleId ?? world.id) === example.id ? (
                       <Check size={16} />

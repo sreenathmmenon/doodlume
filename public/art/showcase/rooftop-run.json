@@ -1,0 +1,270 @@
+{
+  "id": "showcase-rooftop-run",
+  "name": "Rooftop run",
+  "description": "A hand-drawn cat stands on a row of three rooftops connected by a leaning ladder, with a plump fish waiting on the highest roof.",
+  "theme": "moon",
+  "width": 1440,
+  "height": 960,
+  "source": "example",
+  "sourceImage": "/art/showcase/rooftop-run-source.webp",
+  "inputKind": "drawing",
+  "revision": 1,
+  "entities": [
+    {
+      "id": "introduced-source-atmosphere",
+      "kind": "decoration",
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 960,
+      "art": "/art/showcase/rooftop-run-object-0.webp",
+      "artMethod": "crop",
+      "artSource": {
+        "x": 0,
+        "y": 0,
+        "width": 1000,
+        "height": 1000
+      },
+      "label": "Original image",
+      "artNote": "Original scenery at source coordinates; moving source artwork isolated and background reconstructed locally. Background reconstructed with local LaMa."
+    },
+    {
+      "id": "left-roof",
+      "kind": "terrain",
+      "x": 167.04,
+      "y": 524.16,
+      "width": 416.15999999999997,
+      "height": 24,
+      "label": "Left Roof",
+      "artSource": {
+        "x": 103,
+        "y": 542,
+        "width": 307,
+        "height": 46
+      },
+      "artNote": "Original source pixels masked by Meta SAM 2.1 tiny running locally. Check the outline.",
+      "sourcePlacement": {
+        "x": 167.04,
+        "y": 524.16,
+        "width": 416.15999999999997,
+        "height": 24
+      },
+      "art": "/art/showcase/rooftop-run-object-1.webp",
+      "artMethod": "sam"
+    },
+    {
+      "id": "mid-roof",
+      "kind": "terrain",
+      "x": 583.1999999999999,
+      "y": 471.35999999999996,
+      "width": 309.59999999999997,
+      "height": 24,
+      "label": "Middle Roof",
+      "artSource": {
+        "x": 393,
+        "y": 484,
+        "width": 235,
+        "height": 48
+      },
+      "artNote": "Original source pixels masked by Meta SAM 2.1 tiny running locally. Check the outline.",
+      "sourcePlacement": {
+        "x": 583.1999999999999,
+        "y": 471.35999999999996,
+        "width": 309.59999999999997,
+        "height": 24
+      },
+      "art": "/art/showcase/rooftop-run-object-2.webp",
+      "artMethod": "sam"
+    },
+    {
+      "id": "right-roof",
+      "kind": "terrain",
+      "x": 989.28,
+      "y": 319.68,
+      "width": 345.59999999999997,
+      "height": 24,
+      "label": "Right Roof",
+      "artSource": {
+        "x": 680,
+        "y": 326,
+        "width": 257,
+        "height": 57
+      },
+      "artNote": "Original source pixels masked by Meta SAM 2.1 tiny running locally. Check the outline.",
+      "sourcePlacement": {
+        "x": 989.28,
+        "y": 319.68,
+        "width": 345.59999999999997,
+        "height": 24
+      },
+      "art": "/art/showcase/rooftop-run-object-3.webp",
+      "artMethod": "sam"
+    },
+    {
+      "id": "ladder-bridge",
+      "kind": "bridge",
+      "x": 774.72,
+      "y": 327.36,
+      "width": 257.76,
+      "height": 24,
+      "label": "Ladder",
+      "artSource": {
+        "x": 528,
+        "y": 335,
+        "width": 196,
+        "height": 171
+      },
+      "artNote": "Original source pixels masked by Meta SAM 2.1 tiny running locally. Check the outline.",
+      "sourcePlacement": {
+        "x": 774.72,
+        "y": 327.36,
+        "width": 257.76,
+        "height": 24
+      },
+      "art": "/art/showcase/rooftop-run-object-4.webp",
+      "artMethod": "sam"
+    },
+    {
+      "id": "fish-coin",
+      "kind": "coin",
+      "x": 1082.8799999999999,
+      "y": 229.44,
+      "width": 230.39999999999998,
+      "height": 85.44,
+      "label": "Fish",
+      "artSource": {
+        "x": 752,
+        "y": 239,
+        "width": 160,
+        "height": 89
+      },
+      "artNote": "Actual source artwork assembled into the playable scene; source selection remains available in the original image.",
+      "art": "/art/showcase/rooftop-run-object-5.webp",
+      "artMethod": "paper"
+    },
+    {
+      "id": "fish-goal",
+      "kind": "goal",
+      "x": 993.5999999999999,
+      "y": 312.96,
+      "width": 341.28,
+      "height": 51.839999999999996,
+      "label": "High Roof Goal",
+      "artSource": {
+        "x": 690,
+        "y": 326,
+        "width": 237,
+        "height": 54
+      },
+      "artNote": "Actual source artwork assembled into the playable scene; source selection remains available in the original image.",
+      "art": "/art/showcase/rooftop-run-object-6.webp",
+      "artMethod": "paper"
+    },
+    {
+      "id": "introduced-connector-1",
+      "kind": "bridge",
+      "x": 530.3199999999999,
+      "y": 424.15999999999997,
+      "width": 129.60000000000002,
+      "height": 16,
+      "label": "Connection toward Fish",
+      "artNote": "Introduced connector between real source surfaces after a bounded jump-clearance check; not detected source artwork."
+    },
+    {
+      "id": "introduced-connector-2",
+      "kind": "bridge",
+      "x": 630.3199999999999,
+      "y": 324.15999999999997,
+      "width": 129.60000000000002,
+      "height": 16,
+      "label": "Connection toward Fish",
+      "artNote": "Introduced connector between real source surfaces after a bounded jump-clearance check; not detected source artwork."
+    },
+    {
+      "id": "cat-player",
+      "kind": "player",
+      "x": 295.12,
+      "y": 424.3771428571428,
+      "width": 160,
+      "height": 105.14285714285715,
+      "label": "Cat",
+      "artSource": {
+        "x": 108.72395833333333,
+        "y": 255.859375,
+        "width": 296.2239583333333,
+        "height": 291.9921875
+      },
+      "artNote": "Source mask extracted by local Meta SAM 2.1 with surrounding context; original pixels retained. Nearby crossing strokes may need review.",
+      "art": "/art/showcase/rooftop-run-object-9.webp",
+      "artMethod": "sam"
+    },
+    {
+      "id": "left-house",
+      "kind": "decoration",
+      "x": 174.23999999999998,
+      "y": 544.3199999999999,
+      "width": 398.88,
+      "height": 255.35999999999999,
+      "label": "Left House",
+      "artSource": {
+        "x": 121,
+        "y": 567,
+        "width": 277,
+        "height": 266
+      },
+      "artNote": "Actual source artwork assembled into the playable scene; source selection remains available in the original image.",
+      "art": "/art/showcase/rooftop-run-object-10.webp",
+      "artMethod": "paper"
+    },
+    {
+      "id": "mid-house",
+      "kind": "decoration",
+      "x": 573.12,
+      "y": 486.71999999999997,
+      "width": 322.56,
+      "height": 285.12,
+      "label": "Middle House",
+      "artSource": {
+        "x": 398,
+        "y": 507,
+        "width": 224,
+        "height": 297
+      },
+      "artNote": "Actual source artwork assembled into the playable scene; source selection remains available in the original image.",
+      "art": "/art/showcase/rooftop-run-object-11.webp",
+      "artMethod": "paper"
+    },
+    {
+      "id": "right-house",
+      "kind": "decoration",
+      "x": 984.9599999999999,
+      "y": 334.08,
+      "width": 345.59999999999997,
+      "height": 432.96,
+      "label": "Right House",
+      "artSource": {
+        "x": 684,
+        "y": 348,
+        "width": 240,
+        "height": 451
+      },
+      "artNote": "Actual source artwork assembled into the playable scene; source selection remains available in the original image.",
+      "art": "/art/showcase/rooftop-run-object-12.webp",
+      "artMethod": "paper"
+    }
+  ],
+  "goalRules": {
+    "requiredCollectedIds": [
+      "fish-coin"
+    ],
+    "requiredActivatedIds": [],
+    "requiredResourceIds": []
+  },
+  "gameplay": {
+    "movement": "platform",
+    "objectiveTitle": "Help the Rooftop Cat Reach the Fish",
+    "instructions": "Move and jump across the rooftops to reach the fish.",
+    "clues": []
+  },
+  "exampleId": "rooftop-run"
+}

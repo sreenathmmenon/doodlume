@@ -2638,3 +2638,6 @@ select:focus-visible {
 @media (max-width: 900px) {
   .studio-v2 .completion-overlay { flex-direction: column; text-align: center; gap: 12px; }
 }
+
+/* Examples show their actual source artwork in every game mode. */
+.example-source-preview { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:var(--field); }

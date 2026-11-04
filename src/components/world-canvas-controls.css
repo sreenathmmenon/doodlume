@@ -294,9 +294,9 @@
 .carried-object { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: auto; }
 .carried-object img { width: 36px; height: 36px; object-fit: contain; }
 .carried-object > span:first-of-type { display: grid; gap: 1px; }
-.carried-object small { font-size: 10px; line-height: 14px; color: var(--muted); }
+.carried-object small { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; line-height: 16px; color: var(--muted); }
 .carried-object strong { max-width: 180px; font-size: 12px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.carried-quantity { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.carried-quantity { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .carried-object button, .object-hint-toggle, .object-next-hint button {
   min-height: 36px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control);
   background: var(--paper); color: var(--ink); white-space: nowrap;

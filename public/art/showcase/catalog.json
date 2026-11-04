@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "examples": [
+    {
+      "id": "rooftop-run",
+      "title": "Rooftop run",
+      "kind": "drawing",
+      "provenance": "AI-generated rough drawing · Meta-generated game",
+      "world": "/art/showcase/rooftop-run.json",
+      "preview": "/art/showcase/rooftop-run-preview.webp",
+      "href": "#studio?example=rooftop-run",
+      "purpose": "Help the cat reach its pictured fish.",
+      "proof": "Completed by keyboard; source art preserved. Instruction wording edited to match move-and-jump controls."
+    },
+    {
+      "id": "rover",
+      "title": "Lunar rescue",
+      "kind": "illustration",
+      "provenance": "AI-generated illustration · authored resource-and-invention game",
+      "world": "/art/showcase/rover.json",
+      "preview": "/art/showcase/rover-preview.webp",
+      "href": "#studio?example=rover",
+      "purpose": "Allocate limited crystals, power the rescue signal and move the rover."
+    },
+    {
+      "id": "patio-care",
+      "title": "A little care",
+      "kind": "photograph",
+      "provenance": "Real photograph · Meta-generated game",
+      "world": "/art/showcase/patio-care.json",
+      "preview": "/art/showcase/patio-care-preview.webp",
+      "href": "#studio?example=patio-care",
+      "purpose": "Use the pictured can to water the pot through game quantities.",
+      "credit": "Photo: Shixart1985 · CC BY2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Person_waters_succulents_on_a_table_in_an_outdoor_setting.jpg"
+    },
+    {
+      "id": "rooftop-springs",
+      "title": "Rooftop springs",
+      "kind": "remix",
+      "provenance": "Player-authored drawn-part remix of the Meta-generated rooftop game",
+      "world": "/art/showcase/rooftop-springs.json",
+      "preview": "/art/showcase/rooftop-springs-preview.webp",
+      "href": "#studio?example=rooftop-springs",
+      "purpose": "Fit the newly drawn spring rig to gain a higher jump.",
+      "proof": "New part drawn through the UI, ability authored, used in play, completed, saved and backed up."
+    }
+  ]
+}

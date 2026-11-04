@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyPlayState, validateWorld } from "../../shared/world";
 import { reduceInteraction, type InteractionCommand } from "../../shared/interactions";
-import { nextInteractionHint, interactionResourceChanges } from "./interaction-guide";
+import { nextInteractionHint, interactionResourceChanges, selectedSourceTargets } from "./interaction-guide";
 
 function fixture() {
   return validateWorld({ id:"hint-fixture",name:"Garden",description:"Test",theme:"grove",width:1440,height:820,source:"manual",sourceImage:"/art/test.png",revision:1,
@@ -24,6 +24,22 @@ function fixture() {
     ]},goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],requiredResourceIds:["plant"]},
   });
 }
+
+test("selected tool affordances follow real availability without selecting a solution", () => {
+  const world = fixture();
+  assert.deepEqual(selectedSourceTargets(world, emptyPlayState()), []);
+  const state = reduceInteraction(world, emptyPlayState(), {type:"pickup", entityId:"pitcher"}).state;
+  const before = JSON.stringify([world, state]);
+  assert.deepEqual(selectedSourceTargets(world, state), ["cup"], "Protected play does not offer a dead-end allocation.");
+  world.interactions!.completionPolicy = "retryable";
+  assert.deepEqual(selectedSourceTargets(world, state), ["waste", "cup"], "A legal risky choice stays available rather than being advertised as a winning route.");
+  delete world.interactions!.completionPolicy;
+  assert.equal(JSON.stringify([world, state]), before, "Showing affordances never changes possession, quantities or completion.");
+  const filled = reduceInteraction(world, state, {type:"perform", actionId:"refill"});
+  assert.equal(filled.ok, true, filled.reason);
+  assert.deepEqual(selectedSourceTargets(world, filled.state), []);
+  assert.deepEqual(selectedSourceTargets(world, {...state, completed:true}), []);
+});
 
 test("retryable losing allocations show actual shortfall only when a hint is requested",()=>{
   const world=fixture();world.interactions!.completionPolicy="retryable";

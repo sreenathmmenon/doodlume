@@ -1,4 +1,10 @@
-import type { WorldDefinition, WorldEntity } from "../../shared/world";
+import { validateWorld, type WorldDefinition, type WorldEntity } from "../../shared/world";
+
+import rooftopRun from "../../public/art/showcase/rooftop-run.json";
+import rooftopSprings from "../../public/art/showcase/rooftop-springs.json";
+import rover from "../../public/art/showcase/rover.json";
+import patioCare from "../../public/art/showcase/patio-care.json";
+import catalog from "../../public/art/showcase/catalog.json";
 
 const ground = (
   id: string,
@@ -223,6 +229,14 @@ export const EXAMPLES: WorldDefinition[] = [
     ],
   },
 ];
+
+EXAMPLES.push(...[rooftopRun, rooftopSprings, rover, patioCare].map(world => validateWorld({...world, source: "example"})));
+
+/** Presentation order only; uploaded images always use the general creation pipeline. */
+export const PRESENTED_EXAMPLES = [...EXAMPLES].sort((a,b) => {
+  const rank=(w:WorldDefinition)=>{const i=catalog.examples.findIndex(e=>e.id===(w.exampleId??w.id));return i<0?100:i;};
+  return rank(a)-rank(b);
+});
 
 export function freshExample(id: string): WorldDefinition {
   const template = EXAMPLES.find((w) => w.id === id) ?? EXAMPLES[0];

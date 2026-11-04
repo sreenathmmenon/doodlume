@@ -88,7 +88,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   entities.push({ id: introducedId("source-atmosphere"), kind: "decoration", x: 0, y: 0, width, height,
     art: imageData(source), artMethod: "crop", artSource: { x: 0, y: 0, width: 1000, height: 1000 },
     label: "Original image", artNote: "Full original image used as the world backdrop; generated gameplay is separate." });
-  const surfaces = sourceSurfaces.map(object => fromSource(object) as Surface).filter(surface => surface.width >= 70 && surface.height >= 8);
+  const surfaces = sourceSurfaces.map(object => fromSource(object) as Surface).filter(surface => surface.width >= 70 && surface.height >= 4);
   if (surfaces.length < 1) return reject("The recognized surfaces are too narrow for the character to land on.");
   // Source ledges use a one-way landing lip. Keep the complete painted object
   // separate from that collision shape, so editing later moves its underside
@@ -116,7 +116,8 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   // Start beside the actual subject, not an approximate semantic waypoint
   // that can move it to the far end of its own ledge.
   const startPoint = { x: (actor.x + actor.width / 2) * sx, y: (actor.y + actor.height) * sy };
-  const starting = surfaces.flatMap(surface => landingXs(surface).filter(x => stanceClear(surface, x)).map(x => ({
+  const starting = surfaces.flatMap(surface => (landingXs(surface).length ? [...new Set([...landingXs(surface),
+    clamp(startPoint.x, surface.x + half + 6, surface.x + surface.width - half - 6)])] : []).filter(x => stanceClear(surface, x)).map(x => ({
     surface, x, score: Math.hypot((x - startPoint.x) * .7, surface.y - startPoint.y),
   }))).sort((a, b) => a.score - b.score)[0];
   if (!starting) return reject("No clear starting position was found on the recognized surfaces. Check that scenery and pillar shafts are not marked as solid platforms.");
@@ -459,7 +460,9 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   const spawnCandidates = [...surfaces].sort((a,b) => Math.hypot(center(a)-startPoint.x,a.y-startPoint.y) - Math.hypot(center(b)-startPoint.x,b.y-startPoint.y));
   let spawn: { surface: Surface; x: number } | undefined;
   for (const surface of spawnCandidates) {
-    const positions = Array.from({ length: 21 }, (_, index) => surface.x + half + 8 + (surface.width - bodyWidth - 16) * index / 20)
+    if (surface.width < bodyWidth + 16) continue;
+    const positions = [...new Set([clamp(startPoint.x, surface.x + half + 8, surface.x + surface.width - half - 8),
+      ...Array.from({ length: 21 }, (_, index) => surface.x + half + 8 + (surface.width - bodyWidth - 16) * index / 20)])]
       .filter(x => stanceClear(surface, x)).filter(x => entities.filter(entity => ["coin", "goal"].includes(entity.kind)).every(entity => !overlaps(stance(surface, x), entity)))
       .sort((a,b) => Math.abs(a - startPoint.x) - Math.abs(b - startPoint.x));
     if (!positions.length) continue;

@@ -213,3 +213,20 @@ test("activity review uses recovered compiled geometry and accepts small real co
   assert.doesNotThrow(()=>reviewCompiledSourceActivity({...compiled,interactions:{...compiled.interactions,actions:[{kind:"transfer",toolId:"source",targetId:"receiver",amount:1,effects:[]}]}}),"One small quantity change is valid.");
   assert.doesNotThrow(()=>reviewCompiledSourceActivity({...compiled,interactions:{...compiled.interactions,objects:[{entityId:"piece",carryable:true,layer:"surface"}]}}));
 });
+
+test("drawing clarification stays a whole bounded question when a provider ignores the short schema",async()=>{
+  const {interpretDrawing}=await import('./interpret.js');
+  const {default:sharp}=await import('sharp');
+  const image='data:image/png;base64,'+(await sharp({create:{width:64,height:64,channels:3,background:'#ccddee'}}).png().toBuffer()).toString('base64');
+  const question="The pictured subject cannot move freely in this mode, because this image stays in place while an explorer moves through it; would you like to use the separate explorer to collect the pictured items while keeping your original artwork intact, or choose a point-and-click activity with those same objects?";
+  assert.ok(question.length>280&&question.length<600);
+  for(const [clarification,expected] of [[question,question],["Explanation. ".repeat(70)+"Which visible object should the player use?","Which visible object should the player use?"],["Unbounded explanation ".repeat(40),"What should the player do with this image, and what result should finish the game?"]]){
+    let calls=0;
+    await assert.rejects(interpretDrawing(image,'Make a game.',connection,new AbortController().signal,{enabled:false,apiKey:''},async(_url,init)=>{
+      calls++;const body=JSON.parse(String(init?.body));
+      assert.equal(body.response_format.schema.properties.clarification.maxLength,280);
+      return response({name:'Clarification',description:'No guessed world.',theme:'grove',clarification,objects:[],goalRules:{requiredCollectedIds:[],requiredActivatedIds:[]}});
+    },'drawing'),error=>error instanceof Error&&error.message===expected);
+    assert.equal(calls,1,'A human question is not retried as an invalid game plan.');
+  }
+});
