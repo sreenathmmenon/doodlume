@@ -201,12 +201,31 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     }
     return placeObject(object, 92);
   });
-  if (!goals.length) {
-    const finishSurface = [...surfaces].sort((a, b) => b.x + b.width - a.x - a.width)[0];
-    const goal: WorldEntity = { id: introducedId("finish"), kind: "goal", x: finishSurface.x + finishSurface.width - 65,
-      y: finishSurface.y - 92, width: 54, height: 92, label: plan.destinationLabel,
-      artNote: "Introduced finish marker on a real source surface; not a detected pictured destination." };
-    anchors.set(goal.id, finishSurface); goals.push(goal); entities.push(goal);
+  if(plan.finishDestination?.kind==="source"&&(goals.length!==1||goals[0].id!==plan.finishDestination.entityId))
+    return reject("The explicit finish must name the one pictured destination assigned the goal role.");
+  if(plan.finishDestination&&plan.finishDestination.kind!=="source"&&goals.length)
+    return reject("An explicit landmark or requirements finish cannot also introduce a different source goal.");
+  if (!goals.length && (!plan.finishDestination || plan.finishDestination.kind==="landmark")) {
+    if(plan.finishDestination?.kind==="landmark"){
+      const point=plan.path[plan.finishDestination.pathIndex];
+      if(!point)return reject("The explicit finish landmark was not found in the source path.");
+      const marker={id:introducedId("finish"),kind:"goal" as const,x:point.x*sx-27,y:point.y*sy-46,width:54,height:92,label:plan.destinationLabel};
+      if(marker.x<0||marker.y<0||marker.x+marker.width>width||marker.y+marker.height>height)
+        return reject("The complete finish marker does not fit at that explicit landmark. Choose a visible landmark with room for the marker; it has not been moved elsewhere.");
+      // Reuse the same bounded target/foothold proof as actual source targets,
+      // but never crop marker art or present its region as a source detection.
+      const goal=placeObject({...marker,x:marker.x/sx,y:marker.y/sy,width:marker.width/sx,height:marker.height/sy},92);
+      artJobs.delete(goal.id);delete goal.artSource;
+      goal.artNote="Introduced finish marker at the explicitly selected source landmark; not a detected pictured destination.";
+      goals.push(goal);
+    }else{
+      // Legacy transports retain their established rightmost-surface fallback.
+      const finishSurface = [...surfaces].sort((a, b) => b.x + b.width - a.x - a.width)[0];
+      const goal: WorldEntity = { id: introducedId("finish"), kind: "goal", x: finishSurface.x + finishSurface.width - 65,
+        y: finishSurface.y - 92, width: 54, height: 92, label: plan.destinationLabel,
+        artNote: "Introduced finish marker on a real source surface; not a detected pictured destination." };
+      anchors.set(goal.id, finishSurface); goals.push(goal); entities.push(goal);
+    }
   }
   if (unsupportedTarget) return reject(`The original position of ${unsupportedTarget} cannot be reached from a clear supporting surface. Adjust its selection or nearby platform.`);
   const goalRules = options.finishRules(entities, {
@@ -461,7 +480,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   for (const object of options.objects.filter(object => object.kind === "decoration" && object.id !== actor.id && !behaviorIds.has(object.id) && !entities.some(entity=>entity.id===object.id))) entities.push(fromSource(object));
   const world: WorldDefinition = { id: randomUUID(), name: options.name.slice(0, 80), description: options.description.slice(0, 500),
     theme: options.theme, width, height, source: "meta", sourceImage: imageData(source), inputKind, revision: 1, entities, goalRules, ...(plan.interactions ? {interactions: plan.interactions} : {}),
-    gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues: plan.clues } };
+    gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues: plan.clues, ...(plan.finishDestination?.kind==="requirements"?{completion:"requirements" as const}:{}) } };
   for (const entity of entities) {
     const object = artJobs.get(entity.id); if (!object) continue;
     signal.throwIfAborted();

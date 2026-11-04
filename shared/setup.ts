@@ -30,7 +30,7 @@ export function setupFeedback(world: WorldDefinition) {
         `Choose the gate opened by “${entity.label || "Switch"}” in its object settings, or change its role.`,
       );
   }
-  errors.push(...reviewGoalRules(world.goalRules, world.entities, true, world.interactions).issues);
+  errors.push(...reviewGoalRules(world.goalRules, world.entities, world.gameplay?.completion !== "requirements", world.interactions).issues);
   try {
     validateWorld(world);
   } catch (e) {

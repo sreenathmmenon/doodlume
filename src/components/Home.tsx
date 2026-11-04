@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowRight, ArrowUpRight, Pause, Pencil, Play, RotateCcw, Maximize2, Minimize2, Check } from "lucide-react";
-import { retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "../../shared/world";
+import { emptyPlayState, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "../../shared/world";
+import { entryFromExample, type StudioEntry } from "../lib/studio-entry";
 import type { WorldCanvasHandle } from "./WorldCanvas";
 import { extractSketchInk } from "../lib/ink";
 import { Brand } from "./Brand";
@@ -9,12 +10,13 @@ import "./Home.css";
 const LiveWorld = lazy(() => import("./WorldCanvas").then(m => ({ default: m.WorldCanvas })));
 const SketchPad = lazy(() => import("./SketchPad").then(m => ({default:m.SketchPad})));
 const scenes = [
-  { id: "rover", title: "Invent a rescue", type: "Illustration + drawn invention", image: "/art/showcase/rover-source.webp", instruction: "Select a tool, then the object it works with.", alt: "An illustrated rover stranded among orange mesas and glowing blue crystals", aspect: "16 / 9" },
-  { id: "cat-care", title: "Care for a character", type: "Rough pencil drawing → pet care", image: "/art/showcase/cat-care-source.webp", instruction: "Select the fish, then the hungry cat.", alt: "A rough pencil drawing of a cat, rooftops and a fish on lined paper", aspect: "3 / 2" },
-  { id: "clockwork", title: "Explore a world", type: "Illustration → adventure", image: "/art/showcase/clockwork-0.webp", instruction: "Arrow keys to move · Space to jump", alt: "An intricate ink drawing of floating ruins, a brass beetle and a crystal doorway", aspect: "3 / 2" },
+  { id: "rover", category:"Invention", title: "Invent a rescue", type: "AI-generated illustration · authored game", image: "/art/showcase/rover-source.webp", instruction: "Select a tool, then the object it works with.", alt: "An illustrated rover stranded among orange mesas and glowing blue crystals", aspect: "16 / 9", note:"Authored example · AI-generated source artwork" },
+  { id: "patio-care", category:"Photograph", title: "Bring a photo to play", type: "Real photograph · Meta-generated activity", image: "/art/showcase/patio-care-source.webp", instruction: "Select the watering can, then water the pictured pot.", alt: "A real photograph of a person using a green watering can beside a pot of succulents", aspect: "3 / 2", note:"Meta-generated activity · original photograph" },
+  { id: "cat-care", category:"Rough drawing", title: "Care for a character", type: "AI-generated drawing · authored care game", image: "/art/showcase/cat-care-source.webp", instruction: "Select the fish, then the hungry cat.", alt: "A rough pencil drawing of a cat, rooftops and a fish on lined paper", aspect: "3 / 2", note:"Authored example · AI-generated rough drawing" },
+  { id: "clockwork", category:"Adventure", title: "Explore a world", type: "AI-generated illustration · authored adventure", image: "/art/showcase/clockwork-0.webp", instruction: "Arrow keys to move · Space to jump", alt: "An intricate ink drawing of floating ruins, a brass beetle and a crystal doorway", aspect: "3 / 2", note:"Authored example · AI-generated source artwork" },
 ];
 
-export default function Home() {
+export default function Home({onContinueInStudio}:{onContinueInStudio?:(entry:StudioEntry)=>void}) {
   const [index, setIndex] = useState(0);
   const [world, setWorld] = useState<WorldDefinition>();
   const [playing, setPlaying] = useState(false);
@@ -96,6 +98,11 @@ export default function Home() {
   function choose(i: number) { setIndex(i); setLoading(false); setPlaying(false); setShowSource(false); setWorld(undefined); setInitial(undefined); setDrawingDraft(undefined); setInventionUsed(false); setComplete(false); setError(""); setMoment(""); setMission(""); setProgress(""); focusRequested.current = false; setRun(n => n + 1); }
   function play() { focusRequested.current = true; setShowSource(false); setError(""); if (world) setPlaying(true); else setLoading(true); }
   function restart() { focusRequested.current = true; setInitial(undefined); setInventionUsed(false); setShowSource(false); setComplete(false); setRun(n => n + 1); setPlaying(true); }
+  function keepCreating() {
+    if(!world || !onContinueInStudio)return;
+    try { onContinueInStudio(entryFromExample(world,game.current?.snapshot()??initial??emptyPlayState())); }
+    catch { setDisplayNotice("This world couldn’t move to the studio. Your game is still here."); }
+  }
   function retry() {
     setError("");
     if (drawingDraft && invention) { setDrawing(true); return; }
@@ -155,20 +162,20 @@ export default function Home() {
             </div>}
             {error && <div className="home-play-prompt home-play-paused" role="alert"><p>{error}</p><button onClick={retry}>Try again</button></div>}
           </div>
-          <div className="home-stage-footer"><span>{showSource ? "AI-generated test image · original source" : world ? complete ? "What will you invent?" : scene.instruction : scene.type}</span><div className="home-stage-actions">{typeof document.documentElement.requestFullscreen === "function" && <button aria-label={fullscreen ? "Exit full screen" : "Full screen example"} title={fullscreen ? "Exit full screen" : "Full screen example"} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={17}/> : <Maximize2 size={17}/>}</button>}{complete && !showSource && <button className="home-original-toggle" onClick={restart}><RotateCcw size={14}/>Play again</button>}{world && <button className="home-original-toggle" aria-pressed={showSource} onClick={() => { setShowSource(value=>!value); setPlaying(false); }}>{showSource ? "Back to game" : "See original"}</button>}{world && !complete && <button aria-label={playing ? "Pause example" : "Resume example"} onClick={() => { if (playing) setPlaying(false); else play(); }}>{playing ? <Pause size={15}/> : <Play size={15}/>}</button>}</div><span className="sr-only" aria-live="polite">{moment}</span></div>
+          <div className="home-stage-footer"><span>{showSource ? scene.id === "patio-care" ? "Original photograph" : "AI-generated test image · original source" : world ? complete ? "What will you invent?" : scene.instruction : scene.type}</span><div className="home-stage-actions">{typeof document.documentElement.requestFullscreen === "function" && <button aria-label={fullscreen ? "Exit full screen" : "Full screen example"} title={fullscreen ? "Exit full screen" : "Full screen example"} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={17}/> : <Maximize2 size={17}/>}</button>}{complete && !showSource && <button className="home-original-toggle" onClick={restart}><RotateCcw size={14}/>Play again</button>}{world && <button className="home-original-toggle" aria-pressed={showSource} onClick={() => { setShowSource(value=>!value); setPlaying(false); }}>{showSource ? "Back to game" : "See original"}</button>}{world && !complete && <button aria-label={playing ? "Pause example" : "Resume example"} onClick={() => { if (playing) setPlaying(false); else play(); }}>{playing ? <Pause size={15}/> : <Play size={15}/>}</button>}</div><span className="sr-only" aria-live="polite">{moment}</span></div>
           {displayNotice && <p className="home-display-notice" role="status">{displayNotice}</p>}
           {world && <div className="home-example-tools" style={{visibility:showSource ? "hidden" : "visible"}} aria-hidden={showSource} inert={showSource}>
-            {invention && !inventionUsed && <button className="home-invent-button" onClick={()=>void drawPart()}><Pencil size={14}/>Draw your own part</button>}
-            <div ref={setControlsHost} className="home-object-controls"/>
+            {invention && !inventionUsed && <div className="home-invention-entry"><button className="home-invent-button" onClick={()=>void drawPart()}><Pencil size={14}/>Draw your own part</button><span>Keeps this part’s ability</span></div>}
+            {onContinueInStudio && <button className="home-keep-creating" onClick={keepCreating}>{complete ? "Make it yours" : "Keep creating in studio"}<ArrowUpRight size={15}/></button>}<div ref={setControlsHost} className="home-object-controls"/>
           </div>}
           <div className="home-scene-picker" aria-label="Choose an example">
-            {scenes.map((item,i) => <button key={item.id} aria-pressed={i === index} onClick={() => choose(i)}><img src={`/art/showcase/${item.id}-thumb.webp`} alt="" width="192" height="128" loading="lazy"/><span><small>{i === index ? "Selected" : `0${i+1}`}</small>{item.title}</span>{i === index && <Check size={15}/>}</button>)}
+            {scenes.map((item,i) => <button key={item.id} aria-pressed={i === index} onClick={() => choose(i)}><img src={`/art/showcase/${item.id}-thumb.webp`} alt="" width="192" height="128" loading="lazy"/><span><small>{i === index ? "Selected" : item.category}</small>{item.title}</span>{i === index && <Check size={15}/>}</button>)}
           </div>
-          <p className="home-example-note">Authored examples · AI-generated source artwork</p>
+          <p className="home-example-note"><span>{scene.note}</span>{scene.id === "patio-care" && <span>Photo: <a href="https://commons.wikimedia.org/wiki/File:Person_waters_succulents_on_a_table_in_an_outdoor_setting.jpg" target="_blank" rel="noreferrer">Shixart1985</a> · <a href="https://creativecommons.org/licenses/by/2.0/" target="_blank" rel="noreferrer">CC BY 2.0</a> · resized</span>}</p>
         </div>
       </section>
       <section className="home-making" id="how-it-works" aria-labelledby="making-title">
-        <div className="home-making-art"><img src="/art/showcase/cat-care-preview.webp" alt="An imperfect pencil drawing of a cat, rooftops and a fish" loading="lazy" width="1536" height="1024"/><a className="home-drawing-play" href="#play-room" onClick={()=>{choose(1);focusRequested.current=true;setLoading(true);}}><Play size={15} fill="currentColor"/> Play this drawing</a><span><small>AI-generated sample drawing.</small></span></div>
+        <div className="home-making-art"><img src="/art/showcase/cat-care-preview.webp" alt="An imperfect pencil drawing of a cat, rooftops and a fish" loading="lazy" width="1536" height="1024"/><a className="home-drawing-play" href="#play-room" onClick={()=>{choose(scenes.findIndex(item=>item.id === "cat-care"));focusRequested.current=true;setLoading(true);}}><Play size={15} fill="currentColor"/> Play this drawing</a><span><small>AI-generated sample drawing.</small></span></div>
         <div className="home-making-content"><p className="home-eyebrow">FROM A MARK TO A MOVE</p><h2 id="making-title">A little imagination.<br/><em>A world of your own.</em></h2>
         <ol className="home-steps">
           <li><span>01</span><div><h3>Bring something yours.</h3><p>A drawing, a photograph, an unfinished idea.</p></div></li>

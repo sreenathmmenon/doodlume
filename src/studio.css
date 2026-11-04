@@ -2596,10 +2596,16 @@ select:focus-visible {
 .studio-v2 .status-dot { background: #8b9098; }
 .studio-v2 .status-dot.connected { background: #387253; }
 .studio-v2 .status-dot.failed { background: #b34444; }
-.creation-progress { display: flex; align-items: center; gap: 12px; margin-top: 24px; padding: 16px 0; color: var(--primary); }
-.creation-progress > div { display: grid; gap: 4px; }
-.creation-progress strong { font-size: 14px; color: var(--ink); }
-.creation-progress span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Source choice is deliberate: a JPEG can be a photograph or a drawn page. */
+.creation-source-kind { margin:16px 0 0; padding:14px 0 0; border:0; border-top:1px solid var(--border); min-width:0; }
+.creation-source-kind legend { float:left; width:100%; margin-bottom:10px; color:var(--ink); font-size:12px; font-weight:650; }
+.creation-source-kind > div { display:grid; grid-template-columns:1fr 1fr; gap:8px; clear:both; }
+.creation-source-kind button { display:flex; align-items:center; justify-content:center; gap:8px; min-height:42px; padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-control); background:var(--paper); color:var(--muted); font-size:13px; font-weight:650; }
+.creation-source-kind button:hover { border-color:var(--selection-muted); color:var(--ink); }
+.creation-source-kind button[aria-pressed="true"] { color:var(--primary); border-color:var(--primary); background:var(--surface-hover); }
+.creation-source-kind button:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
+.creation-source-kind > p { font-size:12px; color:var(--muted); line-height:1.5; margin-top:8px; }
+.creation-modal .paper-frame:disabled { opacity:1; }
 .creation-failure { padding: 16px; margin-top: 20px; border: 1px solid #e5c9c5; border-radius: 8px; background: #fff8f6; }
 .creation-failure strong { color: #8b352e; font-size: 14px; }
 .creation-failure p { margin: 7px 0; font-size: 13px; line-height: 1.55; color: var(--ink); }

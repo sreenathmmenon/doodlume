@@ -45,6 +45,7 @@ import type { PaperProposal } from "../shared/amendments";
 import { readDrawingFile } from "./lib/drawing-file";
 import { WorldEditor } from "./components/WorldEditor";
 import { ArtworkReview } from "./components/ArtworkReview";
+import { CreationProgress } from "./components/CreationProgress";
 import { setupFeedback } from "../shared/setup";
 import { WorldLibrary } from "./components/WorldLibrary";
 import { SourceInspector } from "./components/SourceInspector";
@@ -73,6 +74,7 @@ import {
 } from "../shared/revisions";
 import { EXAMPLES, freshExample } from "./lib/examples";
 import { copyExample } from "./lib/example-copy";
+import type { StudioEntry } from "./lib/studio-entry";
 import { isSourceAlignedScenery } from "../shared/source-scenery";
 import {
   rememberedWorldId,
@@ -164,7 +166,8 @@ const initialMetrics: WorldTelemetry = {
   playerY: 0,
 };
 
-export default function App({ active = true }: { active?: boolean }) {
+export default function App({ active = true, entry, onEntryConsumed }: { active?: boolean; entry?: StudioEntry; onEntryConsumed?:()=>void }) {
+  const consumedEntry=useRef<string | undefined>(undefined);
   const [boot] = useState(() => {
     const entries = savedWorlds();
     return { entries, returning: returningWorld(entries, rememberedWorldId()) };
@@ -179,6 +182,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const [sourceName, setSourceName] = useState("Your drawing");
   const [customSource, setCustomSource] = useState(false);
   const [inputKind, setInputKind] = useState<InputKind>("drawing");
+  const [sourceKindChosen, setSourceKindChosen] = useState(false);
   const [intent, setIntent] = useState("");
   const [creationStyle, setCreationStyle] = useState<
     "auto" | "platform" | "roam" | "discover"
@@ -385,6 +389,7 @@ export default function App({ active = true }: { active?: boolean }) {
     setSource("");
     setSourceName("Your drawing");
     setInputKind("drawing");
+    setSourceKindChosen(false);
     setIntent("");
     setCreationStyle("auto");
     setDraftIntent("");
@@ -532,6 +537,16 @@ export default function App({ active = true }: { active?: boolean }) {
     setSaveError("");
     setDialog("unsaved-world");
   }
+  useEffect(()=>{
+    if(!entry || !active || libraryLoading || consumedEntry.current===entry.token)return;
+    consumedEntry.current=entry.token;
+    requestWorldOpen(()=>{
+      loadWorld(entry.world,entry.state);
+      setStarted(true);setFocusedPlay(false);setDialog(null);
+      tell("Your example, your changes. Keep creating here.");
+    });
+    onEntryConsumed?.();
+  },[entry?.token,active,libraryLoading]);
   function stayInWorld() {
     if (savingNow.current) return;
     const returnTo = pendingWorldOpen.current?.returnTo ?? null;
@@ -776,7 +791,7 @@ export default function App({ active = true }: { active?: boolean }) {
   function useSource(
     image: string,
     name = "A drawing, made by you",
-    kind = inputKind,
+    kind?: InputKind,
   ) {
     sourceVersion.current++;
     if (request.current) recordRecognitionReturned("cancelled");
@@ -787,7 +802,7 @@ export default function App({ active = true }: { active?: boolean }) {
     setSetupEdits(null);
     setSource(image);
     setSketchDraft(undefined);
-    setInputKind(kind);
+    if (kind) { setInputKind(kind); setSourceKindChosen(true); }
     setSourceName(name);
     setCustomSource(true);
     setDraft(null);
@@ -799,6 +814,10 @@ export default function App({ active = true }: { active?: boolean }) {
   }
   async function bringAlive() {
     setCreationError("");
+    if (!sourceKindChosen) {
+      setCreationError("Choose Drawing or Photo so the game fits your image.");
+      return;
+    }
     if (!customSource) {
       tell("Draw or upload your own image to create a world.");
       return;
@@ -859,7 +878,7 @@ export default function App({ active = true }: { active?: boolean }) {
       recordRecognitionReturned("accepted");
       setRecognitionReview(null);
       tell(
-        "Your drawing has a first interpretation. Preview it before you play.",
+        "Your playable preview is ready.",
       );
       void checkConnection();
     } catch (e) {
@@ -1102,7 +1121,7 @@ export default function App({ active = true }: { active?: boolean }) {
             </span>
             <span className="source-caption">
               <span>
-                {inputKind === "picture" ? "YOUR PICTURE" : "YOUR DRAWING"}
+                {!sourceKindChosen ? "YOUR IMAGE" : inputKind === "picture" ? "YOUR PHOTO" : "YOUR DRAWING"}
               </span>
               <span>↗</span>
             </span>
@@ -1157,25 +1176,19 @@ export default function App({ active = true }: { active?: boolean }) {
             </button>
           )}
         </div>
-        <label className="source-kind source-kind-field">
-          <span>Image type</span>
-          <select
-            aria-label="Source image type"
-            value={inputKind}
-            disabled={busy}
-            onChange={(event) => {
-              const next = event.target.value as InputKind;
-              if (next === inputKind) return;
-              setInputKind(next);
-              setDraft(null);
-              setRecognitionReview(null);
-              setSetupEdits(null);
-            }}
-          >
-            <option value="drawing">Drawing</option>
-            <option value="picture">Photo or image</option>
-          </select>
-        </label>
+        <fieldset className="creation-source-kind" disabled={busy}>
+          <legend>{source ? "What’s in your image?" : "Start from"}</legend>
+          <div role="group" aria-label="Source image type">
+            {([["drawing", "Drawing", Pencil], ["picture", "Photo", ImagePlus]] as const).map(([value, label, Icon]) => <button
+              key={value} type="button" aria-pressed={sourceKindChosen && inputKind === value}
+              onClick={() => {
+                if (sourceKindChosen && inputKind === value) return;
+                setInputKind(value); setSourceKindChosen(true); setCreationError("");
+                setDraft(null); setRecognitionReview(null); setSetupEdits(null);
+              }}><Icon size={16}/><span>{label}</span>{sourceKindChosen && inputKind === value && <Check size={14}/>}</button>)}
+          </div>
+          {source && !sourceKindChosen && <p>Choose how to interpret this image.</p>}
+        </fieldset>
       </div>
       <div className="creation-intent-column">
         <label className="intent-label" htmlFor="world-intent">
@@ -1230,10 +1243,7 @@ export default function App({ active = true }: { active?: boolean }) {
           </p>
         </fieldset>
         </details>
-        {busy && <div className="creation-progress" role="status">
-          <LoaderCircle size={20} className="spin" />
-          <div><strong>Creating your world</strong><span aria-hidden="true">{requestSeconds}s elapsed</span></div>
-        </div>}
+        {busy && <CreationProgress seconds={requestSeconds}/>}
         {creationError && <div role="alert" className="creation-failure">
           <strong>Creation couldn’t finish</strong>
           <p>{creationError}</p>
@@ -1893,7 +1903,7 @@ export default function App({ active = true }: { active?: boolean }) {
           footer={
             <div className="creation-footer">
               <div>
-                {!customSource && !busy && <span className="creation-prerequisite">Add an image or drawing to begin.</span>}
+                {!busy && (!customSource || !sourceKindChosen) && <span className="creation-prerequisite">{!customSource ? "Add an image or drawing to begin." : "Choose Drawing or Photo to continue."}</span>}
                 {hasCreationDraft && !busy && (
                   <button
                     className="text-button"
@@ -1914,7 +1924,7 @@ export default function App({ active = true }: { active?: boolean }) {
                 <button
                   className="primary-button"
                   disabled={
-                    !customSource || !source || creationIntent().length > 500
+                    !customSource || !source || !sourceKindChosen || creationIntent().length > 500
                   }
                   onClick={bringAlive}
                 >
@@ -2161,7 +2171,7 @@ export default function App({ active = true }: { active?: boolean }) {
           context={{ purpose: "create", name: "A new Doodlume world" }}
           onClose={() => setDialog("create")}
           onReceive={(image) => {
-            if (inputKind === "picture") {
+            if (!sourceKindChosen || inputKind === "picture") {
               useSource(image, "Your phone picture");
               return;
             }

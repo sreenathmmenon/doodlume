@@ -1,0 +1,11 @@
+.ability-rule-name { display: grid; min-width: 0; gap: 4px; line-height: 1.5; }
+.ability-rule-name > strong { color: var(--ink); font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.ability-relationship { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; color: var(--muted); font-size: 13px; line-height: 1.5; font-weight: 400; }
+.ability-relationship > span:first-child,.ability-relationship > span:last-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ability-choice-options { display: grid; gap: 12px; margin-top: 8px; }
+.ability-choice-options > .ability-rule-name + .ability-rule-name::before { content: "or"; color: var(--muted); font-size: 13px; }
+.world-rules-summary .required-object-list > li { min-width: 0; }
+.world-rules-summary .required-object-list > li > .ability-rule-name { margin: 0 0 4px; }
+.world-rules-summary .ability-summary-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 0; padding: 0; list-style: none; }
+.world-rules-summary .ability-summary-list > li { min-width: 0; }
+@media (max-width: 700px) { .world-rules-summary .ability-summary-list { grid-template-columns: 1fr; } }

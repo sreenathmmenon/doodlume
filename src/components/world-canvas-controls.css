@@ -13,6 +13,16 @@
   height: auto;
   overflow: hidden;
 }
+/* With no external toolbar (for example a review preview), these controls are
+   a footer, not a flexible side of a toolbar. Their 240/320px toolbar flex bases
+   otherwise consume a short preview and collapse its measured image area. */
+.world-canvas-shell > .object-play-tools,
+.world-canvas-shell > .discovery-access {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.world-canvas-shell > .discovery-access { border-left: 0; margin-left: 0; }
 .world-canvas:focus-visible { outline: none; }
 .world-canvas:focus-visible::after {
   content: "";
@@ -236,12 +246,45 @@
 
 .object-keyboard-play { font-size: 12px; margin-left: auto; position: relative; color: var(--ink); }
 .object-keyboard-play summary { cursor: pointer; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--paper); }
-.object-keyboard-play > div { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 45; width: 300px; background: var(--paper); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 12px 36px #16203124; }
-.object-keyboard-play label { display: grid; gap: 8px; font-weight: 600; }
-.object-keyboard-play select { width: 100%; padding: 10px; margin-bottom: 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
-.object-keyboard-play button { min-height: 36px; margin-right: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font: inherit; }
-.object-keyboard-play button:disabled { opacity: .45; cursor: default; }
-.object-action-preview { margin: 0 0 12px; padding: 10px 0; border-top: 1px solid var(--border); color: var(--ink); font: 500 14px/20px var(--font-ui); overflow-wrap: anywhere; }
+.world-canvas-shell.object-controls-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.object-controls-open > .world-canvas { grid-column: 1; grid-row: 1; }
+.object-controls-open > .object-play-tools { grid-column: 1 / -1; grid-row: 2; }
+.object-keyboard-panel {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border-left: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 13px/20px var(--font-ui);
+}
+.object-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.object-panel-heading strong { font-size: 14px; }
+.object-keyboard-panel label { display: grid; gap: 8px; font-weight: 600; }
+.object-keyboard-panel select { width: 100%; min-height: 40px; padding: 8px; margin-bottom: 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+.object-keyboard-panel button { min-height: 36px; margin: 0 8px 8px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--field); color: var(--ink); font: inherit; cursor: pointer; }
+.object-keyboard-panel .object-perform-action { display: block; width: 100%; background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 700; }
+.object-keyboard-panel .object-panel-heading button { flex: 0 0 36px; padding: 0; margin: 0; font-size: 22px; line-height: 1; background: transparent; }
+.object-keyboard-panel button:hover:not(:disabled) { filter: brightness(.96); }
+.object-keyboard-panel button:disabled { color: var(--disabled-ink); background: var(--disabled-surface); border-color: var(--border); cursor: default; }
+.object-keyboard-panel :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.object-action-relationship { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.object-action-relationship span { min-width: 0; overflow-wrap: anywhere; }
+.object-action-relationship span[aria-label] { flex-shrink: 0; }
+.object-action-preview { margin: 0 0 12px; padding: 8px 0; color: var(--ink); font: 500 13px/20px var(--font-ui); overflow-wrap: anywhere; }
+/* A deliberate alternate beside the art: its height never expands the footer.
+   On narrow screens the panel takes the available stage width and can close. */
+@media (max-width: 600px) {
+  .world-canvas-shell.object-controls-open { grid-template-columns: minmax(0, 1fr) min(260px, 70%); }
+  .object-keyboard-panel { padding: 12px; }
+}
 
 /* Gameplay help stays outside the artwork. It appears only when requested;
    possession stays visible so a player never has to remember a hidden tool. */
@@ -266,3 +309,7 @@
 .object-play-tools button:hover:not(:disabled) { background: var(--surface-hover); }
 .object-play-tools button:disabled { color: var(--disabled-ink); cursor: default; }
 .object-play-tools :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.object-resource-detail { margin: -4px 0 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.object-transfer-change { display: block; font-weight: 650; }
+.object-transfer-quantity { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }

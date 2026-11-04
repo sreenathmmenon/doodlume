@@ -1,3 +1,4 @@
+import { sourceActivityReviewInstructions } from "./staged-planning.js";
 import { createPlanningBudget, PlanningBudgetExhaustedError } from "./planning-budget.js";
 import { runPhotoPlanning } from "./photo-planning.js";
 import { photoSourceFacts } from "./photo-source-facts.js";
@@ -179,7 +180,7 @@ export async function interpretDrawing(
 Choose a useful subset of independently visible objects for the game, not an exhaustive segmentation of the photograph. Before assigning carryable:true or moving an object, check the complete visible object: image-edge crops, occlusion, diffuse foliage, scattered groups and overlapping silhouettes often cannot be lifted as one intact subject. Keep such objects stationary when the intended interaction genuinely works in place; do not disguise an intended physical movement as a resource transfer. An uncertain object may stay scenery. Use clearly separated whole objects for actual movement, preserving their full size and source identity. Do not invent a destination by selecting an arbitrary patch of background and calling it a prep zone, bowl, dock or machine. A real visible surface may be a placement destination only when that surface is identifiable in the source and the complete moved objects fit visibly on it. A resource transfer changes a game quantity; a placement only moves unchanged artwork. Neither cooks, cuts, repairs, grows or transforms the photographed subject. Mission, instructions and action labels must describe those actual supported consequences. Keep recognized-but-unused objects stationary: carrying an unused prop adds extraction work without a game consequence. For a neutral request, choose the clearest meaningful source-supported activity; do not make every detected object a mandatory chore. Preserve any explicitly requested subject and outcome, or ask one focused clarification when the supported operations cannot deliver it.`
         : instructions) +
         "\n" +
-        ruleInstructions + "\n" + creativeInstructions;
+        ruleInstructions + "\n" + creativeInstructions + "\n" + sourceActivityReviewInstructions;
   const request = (feedback = "") => drawingRequest(connection, sourceImage, intent, requestInstructions + feedback, schema);
   // Transport failures stay outside correction. Only a typed deterministic plan
   // failure or a completed, bounded malformed JSON message may be repaired.

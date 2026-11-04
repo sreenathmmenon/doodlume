@@ -41,7 +41,7 @@
   background: var(--surface-hover);
 }
 .goal-rules-choice:has(input:focus-visible) {
-  outline: 3px solid var(--primary);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .goal-rules-choice input {
@@ -104,7 +104,7 @@
 .goal-rules-error {
   padding: 12px;
   border-radius: 10px;
-  background: #332321;
+  background: var(--danger-surface);
   color: var(--danger);
   font-size: 14px;
   line-height: 1.6;

@@ -69,6 +69,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const discoveryChoice = useRef<HTMLSelectElement>(null);
     const objectChoice = useRef<HTMLSelectElement>(null);
     const keyboardObjectAction = useRef<HTMLButtonElement | null>(null);
+    const objectControlsToggle = useRef<HTMLDetailsElement>(null);
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
     const [openingSlow, setOpeningSlow] = useState(false);
@@ -80,6 +81,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const [selectedDiscovery, setSelectedDiscovery] = useState("");
     const [selectedObjectAction, setSelectedObjectAction] = useState("");
     const [objectControlsFocused, setObjectControlsFocused] = useState(false);
+    const [objectControlsOpen, setObjectControlsOpen] = useState(false);
     const [hintOpen, setHintOpen] = useState(false);
     const [undoCount, setUndoCount] = useState(0);
     const [pendingObjectMotion, setPendingObjectMotion] = useState(false);
@@ -526,6 +528,16 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const targetPreviews = useMemo(() => selectedDiscovery ? inspectInteractionTarget(props.world, discoveryProgress, selectedDiscovery) : [],
       [props.world, progressKey, selectedDiscovery]);
     const selectedPreview = targetPreviews.length === 1 ? targetPreviews[0] : targetPreviews.find(preview => preview.id === selectedObjectAction);
+    const previewAction = props.world.interactions?.actions.find(action => action.id === selectedPreview?.id);
+    const previewSourceId = previewAction?.toolId;
+    // The relationship already names both objects. A plain transfer can show
+    // its real resource change once; commitments keep the complete disclosure.
+    const simpleTransfer = selectedPreview?.available && previewAction?.kind === "transfer" && selectedObject?.resource
+      && !previewAction.costs?.length && !previewAction.effects?.length
+      && !props.world.interactions?.choiceGroups?.some(group => group.actionIds.includes(previewAction.id))
+      ? { amount: previewAction.amount, resource: selectedObject.resource,
+        before: interactionProgress.quantities[selectedObject.entityId] ?? 0 }
+      : undefined;
     useEffect(() => {
       scene.current?.previewObjectAction(ready && props.playing && !pendingObjectMotion && objectControlsFocused && selectedPreview?.available ? selectedPreview.id : undefined);
       return () => scene.current?.previewObjectAction(undefined);
@@ -586,39 +598,34 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       callbacks.current.onMoment("Last action undone.");
       host.current?.focus({ preventScroll: true });
     }
-    const objectControls = props.world.interactions && ready && !failed && !finished && (
-      <div className="object-play-tools">
-        <div className="object-play-strip">
-          {sourceObject && <div className="carried-object" role="status">
-            {!sourceIsFixed && sourceObject.art && <img src={sourceObject.art} alt="" />}
-            <span><small>{sourceIsFixed ? "Selected" : "Holding"}</small><strong>{objectName(props.world, sourceObject.id, 42)}</strong></span>
-            {sourceResource && <span className="carried-quantity" aria-label={`${quantityLabel.format(interactionProgress.quantities[sourceObject.id])} of ${quantityLabel.format(sourceResource.capacity)} remaining`}>{quantityLabel.format(interactionProgress.quantities[sourceObject.id])}/{quantityLabel.format(sourceResource.capacity)}</span>}
-            <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`${releaseLabel} ${objectName(props.world, sourceObject.id, 42)}`} title={`${releaseLabel} (Q)`}>{releaseLabel}</button>
-          </div>}
-          {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}
-          {undoCount > 0 && <button type="button" className="discovery-hint" aria-label="Undo last action" disabled={!props.playing || finished || pendingObjectMotion} onClick={undoLastAction}><Undo2 size={14} aria-hidden="true" /> Undo</button>}
-          {!undoCount && retryPoint && !finished && <button type="button" className="discovery-hint" disabled={!props.playing || pendingObjectMotion} onClick={revisitChoice}><Undo2 size={14} aria-hidden="true" /> Revisit choice</button>}
-      <details className="object-keyboard-play"
-        onToggle={event => { if (!event.currentTarget.open) setObjectControlsFocused(false); }}
-        onFocusCapture={() => setObjectControlsFocused(true)}
-        onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setObjectControlsFocused(false); }}>
-        <summary>Object controls</summary>
-        <div>
+    const objectPanel = props.world.interactions && ready && !failed && !finished && objectControlsOpen && (
+        <aside className="object-keyboard-panel" id={`${objectPreviewId}-panel`} aria-label="Object controls"
+          onFocusCapture={() => setObjectControlsFocused(true)}
+          onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setObjectControlsFocused(false); }}>
+          <div className="object-panel-heading"><strong>Object controls</strong><button type="button" aria-label="Close object controls" onClick={() => {
+            if (objectControlsToggle.current) objectControlsToggle.current.open = false;
+            objectControlsToggle.current?.querySelector("summary")?.focus();
+          }}>×</button></div>
           <label>Choose an object
             <select ref={objectChoice} aria-label="Choose interactive object" aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); if (event.target.value) scene.current?.revealObjectHint(event.target.value); }}>
               <option value="">Choose an object…</option>
               {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
             </select>
           </label>
+          {selectedObject?.resource && !simpleTransfer && <p className="object-resource-detail">{quantityLabel.format(interactionProgress.quantities[selectedObject.entityId] ?? 0)} / {quantityLabel.format(selectedObject.resource.capacity)}</p>}
           {targetPreviews.length > 1 && <label>Choose an action
             <select aria-label="Choose object action" aria-describedby={selectedPreview ? objectPreviewId : undefined} value={selectedPreview?.id ?? ""} onChange={event => setSelectedObjectAction(event.target.value)}>
               <option value="">Choose an action…</option>
               {targetPreviews.map(action => <option key={action.id} value={action.id}>{action.label}{action.available ? "" : " · unavailable"}</option>)}
             </select>
           </label>}
-          {selectedPreview && <p className="object-action-preview" id={objectPreviewId}>{selectedPreview.available ? selectedPreview.consequence : <>{selectedPreview.reason}{selectedPreview.costDescription && <><br />When available: {selectedPreview.costDescription}</>}</>}</p>}
+          {selectedPreview && previewSourceId && previewSourceId !== selectedDiscovery && <div className="object-action-relationship"><span>{objectName(props.world, previewSourceId, 42)}</span><span aria-label="to">→</span><span>{objectName(props.world, selectedDiscovery, 42)}</span></div>}
+          {selectedPreview && <p className="object-action-preview" id={objectPreviewId}>{selectedPreview.available ? simpleTransfer ? <>
+            <strong className="object-transfer-change">{simpleTransfer.resource.type.charAt(0).toUpperCase() + simpleTransfer.resource.type.slice(1)} +{quantityLabel.format(simpleTransfer.amount)}</strong>
+            <span className="object-transfer-quantity">One use · {quantityLabel.format(simpleTransfer.before)} → {quantityLabel.format(simpleTransfer.before + simpleTransfer.amount)} / {quantityLabel.format(simpleTransfer.resource.capacity)}</span>
+          </> : selectedPreview.consequence : <>{selectedPreview.reason}{selectedPreview.costDescription && <><br />When available: {selectedPreview.costDescription}</>}</>}</p>}
           {!selectedPreview && incompatibleReason && <p className="object-action-preview" id={objectPreviewId}>{incompatibleReason}</p>}
-          <button aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={event => {
+          <button className="object-perform-action" aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={event => {
             const origin = event.currentTarget;
             keyboardObjectAction.current = event.detail === 0 && document.activeElement === origin ? origin : null;
             if (!scene.current?.interactWithObject(selectedDiscovery, selectedPreview?.id)) keyboardObjectAction.current = null;
@@ -629,7 +636,30 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           }}>{selectedPreview?.label ?? (canSelectSource ? `${selectedObject?.usableInPlace ? "Select" : "Take"} ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
           {canSelectSource && selectedObject?.usableInPlace && targetPreviews.length > 0 && <button disabled={!props.playing} onClick={() => scene.current?.selectFixedSource(selectedDiscovery)}>Select as source</button>}
           <button disabled={!props.playing || !activeSourceId} onClick={() => scene.current?.dropHeldObject()}>{releaseLabel}</button>
-        </div>
+        </aside>
+    );
+    const objectControls = props.world.interactions && ready && !failed && !finished && (
+      <div className="object-play-tools">
+        <div className="object-play-strip">
+          {sourceObject && <div className="carried-object" role="status">
+            {!sourceIsFixed && sourceObject.art && <img src={sourceObject.art} alt="" />}
+            <span><small>{sourceIsFixed ? "Selected" : "Holding"}</small><strong>{objectName(props.world, sourceObject.id, 42)}</strong></span>
+            {sourceResource && <span className="carried-quantity" aria-label={`${quantityLabel.format(interactionProgress.quantities[sourceObject.id])} of ${quantityLabel.format(sourceResource.capacity)} remaining`}>{quantityLabel.format(interactionProgress.quantities[sourceObject.id])}/{quantityLabel.format(sourceResource.capacity)}</span>}
+            {!objectControlsOpen && <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`${releaseLabel} ${objectName(props.world, sourceObject.id, 42)}`} title={`${releaseLabel} (Q)`}>{releaseLabel}</button>}
+          </div>}
+          {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}
+          {undoCount > 0 && <button type="button" className="discovery-hint" aria-label="Undo last action" disabled={!props.playing || finished || pendingObjectMotion} onClick={undoLastAction}><Undo2 size={14} aria-hidden="true" /> Undo</button>}
+          {!undoCount && retryPoint && !finished && <button type="button" className="discovery-hint" disabled={!props.playing || pendingObjectMotion} onClick={revisitChoice}><Undo2 size={14} aria-hidden="true" /> Revisit choice</button>}
+      <details ref={objectControlsToggle} className="object-keyboard-play" open={objectControlsOpen}
+        onToggle={event => {
+          const expanded = event.currentTarget.open;
+          setObjectControlsOpen(expanded);
+          if (!expanded) setObjectControlsFocused(false);
+          else if (event.currentTarget.contains(document.activeElement)) requestAnimationFrame(() => objectChoice.current?.focus({preventScroll: true}));
+        }}
+        onFocusCapture={() => setObjectControlsFocused(true)}
+        onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setObjectControlsFocused(false); }}>
+        <summary aria-controls={`${objectPreviewId}-panel`}>Object controls</summary>
       </details>
         </div>
         {hintOpen && !finished && <div className="object-next-hint" role="status">
@@ -639,7 +669,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       </div>
     );
     return (
-      <div className="world-canvas-shell">
+      <div className={`world-canvas-shell${objectPanel ? " object-controls-open" : ""}`}>
         <div
           ref={host}
           className="world-canvas"
@@ -717,6 +747,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           )}
           {props.overlay}
         </div>
+        {objectPanel}
         {props.controlsHost ? createPortal(<>{discoveryControls}{objectControls}</>, props.controlsHost) : <>{discoveryControls}{objectControls}</>}
       </div>
     );

@@ -1,0 +1,22 @@
+.creation-journey { margin-top:24px; padding:20px; border:1px solid var(--border); border-radius:var(--radius-panel); background:var(--paper); overflow:hidden; }
+.creation-journey-art { height:76px; margin:-8px -4px 16px; background:radial-gradient(ellipse at center,var(--surface-hover),transparent 72%); }
+.creation-journey-art svg { width:100%; height:100%; overflow:visible; }
+.journey-line { stroke:var(--border); stroke-width:1.5; }
+.journey-track { stroke:var(--primary); stroke-width:2; stroke-linecap:round; stroke-dasharray:36 310; animation:journey-trace 3.6s linear infinite; }
+.creation-journey-art circle { fill:var(--paper); stroke:var(--primary); stroke-width:1.5; }
+.journey-spark { stroke:var(--primary); stroke-width:1.5; opacity:.5; transform-origin:center; animation:journey-breathe 2.4s ease-in-out infinite alternate; }
+.creation-journey-heading { display:flex; align-items:center; gap:10px; }
+.creation-journey-icon { display:grid; place-items:center; width:36px; height:36px; flex:0 0 auto; border-radius:10px; background:var(--surface-hover); color:var(--primary); }
+.creation-journey-heading > div { display:flex; flex:1; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 12px; }
+.creation-journey strong { font-size:14px; font-weight:750; line-height:1.5; color:var(--ink); }
+.creation-elapsed { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.creation-journey > p { color:var(--muted); font-size:13px; line-height:1.6; margin:14px 0 18px; }
+.creation-journey-steps { display:flex; flex-wrap:wrap; gap:10px 16px; margin:0; padding:0; list-style:none; }
+.creation-journey-steps li { display:flex; align-items:center; gap:6px; font-size:11px; line-height:1.4; color:var(--muted); }
+.creation-journey-steps li > span { display:grid; place-items:center; width:14px; height:14px; border:1px solid var(--border); border-radius:50%; }
+.creation-journey-steps li[data-state="done"] > span { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+.creation-journey-steps li[data-state="active"] { color:var(--primary); font-weight:700; }
+.creation-journey-steps li[data-state="active"] > span { width:8px; height:8px; margin:3px; border:0; background:var(--primary); box-shadow:0 0 0 3px var(--surface-hover); animation:journey-breathe 1.2s ease-in-out infinite alternate; }
+@keyframes journey-trace { to { stroke-dashoffset:-346; } }
+@keyframes journey-breathe { from { opacity:.35; } to { opacity:1; } }
+@media(prefers-reduced-motion:reduce) { .creation-journey * { animation:none!important; } .journey-track { stroke-dasharray:none; opacity:.6; } }

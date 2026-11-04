@@ -170,3 +170,14 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
   const entityId = collectible ?? switchId ?? (!hasUnfinishedTasks ? world.entities.find(entity => entity.kind === "goal")?.id : undefined);
   if (entityId) return { entityId, text: `${collectible ? "Collect" : switchId ? "Activate" : "Reach"} ${objectName(world, entityId, 48)}.` };
 }
+
+/** Feedback is a receipt for changed game quantities, never a predicted physical
+ * transformation. Both ends come from the same normalized saved-state rules. */
+export function interactionResourceChanges(world: WorldDefinition, before: PlayState, after: PlayState): {entityId: string; delta: number}[] {
+  const previous = interactionState(world, before), next = interactionState(world, after);
+  return (world.interactions?.objects ?? []).flatMap(object => {
+    if (!object.resource) return [];
+    const delta = (next.quantities[object.entityId] ?? 0) - (previous.quantities[object.entityId] ?? 0);
+    return delta ? [{entityId: object.entityId, delta}] : [];
+  });
+}

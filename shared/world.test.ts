@@ -161,3 +161,16 @@ test("authored platform jump strength is bounded and keeps legacy defaults", () 
     assert.throws(() => validateWorld({ ...world, gameplay: { ...world.gameplay, jumpStrength: strength } }));
   assert.throws(() => validateWorld({ ...world, gameplay: { ...world.gameplay, movement: "roam" } }));
 });
+
+test("requirements-only completion is explicit, earned and survives saved-world validation", () => {
+  const world = freshExample(EXAMPLES[0].id);
+  world.entities = world.entities.filter(entity => entity.kind !== "goal");
+  world.gameplay = {movement:"platform",completion:"requirements",objectiveTitle:"Collect the chosen seed",instructions:"Collect the chosen seed to finish."};
+  world.goalRules = {requiredCollectedIds:["sunseed-one"],requiredActivatedIds:[]};
+  assert.equal(validateWorld(JSON.parse(JSON.stringify(world))).gameplay?.completion,"requirements");
+  assert.equal(goalProgress(world,emptyPlayState()).ready,false);
+  assert.equal(goalProgress(world,{...emptyPlayState(),collected:["sunseed-one"]}).ready,true);
+  assert.throws(()=>validateWorld({...world,gameplay:{...world.gameplay,completion:undefined}}),/destination/);
+  assert.throws(()=>validateWorld({...world,goalRules:{requiredCollectedIds:[],requiredActivatedIds:[]}}),/goal requirement/);
+  assert.throws(()=>validateWorld({...world,entities:[...world.entities,...freshExample(EXAMPLES[0].id).entities.filter(e=>e.kind==="goal")]}),/no destination/);
+});

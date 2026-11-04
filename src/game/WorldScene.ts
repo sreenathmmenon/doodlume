@@ -1008,6 +1008,7 @@ export class WorldScene extends Phaser.Scene {
       this.state.collected.push(id);
       this.soundtrack.cue("collect", this.state.collected.length);
     }
+    this.completeInteractionObjectives();
     this.drawDiscoveryRegion(id, this.discoveryHover === id);
     this.ring(
       e.x + e.width / 2,
@@ -1287,6 +1288,7 @@ export class WorldScene extends Phaser.Scene {
         )
           return;
         this.state.collected.push(e.id);
+        this.completeInteractionObjectives();
         this.physics.world.disable(region);
         this.drawSourceCue(e, true);
         this.soundtrack.cue("collect", this.state.collected.length);
@@ -1355,6 +1357,7 @@ export class WorldScene extends Phaser.Scene {
       if (this.definition.gameplay?.movement === "roam" && !this.roamEngaged)
         return;
       this.state.collected.push(e.id);
+      this.completeInteractionObjectives();
       halo.destroy();
       this.physics.world.disable(coin);
       this.tweens.killTweensOf(coin);
@@ -1649,6 +1652,7 @@ export class WorldScene extends Phaser.Scene {
           : `${objectName(this.definition, id)} activated.`,
       );
     }
+    this.completeInteractionObjectives();
     this.report();
   }
 

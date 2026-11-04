@@ -270,3 +270,56 @@ test('ordered investigation rejects unknown or duplicate targets and any implici
   ])await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection:{...connection,requestsRemaining:()=>0},signal:new AbortController().signal,transport:transport([{...metadata,steps}]),compile:async()=>{throw Error('Invalid steps must never compile.');}}),ModelPlanError);
   await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection:{...connection,requestsRemaining:()=>0},signal:new AbortController().signal,transport:transport([{...metadata,steps:[collect,finish],goalRules:investigation.goalRules}]),compile:async()=>true}),/never mix steps/);
 });
+
+test('a provably unchanged sole placement gets one typed correction without inventing an initial state',async()=>{
+  const objects=[{id:'source',label:'Small pictured piece',bounds:{left:450,top:450,right:550,bottom:550}},
+    {id:'receiver',label:'Pictured surface',bounds:{left:300,top:300,right:700,bottom:700}}];
+  const unchanged:any={...structuredClone(plan),objects,
+    interactions:{version:1,objects:[{entityId:'source',carryable:true},{entityId:'receiver',carryable:false}],
+      actions:[{id:'place',kind:'place',label:'Place piece',toolId:'source',targetId:'receiver',requires:[],requiresResourceIds:[],effects:[{kind:'moveObject',entityId:'source',destinationId:'receiver',destinationAlignment:'center'}]}]},
+    finish:{requiredInteractionIds:['place'],requiredResourceIds:[],requiredChoiceGroupIds:[]}};
+  const corrected=structuredClone(unchanged);corrected.interactions.actions[0].effects[0]={kind:'moveObject',entityId:'source',destinationId:'receiver',destinationAnchor:{x:0,y:0}};
+  const {objects:_,...first}=unchanged,{objects:__,...second}=corrected;
+  const requests:any[]=[];let compiled=0;
+  const result=await runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,
+    transport:rawTransport([{kind:'inventory',objects},first,second],requests),compile:async()=>{compiled++;return compiled===1?{entities:[{id:'source',x:450,y:450}],interactions:{...unchanged.interactions,actions:[{...unchanged.interactions.actions[0],effects:[{kind:'moveObject',entityId:'source',x:450,y:450}]}]}}:true;}});
+  assert.equal(result,true);assert.equal(compiled,2);assert.equal(requests.length,3);
+  assert.match(requests[2].messages[1].content[2].text,/already at that destination/);
+  assert.match(requests[2].messages[1].content[2].text,/Do not invent a scrambled initial state/);
+  // An explicit interior anchor remains for the established exact geometry
+  // validator; source centering alone is not evidence that anchors are no-ops.
+  assert.deepEqual(requests[1].messages[1].content[1],requests[2].messages[1].content[1]);
+});
+
+test('visible relationship selection freezes IDs and limits clues to its observed sources within one correction',async()=>{
+  const extra={id:'unrelated',label:'Unrelated pictured detail',bounds:{left:800,top:100,right:900,bottom:200}};
+  const objects=[...plan.objects,extra];
+  const relationships=[{id:'visible_pair',sourceIds:['source','receiver'],observation:'A narrow blue shape sits directly above a wider red rim.'}];
+  const {objects:_,roles:__,clues:___,goalRules:____,...metadata}=structuredClone(investigation);
+  const valid={...metadata,relationshipId:'visible_pair',steps:[{entityId:'source',kind:'collect',text:'Find the narrow blue shape above its matching red rim.'},{entityId:'receiver',kind:'finish',text:'Finish at the wider outline directly below the matched shape.'}]};
+  const invalid=structuredClone(valid);invalid.steps[0].entityId='unrelated';
+  const requests:any[]=[];let compiled=0;
+  const result=await runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,
+    transport:rawTransport([{kind:'inventory',objects,relationships},invalid,valid],requests),compile:async(candidate:any)=>{compiled++;assert.deepEqual(candidate.objects.map((o:any)=>({id:o.id,label:o.label,bounds:o.bounds})),objects);return true;}});
+  assert.equal(result,true);assert.equal(compiled,1);assert.equal(requests.length,3);
+  assert.match(requests[2].messages[1].content[2].text,/must belong to the selected frozen relationship/);
+  assert.match(requests[1].messages[1].content[2].text,/narrow blue shape/);
+  const alternative={...structuredClone(valid),relationshipId:'different_pair'};
+  await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,
+    transport:rawTransport([{kind:'inventory',objects,relationships:[...relationships,{id:'different_pair',sourceIds:['source','unrelated'],observation:'A different visible pair.'}]},invalid,alternative]),
+    compile:async()=>{throw new Error('Unrelated replacement must not compile.');}}),/preserve the selected visible relationship/);
+});
+
+test('relationship observations cannot invent, duplicate or replace frozen physical sources',async()=>{
+  for(const relationships of [null,[{id:'r',sourceIds:['source','unknown'],observation:'Unsupported pair.'}],
+    [{id:'r',sourceIds:['source','source'],observation:'Duplicate pair.'}],
+    [{id:'r',sourceIds:['source','receiver'],observation:'Visible pair.',task:'Invented task'}]]){
+    const requests:unknown[]=[];
+    await assert.rejects(()=>runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,
+      transport:rawTransport([{kind:'inventory',objects:plan.objects,relationships}],requests),compile:async()=>true}),ModelPlanError);
+    assert.equal(requests.length,1,'Invalid observations do not spend a design/correction call.');
+  }
+  const {objects:_,...design}=plan;
+  assert.equal(await runPhotoPlanning({sourceImage,intent,connection,signal:new AbortController().signal,
+    transport:rawTransport([{kind:'inventory',objects:plan.objects,relationships:[]},design]),compile:async()=>true}),true,'No relationship is invented or required for an honest small resource action.');
+});

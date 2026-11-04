@@ -4,6 +4,7 @@ import "./design-system.css";
 import "./styles.css";
 import "./studio.css";
 import { diagnosticsEnabled } from "./lib/runtime-diagnostics";
+import type { StudioEntry } from "./lib/studio-entry";
 const RuntimeDiagnostics = lazy(
   () => import("./components/RuntimeDiagnostics"),
 );
@@ -15,6 +16,7 @@ const isCapture = location.pathname.startsWith("/capture/");
 function Product() {
   const [studio, setStudio] = useState(() => location.hash.startsWith("#studio"));
   const [studioOpened, setStudioOpened] = useState(() => location.hash.startsWith("#studio"));
+  const [studioEntry, setStudioEntry] = useState<StudioEntry>();
   useEffect(() => {
     const route = () => {
       const next = location.hash.startsWith("#studio");
@@ -25,8 +27,8 @@ function Product() {
     return () => window.removeEventListener("hashchange", route);
   }, []);
   return isCapture ? <Capture /> : <>
-    {!studio && <Home />}
-    {studioOpened && <div hidden={!studio} inert={!studio}><Studio active={studio}/></div>}
+    {!studio && <Home onContinueInStudio={entry=>{setStudioEntry(entry);window.location.hash="studio";}}/>}
+    {studioOpened && <div hidden={!studio} inert={!studio}><Studio active={studio} entry={studioEntry} onEntryConsumed={()=>setStudioEntry(undefined)}/></div>}
   </>;
 }
 ReactDOM.createRoot(document.getElementById("root")!).render(

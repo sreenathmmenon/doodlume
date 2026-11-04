@@ -1,0 +1,245 @@
+{
+  "id": "showcase-patio-care",
+  "name": "A little care",
+  "description": "A quiet patio moment becomes a careful watering task. Use the green can to give the potted succulents a measured drink on the weathered table.",
+  "theme": "grove",
+  "width": 1440,
+  "height": 959,
+  "source": "example",
+  "sourceImage": "/art/showcase/patio-care-source.webp",
+  "inputKind": "picture",
+  "revision": 1,
+  "entities": [
+    {
+      "id": "generated-source-backdrop",
+      "kind": "decoration",
+      "width": 1440,
+      "height": 958.5,
+      "x": 0,
+      "y": 0.25,
+      "art": "/art/showcase/patio-care-source.webp",
+      "artMethod": "crop",
+      "artSource": {
+        "x": 0,
+        "y": 0,
+        "width": 1000,
+        "height": 1000
+      },
+      "label": "Original image",
+      "artNote": "Full original image used as the world backdrop; generated gameplay is separate."
+    },
+    {
+      "id": "person",
+      "kind": "decoration",
+      "x": 738.72,
+      "y": 0.25,
+      "width": 701.28,
+      "height": 958.5,
+      "label": "Person",
+      "artSource": {
+        "x": 513,
+        "y": 0,
+        "width": 487,
+        "height": 1000
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "watering_can",
+      "kind": "decoration",
+      "x": 443.52,
+      "y": 128.689,
+      "width": 476.64,
+      "height": 382.4415,
+      "label": "Watering can",
+      "artSource": {
+        "x": 308,
+        "y": 134,
+        "width": 331,
+        "height": 399
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "potted_plant",
+      "kind": "decoration",
+      "x": 249.12,
+      "y": 384.6085,
+      "width": 257.76,
+      "height": 280.8405,
+      "label": "Succulent pot",
+      "artSource": {
+        "x": 173,
+        "y": 401,
+        "width": 179,
+        "height": 293
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "table",
+      "kind": "decoration",
+      "x": 0,
+      "y": 370.231,
+      "width": 979.2,
+      "height": 588.519,
+      "label": "Wooden table",
+      "artSource": {
+        "x": 0,
+        "y": 386,
+        "width": 680,
+        "height": 614
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "tile",
+      "kind": "decoration",
+      "x": 165.6,
+      "y": 542.761,
+      "width": 349.92,
+      "height": 161.028,
+      "label": "Patterned tile",
+      "artSource": {
+        "x": 115,
+        "y": 566,
+        "width": 243,
+        "height": 168
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "bench",
+      "kind": "decoration",
+      "x": 594.72,
+      "y": 277.2565,
+      "width": 470.88,
+      "height": 681.4935,
+      "label": "Bench",
+      "artSource": {
+        "x": 413,
+        "y": 289,
+        "width": 327,
+        "height": 711
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "chair",
+      "kind": "decoration",
+      "x": 0,
+      "y": 177.5725,
+      "width": 292.32,
+      "height": 233.874,
+      "label": "Chair",
+      "artSource": {
+        "x": 0,
+        "y": 185,
+        "width": 203,
+        "height": 244
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    },
+    {
+      "id": "wood_stack",
+      "kind": "decoration",
+      "x": 86.4,
+      "y": 97.0585,
+      "width": 228.96,
+      "height": 223.3305,
+      "label": "Firewood",
+      "artSource": {
+        "x": 60,
+        "y": 101,
+        "width": 159,
+        "height": 233
+      },
+      "artNote": "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image."
+    }
+  ],
+  "goalRules": {
+    "requiredCollectedIds": [],
+    "requiredActivatedIds": [],
+    "requiredInteractionIds": [],
+    "requiredResourceIds": [
+      "potted_plant"
+    ]
+  },
+  "gameplay": {
+    "movement": "discover",
+    "objectiveTitle": "Water the Succulents",
+    "instructions": "Transfer water from the can to the black pot until it is full.",
+    "clues": []
+  },
+  "interactions": {
+    "version": 1,
+    "objects": [
+      {
+        "entityId": "watering_can",
+        "carryable": false,
+        "usableInPlace": true,
+        "layer": "object",
+        "resource": {
+          "type": "water",
+          "capacity": 3,
+          "initial": 3
+        }
+      },
+      {
+        "entityId": "potted_plant",
+        "carryable": false,
+        "layer": "object",
+        "resource": {
+          "type": "water",
+          "capacity": 3,
+          "initial": 0
+        }
+      },
+      {
+        "entityId": "table",
+        "carryable": false,
+        "layer": "surface"
+      },
+      {
+        "entityId": "tile",
+        "carryable": false,
+        "layer": "surface"
+      },
+      {
+        "entityId": "bench",
+        "carryable": false,
+        "layer": "object"
+      },
+      {
+        "entityId": "chair",
+        "carryable": false,
+        "layer": "object"
+      },
+      {
+        "entityId": "wood_stack",
+        "carryable": false,
+        "layer": "object"
+      },
+      {
+        "entityId": "person",
+        "carryable": false,
+        "layer": "object"
+      }
+    ],
+    "actions": [
+      {
+        "id": "water_potted_plant",
+        "label": "Water the succulents",
+        "toolId": "watering_can",
+        "targetId": "potted_plant",
+        "requires": [],
+        "requiresResourceIds": [],
+        "effects": [],
+        "kind": "transfer",
+        "amount": 3
+      }
+    ],
+    "completionPolicy": "protected"
+  },
+  "exampleId": "patio-care"
+}

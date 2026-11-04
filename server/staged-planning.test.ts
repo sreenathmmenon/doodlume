@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readSourceInventory, readStagedDesign, runStagedPlanning } from "./staged-planning.js";
+import { readSourceInventory, readStagedDesign, runStagedPlanning, reviewCompiledSourceActivity } from "./staged-planning.js";
 import { readGameplayPlan } from "./creative-adaptation.js";
 import { modelConnection } from "./provider.js";
 import { RecognitionReviewError } from "./recognition-error.js";
@@ -198,4 +198,18 @@ test("photo-only rollout uses frozen inventory while drawings keep their existin
     },'drawing'),/could not complete/);
     assert.equal(drawingCalls,1);
   }finally{if(before===undefined)delete process.env.SOURCE_PLANNING;else process.env.SOURCE_PLANNING=before;}
+});
+
+
+test("activity review uses recovered compiled geometry and accepts small real consequences",()=>{
+  const placement={id:"place",kind:"place",toolId:"piece",targetId:"surface",effects:[{kind:"moveObject",entityId:"piece",x:100,y:200}]};
+  const compiled={entities:[{id:"piece",x:100,y:200}],interactions:{objects:[{entityId:"piece",carryable:true}],actions:[placement]}};
+  assert.throws(()=>reviewCompiledSourceActivity(compiled),/already at that destination/);
+  const recovered=structuredClone(compiled);recovered.entities[0].x=101;
+  assert.doesNotThrow(()=>reviewCompiledSourceActivity(recovered),"A recovered silhouette can move even when original source box centers matched.");
+  const returnTrip=structuredClone(compiled);returnTrip.interactions.actions.unshift({...placement,id:"outbound",effects:[{kind:"moveObject",entityId:"piece",x:300,y:200}]});
+  assert.doesNotThrow(()=>reviewCompiledSourceActivity(returnTrip),"A real outward and return route is allowed.");
+  assert.doesNotThrow(()=>reviewCompiledSourceActivity({...compiled,interactions:{...compiled.interactions,actions:[{...placement,costs:[{entityId:"battery",amount:1}]}]}}));
+  assert.doesNotThrow(()=>reviewCompiledSourceActivity({...compiled,interactions:{...compiled.interactions,actions:[{kind:"transfer",toolId:"source",targetId:"receiver",amount:1,effects:[]}]}}),"One small quantity change is valid.");
+  assert.doesNotThrow(()=>reviewCompiledSourceActivity({...compiled,interactions:{...compiled.interactions,objects:[{entityId:"piece",carryable:true,layer:"surface"}]}}));
 });

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyPlayState, validateWorld } from "../../shared/world";
 import { reduceInteraction, type InteractionCommand } from "../../shared/interactions";
-import { nextInteractionHint } from "./interaction-guide";
+import { nextInteractionHint, interactionResourceChanges } from "./interaction-guide";
 
 function fixture() {
   return validateWorld({ id:"hint-fixture",name:"Garden",description:"Test",theme:"grove",width:1440,height:820,source:"manual",sourceImage:"/art/test.png",revision:1,
@@ -434,4 +434,27 @@ test("hints find spending that frees capacity for a required refill and later pa
   state=reduceInteraction(world,state,{type:"pickup",entityId:"pitcher"}).state;
   state=reduceInteraction(world,state,{type:"perform",actionId:"charge"}).state;
   assert.match(nextInteractionHint(world,state)!.text,/^Power the return journey/);
+});
+
+
+test("quantity receipts reflect both real transfer ends and never mutate progress", () => {
+  const world = fixture();
+  const selected = reduceInteraction(world, emptyPlayState(), {type: "pickup", entityId: "pitcher"}).state;
+  const after = reduceInteraction(world, selected, {type: "perform", actionId: "refill"});
+  assert.equal(after.ok, true, after.reason);
+  const snapshot = JSON.stringify([selected, after.state]);
+  assert.deepEqual(interactionResourceChanges(world, selected, after.state), [
+    {entityId: "pitcher", delta: -2}, {entityId: "cup", delta: 2},
+  ]);
+  assert.deepEqual(interactionResourceChanges(world, after.state, after.state), []);
+  assert.equal(JSON.stringify([selected, after.state]), snapshot);
+});
+
+test("blocked actions and source selection never produce a quantity receipt", () => {
+  const world = fixture(), initial = emptyPlayState();
+  const selected = reduceInteraction(world, initial, {type: "pickup", entityId: "cup"}).state;
+  assert.deepEqual(interactionResourceChanges(world, initial, selected), []);
+  const blocked = reduceInteraction(world, selected, {type: "perform", actionId: "water"});
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(interactionResourceChanges(world, selected, blocked.state), []);
 });

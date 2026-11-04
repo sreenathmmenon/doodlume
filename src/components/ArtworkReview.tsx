@@ -7,7 +7,7 @@ export function ArtworkReview({ entities }: { entities: WorldEntity[] }) {
   return (
     <details className="artwork-review">
       <summary>
-        Original artwork · {objects.length} objects · {precise} precise cutouts
+        Original artwork · {objects.length} objects · {precise} automatic cutouts
       </summary>
       <ul className="artwork-cutouts">
         {objects.map((e) => (
@@ -20,7 +20,7 @@ export function ArtworkReview({ entities }: { entities: WorldEntity[] }) {
               {e.artMethod === "outline"
                 ? "Outline confirmed by you"
                 : e.artMethod === "sam"
-                ? "Precise cutout"
+                ? "Automatic cutout"
                 : e.artMethod === "crop"
                   ? e.artShape === "ellipse"
                     ? "Oval crop · chosen by you"

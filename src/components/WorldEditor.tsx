@@ -1655,7 +1655,8 @@ function WorldEditorSession({
               <div className="editor-empty-selection">
                 <Move size={22} />
                 <p>
-                  Select an object to edit.
+                  Choose something in your picture.
+                  Give it an ability, or change how it looks.
                 </p>
               </div>
             )}

@@ -3,6 +3,7 @@ import { carriedArtworkPosition, attachedPlayerArtwork } from "./artwork-raster"
 import { interactionMoveDestination } from "./interaction-move-geometry";
 import { layoutResourceBadges } from "./resource-badge-layout";
 import { objectName } from "../lib/object-name";
+import { interactionResourceChanges } from "../lib/interaction-guide";
 import type { InteractionAction } from "../../shared/interactions";
 import { activeInteractionSource, selectInteractionSourceCommand, playerAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
 import { canSelectInteractionSource, previewInteraction, inspectInteractionTarget, incompatibleTargetReason, interactionOutcomeMessage, type ActionPreview } from "../../shared/interaction-preview";
@@ -43,6 +44,7 @@ export class ObjectInteractions {
   private hover = "";
   private lastNotice = -10000;
   private displayedQuantities = new Map<string, number>();
+  private resourceReceipts = new Map<string, { delta: number; until: number }>();
   private movedObjects = new Map<string, { x: number; y: number; width: number; height: number; actionId: string }>();
   private lastRenderTime = 0;
   private pendingMotions = 0;
@@ -323,6 +325,8 @@ export class ObjectInteractions {
       ? { type: "perform", actionId: choice.action.id }
       : selectInteractionSourceCommand(this.world, id));
     if (!result.ok) { this.notice(result.reason || "Try another object."); return true; }
+    for (const change of interactionResourceChanges(this.world, current, result.state))
+      this.resourceReceipts.set(change.entityId, { delta: change.delta, until: this.scene.time.now + 2200 });
     this.syncMoves(true, result.state);
     this.host.change(result.state);
     if (result.event) {
@@ -642,8 +646,18 @@ export class ObjectInteractions {
         }
       }
     }
+    const context = this.context();
     const badgeView = {x:0,y:0,width:camera.worldView.width/unit,height:camera.worldView.height/unit};
-    const badgeObjects = (this.world.interactions?.objects ?? []).filter(object => object.resource && state.heldEntityId !== object.entityId);
+    // Exact quantities follow attention instead of labelling every source
+    // object at once. Changed quantities stay briefly as actual action receipts.
+    // Every resource remains inspectable in the keyboard alternate.
+    const resourceFocus = new Set([activeInteractionSource(state), this.hover, this.menuTarget,
+      context.nearby?.entity.id, this.world.interactions?.actions.find(action => action.id === this.externalPreviewAction)?.targetId]);
+    for (const [id, receipt] of this.resourceReceipts) {
+      if (receipt.until > this.scene.time.now) resourceFocus.add(id);
+      else this.resourceReceipts.delete(id);
+    }
+    const badgeObjects = (this.world.interactions?.objects ?? []).filter(object => object.resource && state.heldEntityId !== object.entityId && resourceFocus.has(object.entityId));
     const reservedBadgeSpace = [this.prompt,this.hintLabel].filter(label=>label.visible).map(label=>{
       const bounds=label.getBounds();
       return {x:(bounds.x-camera.worldView.left)/unit,y:(bounds.y-camera.worldView.top)/unit,width:bounds.width/unit,height:bounds.height/unit};
@@ -680,7 +694,7 @@ export class ObjectInteractions {
         text.setText(`${capacity} / ${capacity}`);
         text.setData("badgeWidth",Math.max(56,text.width+16));
       }
-      return [{id:entity.id,width:text.getData("badgeWidth") as number,height:32,
+      return [{id:entity.id,width:text.getData("badgeWidth") as number,height:this.resourceReceipts.has(entity.id) ? 48 : 32,
         bounds:{x:(point.x-size.width/2-camera.worldView.left)/unit,y:(point.y-size.height/2-camera.worldView.top)/unit,
           width:size.width/unit,height:size.height/unit}}];
     }),badgeView,reservedBadgeSpace,badgeArtwork);
@@ -691,7 +705,9 @@ export class ObjectInteractions {
       if (!object.resource) continue;
       const actual = state.quantities[entity.id] ?? 0;
       const text = this.resourceLabels.get(entity.id)!;
-      text.setText(`${resourceNumber.format(actual)} / ${resourceNumber.format(object.resource.capacity)}`).setScale(unit).setVisible(true);
+      const receipt = this.resourceReceipts.get(entity.id);
+      const change = receipt ? `\n${receipt.delta > 0 ? "+" : "−"}${resourceNumber.format(Math.abs(receipt.delta))}` : "";
+      text.setText(`${resourceNumber.format(actual)} / ${resourceNumber.format(object.resource.capacity)}${change}`).setScale(unit).setVisible(true);
       const badgeWidth = placement.width * unit, badgeHeight = placement.height * unit;
       const x = camera.worldView.left + placement.x * unit, y = camera.worldView.top + placement.y * unit;
       const centerX = x + badgeWidth / 2;
@@ -715,7 +731,7 @@ export class ObjectInteractions {
         : Phaser.Math.Linear(previous, actual, 1 - Math.exp(-delta / 105));
       this.displayedQuantities.set(entity.id, displayed);
       const fraction = Math.max(0, Math.min(1, displayed / object.resource.capacity));
-      const meterX = x + 8 * unit, meterY = y + 25 * unit, meterWidth = badgeWidth - 16 * unit;
+      const meterX = x + 8 * unit, meterY = y + (placement.height - 7) * unit, meterWidth = badgeWidth - 16 * unit;
       this.marks.fillStyle(0xd8e3e9, 1).fillRoundedRect(meterX, meterY, meterWidth, 3 * unit, 1.5 * unit);
       this.marks.fillStyle(0x23846e, 1).fillRoundedRect(meterX, meterY, meterWidth * fraction, 3 * unit, 1.5 * unit);
     }
@@ -754,7 +770,6 @@ export class ObjectInteractions {
       const point = pointer.positionToCamera(camera) as Phaser.Math.Vector2;
       this.hover = this.objectAt(point)?.id ?? "";
     }
-    const context = this.context();
     const available = playerAvailableInteractions(this.world, this.host.state());
     // Held tools reveal only targets that can really accept them now.
     for (const id of new Set(available.map(action => action.targetId))) {
@@ -790,13 +805,15 @@ export class ObjectInteractions {
     if (context.nearby) {
       const point = this.point(context.nearby.entity);
       const discovery = this.world.gameplay?.movement === "discover";
-      const previews = discovery && context.nearby.action ? this.inspect(context.nearby.entity.id) : [];
-      const preview = discovery && context.nearby.action
+      const previews = context.nearby.action ? this.inspect(context.nearby.entity.id) : [];
+      const preview = context.nearby.action
         ? previews.find(candidate => candidate.id === context.nearby!.action!.id) ?? previewInteraction(this.world,this.host.state(),context.nearby.action)
         : undefined;
       const cue = discovery ? "Click" : "E";
+      const action = context.nearby.action;
+      const commitment = action && (action.costs?.length || this.world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)));
       const detail = previews.length > 1 ? `${cue} · Choose action\n${previews.filter(candidate => candidate.available).length} of ${previews.length} available`
-        : preview ? `${cue} · ${preview.label}\n${preview.available ? preview.canvasConsequence ?? preview.consequence : preview.reason ?? "Unavailable"}`
+        : preview ? `${cue} · ${preview.label}${commitment ? `\n${preview.available ? preview.canvasConsequence ?? preview.consequence : preview.reason ?? "Unavailable"}` : ""}`
         : `${cue} · ${context.label}`;
       this.prompt.setText(detail).setScale(unit);
       const half = Math.min(camera.worldView.width / 2, (this.prompt.width / 2 + 12) * unit);
@@ -827,6 +844,28 @@ export class ObjectInteractions {
     }
     const action = this.world.interactions?.actions.find(candidate => candidate.id === actionId);
     if (!action || !this.inspect(action.targetId).some(preview => preview.id === action.id && preview.available)) return;
+    if (action.kind !== "operate" && action.toolId !== action.targetId) {
+      const source = this.entity(action.toolId), target = this.entity(action.targetId);
+      if (source && target) {
+        const from = this.point(source), to = this.point(target), targetSize = this.size(target);
+        const dx = to.x - from.x, dy = to.y - from.y, distance = Math.hypot(dx, dy);
+        // Stop at the receiving object's envelope. This is an action link, not
+        // an invented trajectory or a claim of collision-aware navigation.
+        const inset = Math.min(distance / 3, Math.max(targetSize.width, targetSize.height) / 2 + 12 * unit);
+        if (distance > 48 * unit) {
+          const end = {x: to.x - dx / distance * inset, y: to.y - dy / distance * inset};
+          const angle = Math.atan2(dy, dx);
+          for (const [width, color, alpha] of [[4, 0xffffff, .8], [2, 0x218b77, .9]]) {
+            this.destinationMark.lineStyle(width * unit, color, alpha).beginPath()
+              .moveTo(from.x, from.y).lineTo(end.x, end.y).strokePath();
+            this.destinationMark.beginPath()
+              .moveTo(end.x - Math.cos(angle - .55) * 10 * unit, end.y - Math.sin(angle - .55) * 10 * unit)
+              .lineTo(end.x, end.y)
+              .lineTo(end.x - Math.cos(angle + .55) * 10 * unit, end.y - Math.sin(angle + .55) * 10 * unit).strokePath();
+          }
+        }
+      }
+    }
     for (const effect of action.effects ?? []) {
       if (effect.kind !== "moveObject") continue;
       const entity = this.entity(effect.entityId), art = this.art.get(effect.entityId);

@@ -30,3 +30,10 @@ The packaged worlds are reproducible examples of supported behavior. They do not
 ## Display derivatives
 
 `*-thumb.webp` (192×128) and `*-preview.webp` (up to 1440px wide) are resized/compressed derivatives of the corresponding existing source artwork, not additional generated scenes. The homepage uses these lighter files for browsing; Original and the game continue to use the full source assets. Thumbnail crops are navigation previews only; the main artwork remains contained and uncropped.
+
+
+## Real-photo patio care
+
+`patio-care.json` is the untouched rule graph of the actual hosted neutral-photo generation on deployment31b99731-176c-41e9-a9a1-ff4dc47f722b. Its example identity/title, concise display labels and packaged artwork paths were changed; object IDs, source geometry and gameplay rules were preserved. Its fixed pictured watering can transfers an authored game water quantity into the pictured pot. It does not simulate physical liquid or plant growth. The generated activity was played, saved and reloaded before packaging; the packaged homepage path receives its own browser verification.
+
+Source photograph: [Person waters succulents on a table in an outdoor setting](https://commons.wikimedia.org/wiki/File:Person_waters_succulents_on_a_table_in_an_outdoor_setting.jpg), by **Shixart1985**, [CC BY2.0](https://creativecommons.org/licenses/by/2.0/). Processing: proportional resize, lossless PNG/WebP packaging and preview/thumbnail derivatives. No crop, compositing or semantic alteration is used for the main original. Attribution appears beside this selected example on the homepage. Fresh generation evidence remains under `outputs/verification/compact-photos-2026-11-04/live-final-watering/`.

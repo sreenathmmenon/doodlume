@@ -59,6 +59,8 @@ export interface WorldGameplay {
   movement: "platform" | "roam" | "discover";
   /** Authored platform jump velocity relative to the default; source geometry stays intact. */
   jumpStrength?: number;
+  /** Finish immediately when the explicit goal requirements are met. */
+  completion?: "requirements";
   objectiveTitle: string;
   instructions: string;
   clues?: { entityId: string; text: string }[];
@@ -201,6 +203,7 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
     const g = w.gameplay;
     if (!g || typeof g !== "object" || Array.isArray(g) ||
         !["platform", "roam", "discover"].includes(g.movement) ||
+        (g.completion !== undefined && g.completion !== "requirements") ||
         (g.jumpStrength !== undefined && (g.movement !== "platform" || !Number.isFinite(g.jumpStrength) || g.jumpStrength < 1 || g.jumpStrength > 1.6)) ||
         typeof g.objectiveTitle !== "string" || !g.objectiveTitle.trim() || g.objectiveTitle.length > 100 ||
         typeof g.instructions !== "string" || !g.instructions.trim() || g.instructions.length > 180 ||
@@ -368,7 +371,7 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
         );
     }
     if (
-      !options.allowIncomplete && (rules.requiredCollectedIds.length ||
+      !options.allowIncomplete && w.gameplay?.completion !== "requirements" && (rules.requiredCollectedIds.length ||
         rules.requiredActivatedIds.length) &&
       !w.entities.some((e) => e.kind === "goal")
     )
@@ -379,6 +382,12 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
     if ([...w.goalRules.requiredCollectedIds, ...w.goalRules.requiredActivatedIds].some(id => !clued.has(id)))
       throw new Error("Add a discovery clue for each required object before applying these rules.");
   }
+  if (!options.allowIncomplete && w.gameplay?.completion === "requirements" &&
+      (w.entities.some(entity => entity.kind === "goal") || !w.goalRules ||
+       ![w.goalRules.requiredCollectedIds, w.goalRules.requiredActivatedIds,
+         w.goalRules.requiredInteractionIds, w.goalRules.requiredResourceIds,
+         w.goalRules.requiredChoiceGroupIds].some(ids => ids?.length)))
+    throw new Error("Requirements-only completion needs a goal requirement and no destination.");
   validateInteractions(w, {allowUnpreparedArtwork: options.allowIncomplete});
   return w;
 }
