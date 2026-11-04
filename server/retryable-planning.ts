@@ -58,11 +58,12 @@ export function validateGeneratedRetryablePlan(world: WorldDefinition): void {
   if (!viable.has(0)) throw new ModelPlanError("The retryable allocation puzzle has no completing run from its original supplies. Correct the plan; Undo cannot substitute for a solution.");
   for (let index = 0; index < states.length; index++) {
     if (complete(states[index])) continue; // Spending after winning is not a puzzle.
-    const transfers = edges[index].filter(edge => edge.action.kind === "transfer");
-    for (const safe of transfers) for (const losing of transfers) {
-      if (safe.action.toolId === losing.action.toolId && safe.action.targetId !== losing.action.targetId &&
+    const spends = (action:InteractionAction) => action.kind === "transfer" ? [action.toolId] : (action.costs??[]).map(cost=>cost.entityId);
+    const allocations = edges[index].filter(edge=>spends(edge.action).length);
+    for (const safe of allocations) for (const losing of allocations) {
+      if (safe.action.id !== losing.action.id && spends(safe.action).some(id=>spends(losing.action).includes(id)) &&
           viable.has(safe.to) && !viable.has(losing.to)) return;
     }
   }
-  throw new ModelPlanError('Retryable play needs a real allocation decision: two legal transfers from the same finite source to different pictured receivers, where one can finish and the other needs Undo. Do not invent a waste receiver or impossible chore; keep completionPolicy:"protected" when the source has no such puzzle.');
+  throw new ModelPlanError('Retryable play needs a real allocation decision: two legal actions spending the same finite resource on different consequences, where one can finish and the other needs Undo. Do not invent a waste receiver or impossible chore; keep completionPolicy:"protected" when the source has no such puzzle.');
 }

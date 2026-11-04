@@ -460,7 +460,7 @@ export class ObjectInteractions {
     }
     for (const action of actions.slice(page * pageSize, page * pageSize + pageSize)) {
       const preview = previews.find(candidate => candidate.id === action.id);
-      const fullDetail = preview?.available ? preview.consequence : preview?.reason;
+      const fullDetail = preview?.available ? preview.canvasConsequence ?? preview.consequence : preview?.reason;
       const detail = fullDetail && fullDetail.length > 160 ? `${fullDetail.slice(0,157)}…` : fullDetail;
       addButton(`${action.label}${detail ? `\n${detail}` : ""}`, () => this.interact(entity.id, action.id), action.id);
     }
@@ -648,6 +648,28 @@ export class ObjectInteractions {
       const bounds=label.getBounds();
       return {x:(bounds.x-camera.worldView.left)/unit,y:(bounds.y-camera.worldView.top)/unit,width:bounds.width/unit,height:bounds.height/unit};
     });
+    const backdrop = this.world.entities.find(isSourceBackdrop);
+    const openedGates = new Set(interactionEffects(this.world, this.host.state()).openGateIds);
+    for (const id of this.host.state().activated) {
+      const gateId = this.entity(id)?.targetId;
+      if (gateId) openedGates.add(gateId);
+    }
+    const badgeArtwork = this.world.entities.flatMap(entity => {
+      if (isSourceBackdrop(entity) || (!entity.art && !entity.artSource) || openedGates.has(entity.id)) return [];
+      const art = this.art.get(entity.id);
+      if (art && (!art.visible || art.alpha === 0)) return [];
+      // Use current animated/attached artwork, not the original selected box.
+      // Stationary source details may have a collider smaller than their art.
+      const point = this.point(entity), size = this.size(entity);
+      const box = entity.kind === "player" && this.host.playerArtBounds?.()
+        || (art ? {x:point.x-size.width/2,y:point.y-size.height/2,width:size.width,height:size.height}
+          : backdrop && entity.artSource ? entity.sourceLayer ? sourceLayerArtworkBounds(entity,backdrop)
+            : {x:backdrop.x+entity.artSource.x/1000*backdrop.width,y:backdrop.y+entity.artSource.y/1000*backdrop.height,
+              width:entity.artSource.width/1000*backdrop.width,height:entity.artSource.height/1000*backdrop.height}
+          : {x:point.x-size.width/2,y:point.y-size.height/2,width:size.width,height:size.height});
+      return [{id:entity.id,bounds:{x:(box.x-camera.worldView.left)/unit,y:(box.y-camera.worldView.top)/unit,
+        width:box.width/unit,height:box.height/unit}}];
+    });
     const placements = layoutResourceBadges(badgeObjects.flatMap(object => {
       const entity = this.entity(object.entityId), text = this.resourceLabels.get(object.entityId);
       if (!entity || !text || !object.resource) return [];
@@ -661,7 +683,7 @@ export class ObjectInteractions {
       return [{id:entity.id,width:text.getData("badgeWidth") as number,height:32,
         bounds:{x:(point.x-size.width/2-camera.worldView.left)/unit,y:(point.y-size.height/2-camera.worldView.top)/unit,
           width:size.width/unit,height:size.height/unit}}];
-    }),badgeView,reservedBadgeSpace);
+    }),badgeView,reservedBadgeSpace,badgeArtwork);
     for (const text of this.resourceLabels.values()) text.setVisible(false);
     for (const placement of placements) {
       const object = badgeObjects.find(object => object.entityId === placement.id)!;
@@ -757,7 +779,7 @@ export class ObjectInteractions {
         const preview = previews[0], point = this.point(inspected);
         const cue = this.world.gameplay?.movement === "discover" ? "Click" : this.distance(inspected) <= 100 ? "E" : "Approach";
         const multiple = previews.length > 1 ? `Click · Choose action\n${previews.filter(action => action.available).length} of ${previews.length} available` : undefined;
-        this.prompt.setText(incompatible || multiple || (preview.available ? `${cue} · ${preview.label}\n${preview.consequence}` : preview.reason || "Unavailable"))
+        this.prompt.setText(incompatible || multiple || (preview.available ? `${cue} · ${preview.label}\n${preview.canvasConsequence ?? preview.consequence}` : preview.reason || "Unavailable"))
           .setScale(unit).setVisible(true);
         this.prompt.setPosition(Phaser.Math.Clamp(point.x, camera.worldView.left + 150 * unit, camera.worldView.right - 150 * unit),
           Phaser.Math.Clamp(point.y - this.size(inspected).height / 2 - 12 * unit,
@@ -774,7 +796,7 @@ export class ObjectInteractions {
         : undefined;
       const cue = discovery ? "Click" : "E";
       const detail = previews.length > 1 ? `${cue} · Choose action\n${previews.filter(candidate => candidate.available).length} of ${previews.length} available`
-        : preview ? `${cue} · ${preview.label}\n${preview.available ? preview.consequence : preview.reason ?? "Unavailable"}`
+        : preview ? `${cue} · ${preview.label}\n${preview.available ? preview.canvasConsequence ?? preview.consequence : preview.reason ?? "Unavailable"}`
         : `${cue} · ${context.label}`;
       this.prompt.setText(detail).setScale(unit);
       const half = Math.min(camera.worldView.width / 2, (this.prompt.width / 2 + 12) * unit);

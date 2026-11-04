@@ -36,3 +36,19 @@ test("a nearby action prompt leaves a gap above the badge without detaching it f
   assert.equal(overlap(badge,prompt),false);
   assert.ok(badge.x>=438&&badge.x+badge.width<=811&&badge.y>=0&&badge.y+badge.height<=264);
 });
+
+test("a moved non-resource object stays unobscured without detaching its receiver's badge",()=>{
+  const source={id:"receiver",bounds:{x:556,y:708,width:432,height:167},width:56,height:32};
+  const cargo={id:"cargo",bounds:{x:704,y:719,width:143,height:117}};
+  const viewport={x:0,y:0,width:1440,height:960};
+  const [unloaded]=layoutResourceBadges([source],viewport);
+  assert.equal(overlap(unloaded,cargo.bounds),true,"Original placement reproduces the loaded-art overlap.");
+  const [loaded]=layoutResourceBadges([source],viewport,[],[cargo]);
+  assert.equal(overlap(loaded,cargo.bounds),false);
+  assert.equal(loaded.overlaps,false);
+  assert.equal(overlap({x:loaded.anchor.x,y:loaded.anchor.y,width:1,height:1},cargo.bounds),false,"The attribution point cannot imply the cargo owns this resource.");
+  assert.ok(loaded.x>=source.bounds.x&&loaded.x+loaded.width<=source.bounds.x+source.bounds.width);
+  assert.ok(loaded.y>=source.bounds.y&&loaded.y+loaded.height<=source.bounds.y+source.bounds.height);
+  assert.equal(loaded.leader,true,"A shifted badge retains its source anchor.");
+  assert.deepEqual(layoutResourceBadges([source],viewport,[],[{...cargo,bounds:{...cargo.bounds,x:100}}]),[unloaded],"Once the artwork moves away the old location is not reserved.");
+});

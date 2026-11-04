@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
-import { InterpretationError, ModelPlanError } from "./model.js";
+import { InterpretationError, ModelPlanError, MalformedModelJSONError } from "./model.js";
 import { RecognitionReviewError } from "./recognition-error.js";
 import { interpretationErrorResponse } from "./interpretation-response.js";
 
@@ -32,4 +32,15 @@ test("HTTP errors hide final plan diagnostics while retaining correction detail 
     assert.equal(provider.statusCode,502);
     assert.equal(provider.json().error,errors.provider.message);
   }finally{await app.close();}
+});
+
+
+test("malformed model text stays private at the public error boundary",()=>{
+  const raw='{"private-source-id":"untrusted text';
+  const error=new MalformedModelJSONError(raw);
+  assert.equal(error.rawContent,raw);
+  const response=interpretationErrorResponse(error)!;
+  assert.equal(response.status,422);
+  assert.match(response.body.error,/game rules could not be completed/);
+  assert.doesNotMatch(JSON.stringify(response.body),/private-source-id|untrusted text|rawContent/);
 });

@@ -23,6 +23,7 @@ interface Options {
   signal: AbortSignal;
   transport: typeof fetch;
   requested: GoalRules;
+  validateGeneratedChoices?: boolean;
   onReject?: (reason: string, objectId?: string) => void;
   finishRules: (entities: WorldEntity[], defaults: GoalRules) => GoalRules;
 }
@@ -45,6 +46,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     (options.objects.filter(object => object.kind === "player").length === 1 ? options.objects.find(object => object.kind === "player") : undefined);
   const sourceSurfaces = options.objects.filter(object => ["terrain", "bridge"].includes(object.kind));
   if (!actor || sourceSurfaces.length < 1) return reject("A source-aligned adventure needs a complete character and at least one recognized walkable surface.");
+  if(actor.groundingIssue && !actor.artwork) return reject(actor.groundingIssue,actor.id);
   // A distant countertop/horizon can cross a foreground subject in a photo.
   // Making it solid would force the character onto that background line. Keep
   // source placement honest when a near-foot support already explains its pose;
@@ -248,7 +250,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   const behaviorWorld: WorldDefinition = { id: "preflight", name: options.name, description: "", theme: options.theme,
     width, height, source: "manual", sourceImage: "/art/preflight.png", entities: [...entities, hero], revision: 1,
     interactions: plan.interactions, goalRules, gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions } };
-  try { behaviorWorld.interactions = applyPlannedInteractions(behaviorWorld, plan.interactions, plan.requiredInteractionIds, true).interactions; validateInteractions(behaviorWorld, {allowUnpreparedArtwork:true}); } catch (error) { return reject(error instanceof Error ? error.message : "The source interactions need review."); }
+  try { behaviorWorld.interactions = applyPlannedInteractions(behaviorWorld, plan.interactions, plan.requiredInteractionIds, true, {validateGeneratedChoices:options.validateGeneratedChoices}).interactions; validateInteractions(behaviorWorld, {allowUnpreparedArtwork:true}); } catch (error) { return reject(error instanceof Error ? error.message : "The source interactions need review."); }
   const requiredActions = new Set(goalRules.requiredInteractionIds ?? []);
   const addDependencies = (id: string) => {
     for (const prior of plan.interactions?.actions.find(action => action.id === id)?.requires ?? []) if (!requiredActions.has(prior)) {
@@ -482,12 +484,12 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   }
   try { await prepareMovingSourceArt(source, entities.filter(entity => movingBehaviorIds.has(entity.id)), options.segmentation, signal, options.transport, inputKind); }
   catch(error) { if(error instanceof MovableArtworkReviewError)return reject(error.message, error.objectId); throw error; }
-  world.interactions = applyPlannedInteractions(world, plan.interactions, plan.requiredInteractionIds).interactions;
+  world.interactions = applyPlannedInteractions(world, plan.interactions, plan.requiredInteractionIds, false, {validateGeneratedChoices:options.validateGeneratedChoices}).interactions;
   const placement = setupFeedback(world);
   if (placement.errors.length) return reject(placement.errors.join(" "));
   const backdrop = entities[0];
   let repairNote="";
-  backdrop.art = await sourceScenery(source, entities, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa; source cutouts use Meta SAM." : " Background reconstructed with local classical inpainting.";});
+  backdrop.art = await sourceScenery(source, entities, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";},signal);
   backdrop.artNote = SOURCE_SCENERY_NOTE+repairNote;
   signal.throwIfAborted();
   return world;

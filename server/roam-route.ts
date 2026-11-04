@@ -92,12 +92,13 @@ export function checkRoamRoute(width: number, height: number, guide: WorldEntity
       const changesAccess = action.effects?.some(effect => effect.kind === "openGate" && blockers.some(blocker => blocker.id === effect.entityId) ||
         effect.kind === "moveObject" && relevantObjects.has(effect.entityId));
       const movesNeededPart = action.kind === "attach" && relevantObjects.has(action.toolId);
-      const connectsResource = action.kind === "transfer" && (relevantResources.has(action.toolId) || relevantResources.has(action.targetId));
+      const connectsResource = action.kind === "transfer" && (relevantResources.has(action.toolId) || relevantResources.has(action.targetId)) || action.costs?.some(cost=>relevantResources.has(cost.entityId));
       if (changesAccess || movesNeededPart || connectsResource) relevantActions.add(action.id);
       if (!relevantActions.has(action.id)) continue;
       relevantObjects.add(action.toolId); relevantObjects.add(action.targetId);
       for (const id of action.requires ?? []) relevantActions.add(id);
       for (const id of action.requiresResourceIds ?? []) relevantResources.add(id);
+      for (const cost of action.costs ?? []) relevantResources.add(cost.entityId);
       if (action.kind === "transfer") { relevantResources.add(action.toolId); relevantResources.add(action.targetId); }
     }
     expanded = count !== relevantActions.size + relevantResources.size + relevantObjects.size;

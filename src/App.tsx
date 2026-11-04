@@ -1184,12 +1184,17 @@ export default function App({ active = true }: { active?: boolean }) {
           <textarea
             id="world-intent"
             value={intent}
-            maxLength={400}
+            maxLength={500}
+            aria-invalid={creationIntent().length > 500 || undefined}
+            aria-describedby={creationIntent().length > 500 ? "creation-intent-limit" : undefined}
             onChange={(e) => setIntent(e.target.value)}
             placeholder="What would make this image interesting to play?"
             disabled={busy}
           />
         </div>
+        {creationIntent().length > 500 && <p id="creation-intent-limit" className="small-note" role="status">
+          Shorten your idea by {creationIntent().length - 500} characters for this gameplay style, or choose Auto.
+        </p>}
         <details className="creation-gameplay-options">
           <summary>Gameplay <span>{creationStyle === "auto" ? "Auto" : creationStyle === "platform" ? "Adventure" : creationStyle === "roam" ? "Explore" : "Hands-on"}</span></summary>
         <fieldset className="creation-modes" disabled={busy} aria-describedby="creation-mode-description">

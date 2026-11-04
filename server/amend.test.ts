@@ -362,3 +362,16 @@ test("page amendment carries existing exclusive choices into model context and p
   assert.deepEqual(applied.world.interactions, world.interactions);
   assert.deepEqual(applied.world.goalRules, world.goalRules);
 });
+
+
+test("source amendments require renewed outline confirmation before requesting a model", async()=>{
+  const world=await setup();
+  const entity=world.entities.find(item=>item.kind==="coin")!;
+  const art="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+  const sourceBox={x:100,y:100,width:100,height:100};
+  Object.assign(entity,{art,artMethod:"outline",artSource:sourceBox,sourceOutline:{sourceFingerprint:"a".repeat(64),sourceBox:{...sourceBox}}});
+  let calls=0;
+  await assert.rejects(()=>interpretAmendment(world,awaitableImage,"Keep my confirmed objects",connection,signal,async()=>{calls++;throw Error("No model call expected");}),/creator-confirmed outlines.*new source review/);
+  assert.equal(calls,0);
+  assert.equal(entity.artMethod,"outline");
+});

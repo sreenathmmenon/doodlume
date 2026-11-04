@@ -1,3 +1,5 @@
+import { groundWholeActor } from "./actor-grounding.js";
+import { applyConfirmedSourceOutlines } from "./source-outline.js";
 import { validateGeneratedPlacementVisibility } from "./placement-visibility.js";
 import { prepareMovingSourceArt, MovableArtworkReviewError } from "./moving-source-art.js";
 import { randomUUID } from "node:crypto";
@@ -27,7 +29,9 @@ export interface SourceSelection {
   visualBounds?: { x: number; y: number; width: number; height: number };
   label: string;
   targetId?: string | null;
-  artwork?: Pick<WorldEntity, "art" | "artMethod" | "artNote">;
+  /** Local extraction evidence only; never accepted from model JSON. */
+  groundingIssue?: string;
+  artwork?: Pick<WorldEntity, "art" | "artMethod" | "artNote" | "sourceOutline">;
 }
 interface Waypoint { x: number; y: number; label: string }
 export interface GameplayPlan {
@@ -105,6 +109,11 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
     throw new ModelPlanError("Meta did not return a usable game plan. Your image is unchanged.");
   const input = value as Partial<GameplayPlan>;
   const diagnostics: string[] = [];
+  const nested = input.interactions;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const misplaced = Object.keys(gameplaySchema.properties).filter(field => field !== "interactions" && Object.hasOwn(nested, field));
+    if (misplaced.length) diagnostics.push(`Wrong JSON nesting: ${misplaced.map(field => `gameplay.interactions.${field} belongs at gameplay.${field}`).join("; ")}. Return these as siblings of gameplay.interactions, not inside it. Do not discard finishing requirements.`);
+  }
   let interactions: PlannedInteractions | undefined;
   try { interactions=readPlannedInteractions(input.interactions); }
   catch(error) { if(!(error instanceof ModelPlanError))throw error; diagnostics.push(`gameplay.interactions: ${error.message}`); }
@@ -289,6 +298,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
       label: object.label, ...(object.targetId ? { targetId: object.targetId } : {}),
       artSource: { x: object.x, y: object.y, width: object.width, height: object.height },
       artNote: "Actual source detail used in place as a game interaction. The original pixels remain in the unchanged image.",
+      ...object.artwork,
     };
   };
   const behaviorIds = new Set(plan.interactions?.objects.map(object => object.entityId) ?? []);
@@ -388,7 +398,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
       const draftEntities:WorldEntity[]=await Promise.all(selected.map(async object=>({id:object.id,kind:object.kind,label:object.label.slice(0,80),
         x:object.x*1.44,y:object.y*.82,width:object.width*1.44,height:object.height*.82,
         ...(object.targetId?{targetId:object.targetId}:{}),artSource:{x:object.x,y:object.y,width:object.width,height:object.height},
-        art:await cropArtwork(source,object,false),artMethod:"crop" as const,artNote:"Original selection for correction; whole outline is not yet verified."})));
+        art:await cropArtwork(source,object,false),artMethod:"crop" as const,artNote:"Original selection for correction; whole outline is not yet verified.",...object.artwork})));
       const draft=applyPlannedInteractions({id:randomUUID(),name:options.name.slice(0,80),description:options.description.slice(0,500),theme:options.theme,
         width:1440,height:820,source:"meta",sourceImage:imageData(source),inputKind,revision:1,entities:draftEntities,goalRules:rules,
         gameplay:{movement:plan.movement,objectiveTitle:plan.objectiveTitle,instructions:plan.instructions,clues}},plan.interactions,plan.requiredInteractionIds,true,{validateGeneratedChoices:options.validateGeneratedChoices});
@@ -397,7 +407,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
     }
     if (moving.length) {
       let repairNote="";
-      entities[0].art = await sourceScenery(source, moving, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa; source cutouts use Meta SAM." : " Background reconstructed with local classical inpainting.";});
+      entities[0].art = await sourceScenery(source, moving, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";},signal);
       entities[0].artNote = SOURCE_SCENERY_NOTE+repairNote;
     }
   }
@@ -429,7 +439,7 @@ export async function compileCreativeAdaptation(options: AdaptationOptions): Pro
   const sourceScene = await sourcePlatformScene({ ...options, requested: requestedRules,
     onReject: (reason, objectId) => { sourceRejection = reason; rejectedObjectId = objectId; },
     finishRules: (entities, defaults) => finishingRequirements(options, entities, defaults) });
-  if (sourceScene) return checkedCompiledWorld(sourceScene, plan);
+  if (sourceScene) return checkedCompiledWorld(sourceScene, plan, options.validateGeneratedChoices);
   // A recognized scene must not silently become a generic staircase when its
   // route fails. Preserve the source selections in the existing editable review.
   const sourceSurfaceCount = options.objects.filter(object => ["terrain", "bridge"].includes(object.kind)).length;
@@ -438,15 +448,16 @@ export async function compileCreativeAdaptation(options: AdaptationOptions): Pro
       id: object.id, kind: object.kind, label: object.label.slice(0, 80),
       x: object.x * 1.44, y: object.y * .82, width: Math.max(4, object.width * 1.44), height: Math.max(4, object.height * .82),
       ...(object.targetId ? { targetId: object.targetId } : {}),
-      artSource: { x: object.x, y: object.y, width: object.width, height: object.height },
-      art: await cropArtwork(source, object, false), artMethod: "crop" as const,
+      artSource: { ...(object.visualBounds ?? {x:object.x,y:object.y,width:object.width,height:object.height}) },
+      art: await cropArtwork(source, object.visualBounds ?? object, false), artMethod: "crop" as const,
       artNote: "Original source selection retained for correction; the route has not been verified.",
+      ...object.artwork,
     })));
     const draft = applyPlannedInteractions({ id: randomUUID(), name: options.name.slice(0, 80), description: options.description.slice(0, 500),
         theme: options.theme, width: 1440, height: 820, source: "meta", sourceImage: imageData(source), inputKind,
         revision: 1, entities: draftEntities, goalRules: {...requestedRules, requiredResourceIds:plan.requiredResourceIds ?? [], ...(plan.requiredChoiceGroupIds?.length ? {requiredChoiceGroupIds:[...plan.requiredChoiceGroupIds]} : {})},
         gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues: plan.clues } },
-      plan.interactions, plan.requiredInteractionIds, true);
+      plan.interactions, plan.requiredInteractionIds, true, {validateGeneratedChoices:options.validateGeneratedChoices});
     const rejectedObject = options.objects.find(object => object.id === rejectedObjectId);
     throw new RecognitionReviewError(validateRecognitionReview({ kind: "recognition-review", version: 1, draft,
       issues: [{ id: rejectedObject ? "source-outline" : "source-route",
@@ -694,30 +705,57 @@ export async function compileCreativeAdaptation(options: AdaptationOptions): Pro
 }
 
 
-/** Re-extract an explicitly corrected pointer-roleplay review. The recognized
- * object graph is retained; this operation makes no semantic model request. */
+/** Rebuild creator-reviewed source geometry without requesting another model plan. */
 export async function prepareSourceInteractionReview(value:unknown, segmentation:SegmentationConnection, signal:AbortSignal):Promise<WorldDefinition> {
-  const world=validateWorld(value,{allowIncomplete:true});
-  if (world.source!=="meta" || world.gameplay?.movement!=="discover" || !world.interactions)
+  let world=validateWorld(value,{allowIncomplete:true});
+  if (world.source!=="meta" || !world.gameplay || !world.interactions)
     throw new InterpretationError("Choose the original source-interaction review to prepare.",400);
   const source=await normalizeDrawing(world.sourceImage);
-  const objects:SourceSelection[]=world.entities.filter(entity=>entity.artSource && !(entity.artSource.width===1000 && entity.artSource.height===1000)).map(entity=>({
-    id:entity.id,kind:entity.kind,label:entity.label ?? "Object",...entity.artSource!,...(entity.targetId?{targetId:entity.targetId}:{})}));
+  world=await applyConfirmedSourceOutlines(source,world,[]);
+  const movement=world.gameplay!.movement;
+  const objects:SourceSelection[]=world.entities.filter(entity=>entity.artSource && !(entity.artSource.width===1000 && entity.artSource.height===1000)).map(entity=>{
+    const bounds=entity.artSource!;
+    // Only surface collision lips differ from their painted selections. Other
+    // objects use the current source box, not a stale crop or scaled game spawn.
+    const placement=entity.sourcePlacement ?? entity;
+    const geometry=movement==="platform" && ["terrain","bridge"].includes(entity.kind)
+      ? {x:placement.x/world.width*1000,y:placement.y/world.height*1000,width:placement.width/world.width*1000,height:placement.height/world.height*1000} : bounds;
+    return {id:entity.id,kind:entity.kind,label:entity.label ?? "Object",...geometry,
+      ...(movement==="platform"?{visualBounds:{...bounds}}:{}),...(entity.targetId?{targetId:entity.targetId}:{}),
+      ...(entity.artMethod==="outline"?{artwork:{art:entity.art,artMethod:entity.artMethod,artNote:entity.artNote,sourceOutline:entity.sourceOutline}}:{})};
+  });
   if(!objects.length)throw new InterpretationError("Keep at least one source selection before preparing.",400);
+  if(movement==="platform" && segmentation.enabled && segmentation.provider==="local-sam2" && segmentation.local?.configured) {
+    const index=objects.findIndex(object=>object.kind==="player");
+    if(index>=0 && objects[index].artwork?.artMethod!=="outline") {
+      const actor=objects[index];
+      try {
+        const recovered=await groundWholeActor(source,actor,segmentation.local,signal,objects);
+        objects[index]=recovered.artwork ? recovered : {...actor,groundingIssue:"The complete character outline could not be verified. Confirm its whole outline before preparing this scene."};
+      } catch {
+        signal.throwIfAborted();
+        objects[index]={...actor,groundingIssue:"The complete character outline could not be verified. Confirm its whole outline before preparing this scene."};
+      }
+    }
+  }
+
   const size=await sharp(source).metadata(),scale=Math.max(1440/size.width!,820/size.height!);
   const width=Math.min(12000,Math.max(1440,Math.round(size.width!*scale))),height=Math.min(5000,Math.max(820,Math.round(size.height!*scale)));
-  const interactions:PlannedInteractions={...world.interactions,actions:world.interactions.actions.map(action=>({...action,effects:action.effects?.map(effect=>effect.kind==='moveObject'?{...effect,x:effect.x/world.width*width,y:effect.y/world.height*height}:effect)}))};
-  const plan:GameplayPlan={mode:"creative",movement:"discover",avatarId:null,reason:"Creator corrected the original source selections.",objective:"explore",
-    objectiveTitle:world.gameplay.objectiveTitle,instructions:world.gameplay.instructions,objectiveLabel:world.gameplay.objectiveTitle,destinationLabel:world.gameplay.objectiveTitle,
+  const interactions:PlannedInteractions={...world.interactions!,actions:world.interactions!.actions.map(action=>({...action,...(action.effects?{effects:action.effects.map(effect=>effect.kind==='moveObject'?{...effect,x:effect.x/world.width*width,y:effect.y/world.height*height}:effect)}:{})}))};
+  const plan:GameplayPlan={mode:"source-layout",movement,avatarId:objects.find(object=>object.kind==="player")?.id ?? null,reason:"Creator corrected the original source selections.",objective:"explore",
+    objectiveTitle:world.gameplay!.objectiveTitle,instructions:world.gameplay!.instructions,objectiveLabel:world.gameplay!.objectiveTitle,destinationLabel:world.gameplay!.objectiveTitle,
     path:Array.from({length:3},(_,index)=>{const object=objects[Math.min(index,objects.length-1)];return{x:object.x+object.width/2,y:object.y+object.height/2,label:object.label};}),
-    clues:world.gameplay.clues??[],obstacleIds:[],interactions,requiredInteractionIds:world.goalRules?.requiredInteractionIds??[],requiredResourceIds:world.goalRules?.requiredResourceIds??[],requiredChoiceGroupIds:world.goalRules?.requiredChoiceGroupIds??[]};
+    clues:world.gameplay!.clues??[],obstacleIds:objects.filter(object=>["terrain","bridge","gate"].includes(object.kind)).map(object=>object.id),interactions,
+    requiredInteractionIds:world.goalRules?.requiredInteractionIds??[],requiredResourceIds:world.goalRules?.requiredResourceIds??[],requiredChoiceGroupIds:world.goalRules?.requiredChoiceGroupIds??[]};
   try {
-  const rebuilt=await compileImageNative({source,inputKind:world.inputKind??"drawing",name:world.name,description:world.description,theme:world.theme,objects,plan,
-    sourceGoalRules:{requiredCollectedIds:world.goalRules?.requiredCollectedIds??[],requiredActivatedIds:world.goalRules?.requiredActivatedIds??[]},
-    segmentation,signal,transport:fetch,validateGeneratedChoices:false});
-  return {...rebuilt,id:world.id,revision:world.revision};
+    const rebuilt=await compileCreativeAdaptation({source,inputKind:world.inputKind??"drawing",name:world.name,description:world.description,theme:world.theme,objects,plan,
+      sourceGoalRules:{requiredCollectedIds:world.goalRules?.requiredCollectedIds??[],requiredActivatedIds:world.goalRules?.requiredActivatedIds??[]},
+      segmentation,signal,transport:fetch,validateGeneratedChoices:false});
+    return {...rebuilt,id:world.id,revision:world.revision,sourceImage:world.sourceImage};
   } catch(error) {
-    if(error instanceof RecognitionReviewError) {error.recovery.draft.id=world.id;error.recovery.draft.revision=world.revision;}
+    if(error instanceof RecognitionReviewError) {
+      error.recovery.draft.id=world.id;error.recovery.draft.revision=world.revision;error.recovery.draft.sourceImage=world.sourceImage;
+    }
     throw error;
   }
 }

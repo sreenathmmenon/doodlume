@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { Modal } from "./Modal";
+import { SourceOutlineEditor } from "./SourceOutlineEditor";
 import { prepareSourceArtwork } from "../lib/source-art";
 import { setupFeedback } from "../../shared/setup";
 import { validateRecognitionReview, type RecognitionReview } from "../../shared/recognition-review";
@@ -44,6 +45,26 @@ const roles: { kind: EntityKind; name: string; help: string }[] = [
 ];
 const clamp = (v: number, min: number, max: number) =>
   Math.min(max, Math.max(min, v));
+/** Keep incomplete decimal input local until the creator finishes the field. */
+function SourceSelectionNumber({ label, value, min, max, onCommit }: {
+  label: string; value: number; min: number; max: number; onCommit: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  function commit() {
+    const parsed = text.trim() === "" ? NaN : Number(text);
+    const next = Number.isFinite(parsed) ? Math.round(clamp(parsed, min, max) * 10) / 10 : value;
+    setText(String(next));
+    if (next !== value) onCommit(next);
+  }
+  return <input type="number" aria-label={label} value={text} min={min} max={max} step={0.1}
+    onChange={event => setText(event.target.value)} onBlur={commit}
+    onKeyDown={event => {
+      if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+      if (event.key === "Escape") { event.stopPropagation(); event.preventDefault(); setText(String(value)); }
+    }} />;
+}
+
 function emptyWorld(
   image: string,
   inputKind: InputKind,
@@ -105,6 +126,7 @@ export function WorldSetup({
   const [selection, setSelection] = useState<ArtworkBox | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const [outlineId, setOutlineId] = useState<string | null>(null);
   const [sourceAspect, setSourceAspect] = useState(1440 / 820);
   const [reviewNotes, setReviewNotes] = useState(recovery);
   const [rulesConfirmed, setRulesConfirmed] = useState(
@@ -130,7 +152,11 @@ export function WorldSetup({
     };
   }, [image]);
   const item = world.entities.find((e) => e.id === selected);
+  const outlineItem = world.entities.find((entity) => entity.id === outlineId);
   const feedback = setupFeedback(world);
+  // Source review geometry is a selection map. The server still has to build
+  // and validate collision placement before it can become a playable world.
+  const serverSourceReview = world.source === "meta" && Boolean(world.interactions);
   const goalRules = world.goalRules ?? {
     requiredCollectedIds: [],
     requiredActivatedIds: [],
@@ -308,7 +334,7 @@ export function WorldSetup({
     setError("");
     try {
       let ready: WorldDefinition;
-      if (world.source === "meta" && world.gameplay?.movement === "discover" && world.interactions) {
+      if (world.source === "meta" && world.interactions) {
         const response = await fetch("/api/source-review", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ world }), signal: controller.signal,
@@ -350,6 +376,7 @@ export function WorldSetup({
     crop.height = clamp(crop.height, 5, 1000 - crop.y);
     update({
       artSource: crop,
+      sourceOutline: undefined,
       art: undefined,
       artMethod: undefined,
       artNote: undefined,
@@ -378,7 +405,7 @@ export function WorldSetup({
           </div>
           <button
             className="primary-button"
-            disabled={busy || feedback.errors.length > 0 || !rulesConfirmed}
+            disabled={busy || (!serverSourceReview && feedback.errors.length > 0) || !rulesConfirmed}
             onClick={() => void prepare()}
           >
             {busy ? <LoaderCircle size={17} className="spin" /> : <ArrowUpRight size={17} />}
@@ -392,6 +419,19 @@ export function WorldSetup({
         onClose();
       }}
     >
+      {outlineItem?.artSource && <SourceOutlineEditor key={outlineItem.id} image={world.sourceImage!} sourceBox={outlineItem.artSource}
+        existingArt={outlineItem.artMethod === "outline" ? outlineItem.art : undefined} existingRepairMargin={outlineItem.sourceOutline?.repairMargin ?? 0} label={outlineItem.label || "object"}
+        onClose={() => setOutlineId(null)} onConfirm={async (mask, repairMargin) => {
+          const controller = new AbortController(); request.current = controller;
+          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(world.sourceImage!));
+          const sourceFingerprint = [...new Uint8Array(hash)].map(value => value.toString(16).padStart(2, "0")).join("");
+          const response = await fetch("/api/source-outline", {method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({world,outlines:[{entityId:outlineItem.id,sourceBox:outlineItem.artSource,mask,sourceFingerprint,repairMargin}]}),signal:controller.signal});
+          const result = await response.json().catch(() => ({error:"The outline could not be saved. Your brushwork is still here."}));
+          controller.signal.throwIfAborted();
+          if (!response.ok) throw new Error(result.error || "The outline could not be saved. Your brushwork is still here.");
+          setWorld(validateWorld(result.world, {allowIncomplete:true})); setOutlineId(null); setError("");
+        }} />}
       <span className="setup-context-note" title={world.source === "manual" ? "Selected and arranged by you" : "Meta interpretation with your adjustments"}>
         {world.source === "manual" ? "Manual" : "Meta interpretation"}
       </span>
@@ -759,6 +799,10 @@ export function WorldSetup({
             </div>
             {item.artSource && (
               <>
+                {world.source === "meta" && world.interactions && <div className="setup-outline-action">
+                  <button type="button" className="secondary-button" onClick={() => setOutlineId(item.id)}>{item.artMethod === "outline" ? "Edit confirmed outline" : "Correct object outline"}</button>
+                  <p className="small-note">{item.artMethod === "outline" ? "Your confirmed outline is saved in this draft." : "Keep or remove source pixels when the automatic cutout needs correction."}</p>
+                </div>}
                 <h4>Selection in the picture (%)</h4>
                 {world.inputKind === "picture" && (
                   <label>
@@ -771,6 +815,7 @@ export function WorldSetup({
                           art: undefined,
                           artMethod: undefined,
                           artNote: undefined,
+                          sourceOutline: undefined,
                         })
                       }
                     >
@@ -787,17 +832,13 @@ export function WorldSetup({
                   {(["x", "y", "width", "height"] as const).map((key) => (
                     <label key={key}>
                       {`Selection ${key}`}
-                      <input
-                        type="number"
-                        aria-label={`Selection ${key}`}
+                      <SourceSelectionNumber
+                        key={`${item.id}-${key}`}
+                        label={`Selection ${key}`}
                         value={Math.round(item.artSource![key]) / 10}
-                        min={0}
-                        max={100}
-                        step={0.1}
-                        onChange={(e) => {
-                          if (e.target.value !== "")
-                            cropChange(key, Number(e.target.value));
-                        }}
+                        min={key === "width" || key === "height" ? 0.5 : 0}
+                        max={key === "width" ? (1000 - item.artSource!.x) / 10 : key === "height" ? (1000 - item.artSource!.y) / 10 : 99.5}
+                        onCommit={value => cropChange(key, value)}
                       />
                     </label>
                   ))}

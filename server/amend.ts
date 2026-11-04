@@ -128,6 +128,9 @@ export async function interpretAmendment(
       "The revised page has a different shape. Use the same crop and orientation as the original, or place additions manually.",
     );
   const afterImage = imageData(after);
+  if (afterImage !== world.sourceImage && world.entities.some(entity => entity.artMethod === "outline" || entity.sourceOutline))
+    throw new InterpretationError("This image has creator-confirmed outlines. Confirm them again in a new source review before replacing the original image. Your current world is unchanged.",400);
+
   const context = JSON.stringify({
     worldId: world.id,
     revision: world.revision,
@@ -322,7 +325,7 @@ export async function interpretAmendment(
   signal.throwIfAborted();
   const revisedScenery = sourceBackdrop ? {
     id: sourceBackdrop.id,
-    art: await sourceScenery(after, [...world.entities, ...additions], world.interactions),
+    art: await sourceScenery(after, [...world.entities, ...additions], world.interactions,undefined,undefined,signal),
   } : undefined;
   signal.throwIfAborted();
   const patch = {

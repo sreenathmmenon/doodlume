@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { refinePlatformSelections } from './platform-grounding.js';
+import { mkdtemp,writeFile,chmod,rm } from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {closeLocalSegmentationWorkers} from './local-segmentation.js';
+import {RecognitionReviewError} from './recognition-error.js';
+import {validateRecognitionReview} from '../shared/recognition-review.js';
+import {compileCreativeAdaptation} from './creative-adaptation.js';
 import { sourcePlatformScene } from './source-platform-scene.js';
 import { modelConnection } from './provider.js';
 import { validateWorld } from '../shared/world.js';
@@ -69,4 +76,33 @@ test('source assembly retains complete platform pixels and an independent thin c
   assert.ok(Math.abs(bounds.y-moved.y)<1e-8);
   assert.ok(Math.abs(bounds.width-moved.width)<1e-8);
   assert.ok(Math.abs(bounds.height-200*world.height/1000)<1e-8,'Changing the collider width preserves the full painted height');
+});
+
+
+test('uncertain local actor extraction preserves corrected full bounds and requests review instead of compiling the old crop',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'doodlume-refinement-review-'));
+  const executable=join(directory,'empty-mask-worker.cjs');
+  await writeFile(executable,`#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+let pending='';process.stdin.on('data',chunk=>{pending+=chunk;let end;while((end=pending.indexOf('\\n'))!==-1){const request=JSON.parse(pending.slice(0,end));pending=pending.slice(end+1);process.stdout.write(JSON.stringify({id:request.id,records:[],ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');}});
+`);
+  await chmod(executable,0o700);
+  const local={enabled:true,apiKey:'',provider:'local-sam2' as const,local:{python:executable,checkpoint:'synthetic-empty-masks',worker:'synthetic-empty-masks',configured:true}};
+  try {
+    const input=await source();
+    const observations=objects.map(o=>({id:o.id,kind:o.kind,left:o.x,top:o.y,right:o.x+o.width,bottom:o.y+o.height,visualBounds:null}));
+    Object.assign(observations[0],{left:160,top:450,right:260,bottom:580});
+    const refined=await refinePlatformSelections(input,objects,connection,new AbortController().signal,async()=>reply(observations),local);
+    assert.deepEqual([refined[0].x,refined[0].y,refined[0].width,refined[0].height],[160,450,100,130]);
+    assert.equal(refined[0].artwork,undefined);
+    assert.match(refined[0].groundingIssue!,/complete character outline/);
+    const plan:GameplayPlan={mode:'source-layout',reason:'Synthetic fixture',avatarId:'hero',objective:'explore',objectiveLabel:'Explore',destinationLabel:'Finish',path:[],movement:'platform',objectiveTitle:'Cross the rocks',instructions:'Reach the finish.',clues:[],obstacleIds:[]};
+    await assert.rejects(()=>compileCreativeAdaptation({source:input,inputKind:'drawing',name:'Whole actor',description:'Synthetic fixture',theme:'grove',objects:refined,plan,segmentation:local,signal:new AbortController().signal,transport:async()=>{throw Error('No further inference expected');}}),error=>{
+      assert.ok(error instanceof RecognitionReviewError);
+      const review=validateRecognitionReview(error.recovery);
+      assert.equal(review.issues[0].objectId,'hero');
+      assert.deepEqual(review.draft.entities.find(e=>e.id==='hero')!.artSource,{x:160,y:450,width:100,height:130});
+      return true;
+    });
+  } finally {closeLocalSegmentationWorkers();await rm(directory,{recursive:true,force:true});}
 });

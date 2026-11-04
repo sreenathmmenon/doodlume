@@ -30,7 +30,9 @@ export interface WorldEntity {
   width: number;
   height: number;
   art?: string;
-  artMethod?: "sam" | "paper" | "crop";
+  artMethod?: "sam" | "paper" | "crop" | "outline";
+  /** Creator-confirmed alpha bound to the exact original source and selection. */
+  sourceOutline?: { sourceFingerprint: string; sourceBox: ArtworkBox; repairMargin?: number };
   artNote?: string;
   artSource?: ArtworkBox;
   /** Original collider placement before a source object became an editable layer. */
@@ -272,7 +274,7 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
     }
     if (
       (entity.artMethod !== undefined &&
-        !["sam", "paper", "crop"].includes(entity.artMethod)) ||
+        !["sam", "paper", "crop", "outline"].includes(entity.artMethod)) ||
       (entity.artNote !== undefined &&
         (typeof entity.artNote !== "string" || entity.artNote.length > 200))
     )
@@ -291,6 +293,18 @@ export function validateWorld(value: unknown, options: { allowIncomplete?: boole
         throw new Error(
           "An artwork selection falls outside the source picture.",
         );
+    }
+    if (entity.artMethod === "outline" || entity.sourceOutline !== undefined) {
+      const outline = entity.sourceOutline;
+      if (entity.artMethod !== "outline" || !entity.art?.startsWith("data:image/png;base64,") || !entity.artSource ||
+          !outline || typeof outline !== "object" || Array.isArray(outline) ||
+          Object.keys(outline).some(key => !["sourceFingerprint", "sourceBox", "repairMargin"].includes(key)) ||
+          (outline.repairMargin !== undefined && (!Number.isInteger(outline.repairMargin) || outline.repairMargin < 0 || outline.repairMargin > 12)) ||
+          typeof outline.sourceFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(outline.sourceFingerprint) ||
+          !outline.sourceBox || typeof outline.sourceBox !== "object" || Array.isArray(outline.sourceBox) ||
+          Object.keys(outline.sourceBox).some(key => !["x", "y", "width", "height"].includes(key)) ||
+          !(["x", "y", "width", "height"] as const).every(key => outline.sourceBox[key] === entity.artSource![key]))
+        throw new Error("A confirmed outline no longer matches its source selection. Confirm the outline again.");
     }
     for (const b of [entity.sourceLayer, entity.sourcePlacement].filter(Boolean) as ArtworkBox[]) {
       if (!entity.artSource || (entity.sourceLayer && !entity.art) || ![b.x, b.y, b.width, b.height].every(Number.isFinite) ||

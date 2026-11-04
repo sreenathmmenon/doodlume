@@ -38,6 +38,8 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
     needed.add(id);
     for (const prior of action.requires ?? []) requireAction(prior);
     for (const resource of action.requiresResourceIds ?? []) requireResource(resource);
+    for (const cost of action.costs ?? []) if ((progress.quantities[cost.entityId] ?? 0) < cost.amount)
+      for (const refill of actions) if (refill.kind === "transfer" && refill.targetId === cost.entityId) requireAction(refill.id);
     // A refill can be the useful next move, even though only the delivery is
     // listed as a goal. Follow compatible incoming transfers, not object names.
     if (action.kind === "transfer" && (progress.quantities[action.toolId] ?? 0) < action.amount) {
@@ -46,7 +48,7 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
     if (action.kind === "transfer") {
       const capacity = world.interactions!.objects.find(object => object.entityId === action.targetId)?.resource?.capacity ?? 0;
       if ((progress.quantities[action.targetId] ?? 0) + action.amount > capacity) {
-        for (const drain of actions) if (drain.kind === "transfer" && drain.toolId === action.targetId) requireAction(drain.id);
+        for (const drain of actions) if (drain.kind === "transfer" && drain.toolId === action.targetId || drain.costs?.some(cost=>cost.entityId===action.targetId)) requireAction(drain.id);
       }
     }
   };
@@ -106,12 +108,14 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
       related.add(action.id);
       for (const id of action.requires ?? []) pending.push({kind:"action",id});
       for (const id of action.requiresResourceIds ?? []) pending.push({kind:"resource",id});
+      for (const cost of action.costs ?? []) if ((progress.quantities[cost.entityId] ?? 0) < cost.amount)
+        for (const refill of actions) if (refill.kind === "transfer" && refill.targetId === cost.entityId) pending.push({kind:"action",id:refill.id});
       if (action.kind === "transfer") {
         if ((progress.quantities[action.toolId] ?? 0) < action.amount)
           for (const refill of actions) if (refill.kind === "transfer" && refill.targetId === action.toolId) pending.push({kind:"action",id:refill.id});
         const capacity = world.interactions!.objects.find(object => object.entityId === action.targetId)?.resource?.capacity ?? 0;
         if ((progress.quantities[action.targetId] ?? 0) + action.amount > capacity)
-          for (const drain of actions) if (drain.kind === "transfer" && drain.toolId === action.targetId) pending.push({kind:"action",id:drain.id});
+          for (const drain of actions) if (drain.kind === "transfer" && drain.toolId === action.targetId || drain.costs?.some(cost=>cost.entityId===action.targetId)) pending.push({kind:"action",id:drain.id});
       }
     }
     return related;

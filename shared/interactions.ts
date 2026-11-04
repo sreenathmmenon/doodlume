@@ -29,6 +29,8 @@ interface ActionBase {
   requires?: string[];
   /** These resource objects must currently be full, regardless of transfer route. */
   requiresResourceIds?: string[];
+  /** Non-transfer actions spend these quantities once, after readiness checks. */
+  costs?: { entityId: string; amount: number }[];
   effects?: InteractionEffect[];
 }
 export type InteractionAction = ActionBase & (
@@ -135,7 +137,7 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
   const actions = new Map<string, InteractionAction>();
   const movementSteps = new Map<string, {actionId: string; x: number; y: number}[]>();
   for (const a of p.actions) {
-    if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "requiresResourceIds", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
+    if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "requiresResourceIds", "costs", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
         !safeId(a.id) || actions.has(a.id) || typeof a.label !== "string" || !a.label.trim() || a.label.length > 80 ||
         !["transfer", "attach", "use", "place", "operate"].includes(a.kind) || !safeId(a.toolId) || !safeId(a.targetId) ||
         (a.kind === "operate"
@@ -146,6 +148,11 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
       fail("An action needs a carried or stationary transfer source and distinct target; direct operation needs one uncarried decoration as both source and target.");
     if (a.requiresResourceIds !== undefined && (!Array.isArray(a.requiresResourceIds) || a.requiresResourceIds.length > 32 || new Set(a.requiresResourceIds).size !== a.requiresResourceIds.length || a.requiresResourceIds.some(id => !safeId(id) || !objects.get(id)?.resource)))
       fail("An action readiness condition needs distinct resource objects from this world.");
+    if (a.costs !== undefined && (a.kind === "transfer" || !Array.isArray(a.costs) || a.costs.length > 8 ||
+        a.costs.some(cost => !record(cost) || !keysOnly(cost, ["entityId", "amount"]) || !safeId(cost.entityId) ||
+          !objects.get(cost.entityId)?.resource || !quantity(cost.amount) || cost.amount <= 0 || cost.amount > objects.get(cost.entityId)!.resource!.capacity) ||
+        new Set(a.costs.map(cost => cost.entityId)).size !== a.costs.length))
+      fail("Only non-transfer actions can have costs: use up to eight distinct resource objects and positive amounts within their capacities.");
     if (a.kind === "transfer") {
       const source = objects.get(a.toolId)!.resource, target = objects.get(a.targetId)!.resource;
       if (!source || !target || source.type !== target.type || !quantity(a.amount) || a.amount <= 0 || a.amount > source.capacity || a.amount > target.capacity)
@@ -304,6 +311,7 @@ function signature(world: WorldDefinition, action: InteractionAction) {
   return JSON.stringify({ kind: action.kind, toolId: action.toolId, targetId: action.targetId,
     requires: [...(action.requires ?? [])].sort(), effects: action.effects ?? [],
     ...(action.requiresResourceIds?.length ? {requiresResourceIds:[...action.requiresResourceIds].sort()} : {}),
+    ...(action.costs?.length ? {costs: action.costs.map(({entityId, amount}) => ({entityId, amount})).sort((a,b) => a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0)} : {}),
     ...(action.kind === "transfer" ? { amount: action.amount } : {}),
     ...(group ? {choiceGroup:{id:group.id,actionIds:[...group.actionIds].sort()}} : {}) });
 }
@@ -346,6 +354,11 @@ function blockedReason(world: WorldDefinition, s: InteractionState, action: Inte
     const names = missingResources.slice(0,2).map(id => world.entities.find(entity => entity.id === id)?.label?.trim() || "the required object");
     return `Fill ${names.join(" and ")} first${missingResources.length > 2 ? ", along with the other required objects" : ""}.`;
   }
+  const missingCost = action.costs?.find(cost => !hasQuantity(s.quantities[cost.entityId] ?? 0, cost.amount));
+  if (missingCost) {
+    const name = world.entities.find(entity => entity.id === missingCost.entityId)?.label?.trim() || "the required object";
+    return `Not enough left in ${name}. This action needs ${missingCost.amount}.`;
+  }
   if (checkHeld && action.kind !== "operate" && activeInteractionSource(s) !== action.toolId)
     return world.interactions!.objects.find(object => object.entityId === action.toolId)?.usableInPlace
       ? "Select the matching source first." : "Pick up the matching object first.";
@@ -357,6 +370,10 @@ function blockedReason(world: WorldDefinition, s: InteractionState, action: Inte
   }
 }
 function apply(world: WorldDefinition, s: InteractionState, action: InteractionAction) {
+  for (const cost of action.costs ?? []) {
+    const available = s.quantities[cost.entityId];
+    s.quantities[cost.entityId] = sameQuantity(available, cost.amount) ? 0 : Math.max(0, available - cost.amount);
+  }
   if (action.kind === "transfer") {
     const source = s.quantities[action.toolId];
     const target = s.quantities[action.targetId] + action.amount;
@@ -424,9 +441,13 @@ function completionFeasibility(world: WorldDefinition, start: InteractionState, 
     const addResource = (id: string) => { if (!resourceIds.has(id)) { resourceIds.add(id); changed = true; } };
     for (const action of actions) {
       if (action.kind === "transfer" && (resourceIds.has(action.toolId) || resourceIds.has(action.targetId))) addAction(action.id);
+      // Spending can free room for a required incoming transfer just as an
+      // outgoing transfer can. Keep that causal route in the bounded search.
+      if (action.costs?.some(cost => resourceIds.has(cost.entityId))) addAction(action.id);
       if (!relevant.has(action.id)) continue;
       for (const id of action.requires ?? []) addAction(id);
       for (const id of action.requiresResourceIds ?? []) addResource(id);
+      for (const cost of action.costs ?? []) addResource(cost.entityId);
       if (action.kind === "transfer") { addResource(action.toolId); addResource(action.targetId); }
     }
   }
@@ -487,9 +508,26 @@ export function validateInteractionChoiceOutcomes(world: WorldDefinition): void 
       requiredInteractionIds: [...new Set([...(world.goalRules?.requiredInteractionIds ?? []), id])],
     }};
     const result = completionFeasibility(candidate, initialState(candidate), budget);
-    if (result !== "possible") fail(result === "bounded"
-      ? `Choice ${group.id} is too complex to verify for action ${id}. Simplify its prerequisites or resource routes.`
-      : `Choice ${group.id} offers action ${id}, but no completing run can include it. Adjust the alternatives or finishing requirements.`);
+    if (result !== "possible") {
+      const excluded = new Set(group.actionIds.filter(other => other !== id));
+      const notes:string[]=[];
+      for(const action of world.interactions!.actions){
+        const blocked=(action.requires??[]).filter(requirement=>excluded.has(requirement));
+        if(blocked.length)notes.push(`${action.id} requires excluded action ${blocked.join(", ")}.`);
+      }
+      for(const object of world.interactions!.objects){
+        if(!object.resource)continue;
+        const suppliers=world.interactions!.actions.filter(action=>action.kind==="transfer"&&action.targetId===object.entityId);
+        if(!suppliers.length||!suppliers.every(action=>excluded.has(action.id)))continue;
+        const blocked=world.interactions!.actions.filter(action=>
+          ((action.requiresResourceIds??[]).includes(object.entityId)&&object.resource!.initial<object.resource!.capacity)||
+          action.costs?.some(cost=>cost.entityId===object.entityId&&cost.amount>object.resource!.initial));
+        if(blocked.length)notes.push(`${object.entityId} starts with ${object.resource.initial}/${object.resource.capacity}; its only incoming transfers (${suppliers.map(action=>action.id).join(", ")}) are excluded, so ${blocked.map(action=>action.id).join(", ")} cannot become ready.`);
+      }
+      fail(result === "bounded"
+        ? `Choice ${group.id} is too complex to verify for action ${id}. Simplify its prerequisites or resource routes.`
+        : `Choice ${group.id} offers action ${id}, but no completing run can include it. Selecting it excludes ${[...excluded].join(", ")}. ${notes.slice(0,4).join(" ")} Do not make necessary preparation mutually exclusive. Every offered alternative needs a complete route; adjust the choice membership or causal prerequisites without inventing objects.`);
+    }
   }
 }
 

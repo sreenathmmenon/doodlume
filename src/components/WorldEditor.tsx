@@ -35,6 +35,8 @@ import {
   editorPoint,
   editorCenter,
 } from "../lib/editorViewport";
+import { SourceOutlineEditor } from "./SourceOutlineEditor";
+import type { SourceOutlineCorrection } from "../../shared/source-outline";
 import { SketchPad } from "./SketchPad";
 import { ArtworkReview } from "./ArtworkReview";
 import { extractSketchInk } from "../lib/ink";
@@ -115,6 +117,8 @@ type EditorDraft = {
   requiredChoiceGroupIds?: string[];
   requiredInteractionIds?: string[];
   choiceDraft?: ChoiceDraft;
+  refinement?: SourceOutlineCorrection;
+  refinementPatch?: WorldPatch;
 };
 // Session drafts never cross a world revision or a proposed image update.
 const editorDrafts = new Map<string, EditorDraft>();
@@ -227,14 +231,20 @@ function WorldEditorSession({
   const [customArt, setCustomArt] = useState<string | null>(savedDraft?.customArt ?? null);
   const [customArtAspect, setCustomArtAspect] = useState(savedDraft?.customArtAspect ?? 1);
   const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
+  const [outlineItem, setOutlineItem] = useState<WorldEntity>();
+  const [refinement, setRefinement] = useState(savedDraft?.refinement);
+  const [refinementPatch, setRefinementPatch] = useState(savedDraft?.refinementPatch);
+  const [refinementBusy, setRefinementBusy] = useState(false);
+  const refinementRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => refinementRequest.current?.abort(), []);
   useEffect(() => {
-    if (!additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !choiceDraft && !abilityDraftDirty && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
+    if (!refinement && !additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !choiceDraft && !abilityDraftDirty && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
       editorDrafts.delete(cacheKey);
       return;
     }
-    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, recovery, interactions, requiredChoiceGroupIds, requiredInteractionIds, choiceDraft });
+    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, recovery, interactions, requiredChoiceGroupIds, requiredInteractionIds, choiceDraft, refinement, refinementPatch });
     if (editorDrafts.size > 12) editorDrafts.delete(editorDrafts.keys().next().value!);
-  }, [cacheKey, bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged, requiredChoiceGroupIds, requiredInteractionIds, choiceDraft, abilityDraftDirty]);
+  }, [cacheKey, bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged, requiredChoiceGroupIds, requiredInteractionIds, choiceDraft, abilityDraftDirty, refinement, refinementPatch]);
   const [preparingArtwork, setPreparingArtwork] = useState(false);
   const artworkRequest = useRef<AbortController | null>(null);
   type PreparedScene = Pick<WorldPatch, "sourceScenery" | "sourceLayers">;
@@ -258,6 +268,7 @@ function WorldEditorSession({
   };
   useEffect(() => () => artworkRequest.current?.abort(), []);
   const canvas = useRef<SVGSVGElement>(null);
+  const destinationOpener = useRef<HTMLElement | null>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 360 });
   const [detailScale, setDetailScale] = useState<number | null>(null);
@@ -387,6 +398,8 @@ function WorldEditorSession({
             ...world.entities.map((entity) => ({
               ...entity,
               artSource: undefined,
+              sourceOutline: undefined,
+              artMethod: entity.artMethod === "outline" ? undefined : entity.artMethod,
             })),
             {
               ...snapshot,
@@ -394,6 +407,7 @@ function WorldEditorSession({
               kind: "decoration",
               art: undefined,
               artMethod: undefined,
+              sourceOutline: undefined,
               artNote: undefined,
               artSource: source,
               artShape: "box",
@@ -427,6 +441,7 @@ function WorldEditorSession({
             ? {
                 ...entity,
                 art: crop.art,
+                sourceOutline: undefined,
                 artSource: source,
                 artShape: "box",
                 artMethod: crop.artMethod,
@@ -499,6 +514,29 @@ function WorldEditorSession({
       mode,
     ],
   );
+  const unrelatedDraft = Boolean(additions.length || changedCount || expanded || interactionsChanged || abilityDraftDirty || choiceDraft || customArt || sketchDraft || proposal || revisedImage);
+  async function prepareRefinement(correction: SourceOutlineCorrection) {
+    refinementRequest.current?.abort();
+    const controller = new AbortController(); refinementRequest.current = controller;
+    setRefinementBusy(true); setError("");
+    try {
+      const response = await fetch("/api/source-refinement", {method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({world,outlines:[correction]}),signal:controller.signal});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The outline could not be prepared. Your draft is kept.");
+      if (controller.signal.aborted || !sceneAlive.current) return;
+      applyWorldPatch(world, state, result.patch);
+      setRefinementPatch(result.patch);
+    } catch (error) {
+      if (!controller.signal.aborted && sceneAlive.current) setError(error instanceof Error ? error.message : "The outline could not be prepared. Your draft is kept.");
+    } finally {
+      if (refinementRequest.current === controller) { refinementRequest.current = null; if (sceneAlive.current) setRefinementBusy(false); }
+    }
+  }
+  useEffect(() => {
+    if (refinement && refinement !== savedDraft?.refinement && !refinementPatch) void prepareRefinement(refinement);
+    return () => refinementRequest.current?.abort();
+  }, [refinement]);
   const patchNow = useRef(patch);
   patchNow.current = patch;
   const derivedScenery = isSourceAlignedScenery(sourceBackdrop);
@@ -548,7 +586,7 @@ function WorldEditorSession({
     e.preventDefault();
     e.currentTarget.focus();
     e.currentTarget.setPointerCapture(e.pointerId);
-    if (panMode || spaceHeld || e.button === 1) {
+    if (refinement || panMode || spaceHeld || e.button === 1) {
       pan.current = { x: e.clientX, y: e.clientY, center: editorCenter(view) };
       setPanning(true);
       return;
@@ -744,7 +782,9 @@ function WorldEditorSession({
       if (event.key === "Enter" || event.key === "Escape") {
         event.preventDefault(); event.stopPropagation();
         if (event.key === "Enter") destinationPick.choose(destinationPick.point);
-        setDestinationPick(undefined); return;
+        setDestinationPick(undefined);
+        requestAnimationFrame(() => { if (destinationOpener.current?.isConnected) destinationOpener.current.focus(); });
+        return;
       }
     }
     if (event.key === " ") {
@@ -772,7 +812,7 @@ function WorldEditorSession({
       focusObject(item);
       return;
     }
-    if (panMode || !item) {
+    if (refinement || panMode || !item) {
       const shifts: Record<string, [number, number]> = {
         ArrowLeft: [-1, 0],
         ArrowRight: [1, 0],
@@ -839,7 +879,7 @@ function WorldEditorSession({
     const entity = additions[index];
     if (!entity) return;
     if (world.goalRules?.requiredResourceIds?.includes(id)) { setError("Remove this object's completion requirement before deleting it."); return; }
-    const linkedAction = interactions?.actions.find(action => action.toolId === id || action.targetId === id || action.requiresResourceIds?.includes(id) || action.effects?.some(effect => (effect.kind === "openGate" || effect.kind === "moveObject") && effect.entityId === id));
+    const linkedAction = interactions?.actions.find(action => action.toolId === id || action.targetId === id || action.requiresResourceIds?.includes(id) || action.costs?.some(cost=>cost.entityId===id) || action.effects?.some(effect => (effect.kind === "openGate" || effect.kind === "moveObject") && effect.entityId === id));
     if (linkedAction) { setError(`Remove the ability “${linkedAction.label}” before deleting ${title(entity)}.`); return; }
     const linked = editableEntities.find(other => other.targetId === id);
     if (linked) {
@@ -941,6 +981,12 @@ function WorldEditorSession({
   }, [sceneKey, Boolean(drag), Boolean(problem), preparingArtwork]);
 
   async function apply() {
+    if (refinement) {
+      if (!refinementPatch || refinementBusy) return;
+      try { applyWorldPatch(world, state, refinementPatch); onApply(refinementPatch); editorDrafts.delete(cacheKey); }
+      catch (error) { setError(error instanceof Error ? error.message : "The outline could not be applied."); }
+      return;
+    }
     if (preparingArtwork || artworkRequest.current) return;
     if (abilityDraftDirty) { setError("Add your pending ability before applying, or discard the draft."); return; }
     if (choiceDraft) { setError("Save or cancel the choice before applying changes."); return; }
@@ -968,7 +1014,7 @@ function WorldEditorSession({
     const original = world.entities.find(entity => entity.id === e.id);
     const layer = preparedScene?.sourceLayers?.find(entity => entity.id === e.id);
     const baseline = e.sourceLayer ?? (original ? sourceLayerForEdit(world, original, e) : undefined);
-    const previewEntity = { ...e, ...(baseline ? { sourceLayer: baseline } : {}), ...layer };
+    const previewEntity = { ...e, ...(baseline ? { sourceLayer: baseline } : {}), ...layer, ...refinementPatch?.sourceRefinements?.find(entity => entity.id === e.id) };
     const artBox = derivedScenery && sourceBackdrop && previewEntity.sourceLayer
       ? sourceLayerArtworkBounds(previewEntity, sourceBackdrop) : undefined;
     const embeddedSource = Boolean(sourceBackdrop?.art && e.artSource && !e.art && !isSourceBackdrop(e) && e.kind === "decoration");
@@ -1006,7 +1052,7 @@ function WorldEditorSession({
           />
         ) : embeddedSource || sourceStationary && (!artBox || awaitingLayer) ? null : e.art ? (
           <image
-            href={isSourceBackdrop(e) && preparedScene?.sourceScenery ? preparedScene.sourceScenery.art : previewEntity.art}
+            href={isSourceBackdrop(e) && (refinementPatch?.sourceScenery ?? preparedScene?.sourceScenery) ? (refinementPatch?.sourceScenery ?? preparedScene?.sourceScenery)!.art : previewEntity.art}
             x={artBox ? artBox.x - e.x : 0}
             y={artBox ? artBox.y - e.y : 0}
             width={artBox?.width ?? e.width}
@@ -1089,22 +1135,23 @@ function WorldEditorSession({
                   : "I checked the new objects, their placement, and interactions."}
               </label>
             )}
-            {(additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft || abilityDraftDirty || choiceDraft) && <p className="editor-draft-note">{choiceDraft ? "Save or cancel your choice before applying. Your draft is kept." : abilityDraftDirty ? "Add your pending ability before applying. Your draft is kept." : "Draft kept when you close. Apply to update your world."}</p>}
+            {(refinement || additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft || abilityDraftDirty || choiceDraft) && <p className="editor-draft-note">{choiceDraft ? "Save or cancel your choice before applying. Your draft is kept." : abilityDraftDirty ? "Add your pending ability before applying. Your draft is kept." : "Draft kept when you close. Apply to update your world."}</p>}
             {abilityDraftDirty && pendingObjectAbilities(world.id, world.revision).filter(id => id !== selected).map(id => <button key={id} className="text-button" onClick={() => selectObject(id)}>Finish ability for {editableEntities.find(entity => entity.id === id)?.label || "object"}</button>)}
             {recovery && <div className="editor-recovery" role="status">
               <span>{recovery.action === "reset" ? "Object changes reset." : "New object deleted."}</span>
               <button className="text-button" onClick={undoObjectAction}><Undo2 size={14} /> Undo</button>
             </div>}
             <div className="editor-apply-actions">
-              <button
+              {!refinement && <button
                 className="text-button"
                 disabled={!additions.length}
                 onClick={() => { const last = additions.at(-1); if (last) removeAddition(last.id); }}
               >
                 <Undo2 size={15} /> Remove last addition
-              </button>
-              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft && !abilityDraftDirty && !choiceDraft}
+              </button>}
+              <button className="text-button" disabled={!refinement && !additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft && !abilityDraftDirty && !choiceDraft}
                 onClick={(event) => {
+                  refinementRequest.current?.abort(); setRefinement(undefined); setRefinementPatch(undefined); setRefinementBusy(false);
                   cancelArtwork();
                   clearObjectAbilityDrafts(world.id, world.revision); setAbilityDraftDirty(false); setAbilityFormReset(value => value + 1);
                   setBounds({ width: world.width, height: world.height });
@@ -1116,7 +1163,8 @@ function WorldEditorSession({
               <button
                 className="primary-button"
                 disabled={
-                  (!additions.length && !changedCount && !expanded && !interactionsChanged) ||
+                  (!refinement && !additions.length && !changedCount && !expanded && !interactionsChanged) ||
+                  Boolean(refinement && (!refinementPatch || refinementBusy)) ||
                   preparingArtwork ||
                   abilityDraftDirty || Boolean(choiceDraft) ||
                   Boolean(problem) ||
@@ -1124,10 +1172,16 @@ function WorldEditorSession({
                 }
                 onClick={() => void apply()}
               >
-                {preparingArtwork || scenePreparing ? <>Preparing artwork <LoaderCircle size={17} className="spin" /></> : <>Apply changes <ArrowUpRight size={17} /></>}
+                {preparingArtwork || scenePreparing || refinementBusy ? <>Preparing artwork <LoaderCircle size={17} className="spin" /></> : <>Apply changes <ArrowUpRight size={17} /></>}
               </button>
             </div>
 </div>}>
+        {refinement && <div className="editor-draft-note" role="status">
+          <p>{refinementBusy ? "Preparing artwork…" : refinementPatch ? "Outline and background ready." : "Your outline draft is kept. Prepare it again before applying."}</p>
+          {!refinementBusy && <button className="text-button" onClick={() => setOutlineItem(world.entities.find(entity => entity.id === refinement.entityId))}>Edit outline draft</button>}
+          {!refinementBusy && !refinementPatch && <button className="text-button" onClick={() => void prepareRefinement(refinement)}>Prepare outline again</button>}
+        </div>}
+        <div>
         {revisedImage && (
           <div className="paper-review-header">
             <div>
@@ -1154,7 +1208,7 @@ function WorldEditorSession({
             )}
           </div>
         )}
-        <div className="editor-tools" role="group" aria-label="Objects to add">
+        <div className="editor-tools" style={refinement ? {display:"none"} : undefined} role="group" aria-label="Objects to add">
           {mode !== "discover" && (
             <button
               onClick={() => {
@@ -1197,7 +1251,7 @@ function WorldEditorSession({
             )}
 
         </div>
-        <div className="editor-keyboard-controls">
+        <div className="editor-keyboard-controls" style={refinement ? {display:"none"} : undefined}>
           {tool !== "move" && <button
             className="secondary-button"
             disabled={world.entities.length + additions.length >= 160}
@@ -1235,7 +1289,7 @@ function WorldEditorSession({
             This world has reached its 160-object limit.
           </p>
         )}
-        <div className="editor-workbench">
+        <div className="editor-workbench" style={refinement ? {gridTemplateColumns:"minmax(0, 1fr)"} : undefined}>
         <div className="editor-canvas-wrap">
           <div
             className="editor-viewport-toolbar"
@@ -1305,7 +1359,7 @@ function WorldEditorSession({
               className="editor-canvas"
               viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
               preserveAspectRatio="none"
-              aria-label="World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes a new object; existing objects are kept. Reset changes is available in object settings. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Object identities and earned progress are kept."
+              aria-label={refinement ? "Outline preview of the starting layout. Drag or use arrows to pan. Plus and minus zoom. Current play positions are unchanged." : "World edit canvas. Arrows move the selected object by ten units, Shift and arrows by one. Delete removes a new object; existing objects are kept. Reset changes is available in object settings. Pan mode or holding Space drags the view. Plus and minus zoom, zero fits the world, F focuses selection. Object identities and earned progress are kept."}
               onKeyDown={canvasKey}
               onKeyUp={(e) => {
                 if (e.key === " ") setSpaceHeld(false);
@@ -1390,7 +1444,7 @@ function WorldEditorSession({
             </span>
           </div>
           <span className="editor-canvas-caption">
-            {destinationPick
+            {refinement ? "Starting layout · Drag to pan · + / − to zoom" : destinationPick
               ? "Choose a destination · Arrows to position · Enter to confirm · Esc to cancel"
               : panMode
               ? "Drag to explore the world, or focus the canvas and use arrow keys. Fit world restores the overview."
@@ -1401,7 +1455,7 @@ function WorldEditorSession({
                   : `${editorTools.find((t) => t.kind === tool)?.hint} Click to place, or drag to choose its size.`}
           </span>
         </div>
-        <div className="editor-bottom">
+        <div className="editor-bottom" style={refinement ? {display:"none"} : undefined}>
           <section
             className="editor-properties"
             aria-label="Selected object settings"
@@ -1436,6 +1490,11 @@ function WorldEditorSession({
                     </span>
                   </div>
                 )}
+                {existingSelected && item.art && item.artSource && derivedScenery && <div>
+                  <button className="text-button" disabled={unrelatedDraft || preparingArtwork || scenePreparing}
+                    onClick={() => setOutlineItem(item)}>Refine outline</button>
+                  {unrelatedDraft && <p className="editor-scope">Apply or discard other changes before refining an outline.</p>}
+                </div>}
                 {!existingSelected && <label>
                   Object role
                   <select
@@ -1487,6 +1546,7 @@ function WorldEditorSession({
                   }} onDraw={!existingSelected ? () => setDrawing(true) : undefined}
                   onDraftChange={setAbilityDraftDirty} onCancelDestination={() => setDestinationPick(undefined)}
                   onPickDestination={(target, choose) => {
+                    destinationOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
                     setPanMode(false); setTool("move"); setDrag(null);
                     setDestinationPick({target, choose, point: {x: limit(target.x + target.width * 1.5, 0, bounds.width - target.width), y: target.y}});
                     requestAnimationFrame(() => canvas.current?.focus({preventScroll: true}));
@@ -1646,7 +1706,18 @@ function WorldEditorSession({
           </section>}
         </div>
         </div>
+        </div>
       </Modal>
+      {outlineItem?.artSource && <SourceOutlineEditor image={world.sourceImage} sourceBox={outlineItem.artSource}
+        existingArt={refinement?.entityId === outlineItem.id ? refinement.mask : outlineItem.art}
+        existingRepairMargin={refinement?.entityId === outlineItem.id ? refinement.repairMargin : outlineItem.sourceOutline?.repairMargin}
+        label={title(outlineItem)} onClose={() => setOutlineItem(undefined)} onConfirm={async (mask, repairMargin) => {
+          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(world.sourceImage));
+          const sourceFingerprint = [...new Uint8Array(hash)].map(value => value.toString(16).padStart(2, "0")).join("");
+          setRefinementPatch(undefined);
+          setRefinement({entityId:outlineItem.id,sourceBox:outlineItem.artSource!,mask,repairMargin,sourceFingerprint});
+          setOutlineItem(undefined);
+        }} />}
       {drawing && (
         <SketchPad
           title="Draw an object"
@@ -1660,6 +1731,7 @@ function WorldEditorSession({
                   update({
                     art: ink.art,
                     artMethod: undefined,
+                    sourceOutline: undefined,
                     artNote: undefined,
                   });
                 else { setCustomArt(ink.art); setCustomArtAspect(ink.aspectRatio); setTool("decoration"); }

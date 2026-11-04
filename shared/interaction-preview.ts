@@ -7,10 +7,33 @@ export interface ActionPreview {
   available: boolean;
   reason?: string;
   consequence: string;
+  canvasConsequence?: string;
+  /** Known price, independent of readiness; safe to disclose while blocked. */
+  costDescription?: string;
 }
 const number = new Intl.NumberFormat("en", { maximumSignificantDigits: 6 });
 const compact = (text: string, limit: number) => text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
 const label = (world: WorldDefinition, id: string) => compact(world.entities.find(entity => entity.id === id)?.label?.trim() || "object", 40);
+
+
+/** Keep the canvas bounded without pretending an omitted supply is free.
+ * The full preview remains available in Object controls. */
+export function canvasCostSummary(costs: {amount:number; name:string}[], full: string, outcome: string, closesChoice: boolean): string {
+  if (full.length <= 160) return full;
+  const details = "Details in Object controls.";
+  for (const count of [Math.min(2, costs.length), 1]) {
+    for (const nameLimit of [32, 20, 12]) {
+      const named = costs.slice(0,count).map(cost => `${cost.amount} from ${compact(cost.name, nameLimit)}`).join("; ");
+      const omitted = costs.length-count;
+      const spending = `Spends ${named}${omitted ? `; +${omitted} ${omitted === 1 ? "supply" : "supplies"}` : ""}.`;
+      const summary = [spending, compact(outcome, 48), closesChoice ? "Other options close." : "", details].filter(Boolean).join(" ");
+      if (summary.length <= 160) return summary;
+    }
+  }
+  // Valid amounts and the bounded labels above fit; this remains defensive for
+  // callers supplying exceptionally long numeric strings or future fields.
+  return `Spends resources from ${costs.length} supplies. ${compact(outcome, 48)} ${closesChoice ? "Other options close. " : ""}${details}`;
+}
 
 /** Selection should suggest unfinished uses, not spent supplies or a branch
  * already closed by the player's choice. Future preparation remains possible. */
@@ -31,37 +54,62 @@ export function previewInteraction(world: WorldDefinition, state: PlayState, act
   const capability = (name: string, before: number, after: number) => before === after
     ? `${name} stays ×${number.format(after)}.`
     : `${name} ×${number.format(before)} → ×${number.format(after)}.`;
-  let consequence: string;
-  if (action.kind === "transfer") {
-    const resource = world.interactions?.objects.find(object => object.entityId === action.targetId)?.resource;
-    const before = progress.quantities[action.targetId] ?? 0;
-    const after = result.ok ? result.state.interactions!.quantities[action.targetId] : before + action.amount;
-    consequence = `Uses ${number.format(action.amount)} once · ${label(world, action.targetId)}: ${number.format(before)} → ${number.format(after)}${resource ? ` / ${number.format(resource.capacity)}` : ""}`;
-  } else if (action.kind === "place") {
-    consequence = `${label(world, action.toolId)} moves to ${label(world, action.targetId)}.`;
-  } else {
-    consequence = (action.effects ?? []).map(effect => effect.kind === "openGate"
-      ? `Opens ${label(world, effect.entityId)}.`
-      : effect.kind === "moveObject" ? `Moves ${label(world, effect.entityId)} to a new position.`
-      : effect.kind === "jumpBoost" ? capability("Jump strength", beforeEffects.jumpMultiplier, afterEffects.jumpMultiplier)
-      : capability("Movement speed", beforeEffects.moveSpeedMultiplier, afterEffects.moveSpeedMultiplier)).join(" ");
-    if (action.kind === "attach") consequence = `Fits ${label(world, action.toolId)} to ${label(world, action.targetId)}. ${consequence}`;
-  }
+  const describe = (name: (id: string) => string): string => {
+    let consequence: string;
+    if (action.kind === "transfer") {
+      const resource = world.interactions?.objects.find(object => object.entityId === action.targetId)?.resource;
+      const before = progress.quantities[action.targetId] ?? 0;
+      const after = result.ok ? result.state.interactions!.quantities[action.targetId] : before + action.amount;
+      consequence = `Uses ${number.format(action.amount)} once · ${name(action.targetId)}: ${number.format(before)} → ${number.format(after)}${resource ? ` / ${number.format(resource.capacity)}` : ""}`;
+    } else if (action.kind === "place") {
+      consequence = `${name(action.toolId)} moves to ${name(action.targetId)}.`;
+    } else {
+      consequence = (action.effects ?? []).map(effect => effect.kind === "openGate"
+        ? `Opens ${name(effect.entityId)}.`
+        : effect.kind === "moveObject" ? `Moves ${name(effect.entityId)} to a new position.`
+        : effect.kind === "jumpBoost" ? capability("Jump strength", beforeEffects.jumpMultiplier, afterEffects.jumpMultiplier)
+        : capability("Movement speed", beforeEffects.moveSpeedMultiplier, afterEffects.moveSpeedMultiplier)).join(" ");
+      if (action.kind === "attach") consequence = `Fits ${name(action.toolId)} to ${name(action.targetId)}. ${consequence}`;
+    }
+    return consequence;
+  };
+  let consequence = describe(id => label(world, id));
+  let fullConsequence = describe(id => world.entities.find(entity => entity.id === id)?.label?.trim() || "object");
+  const primaryEffect = action.effects?.[0];
+  const outcome = primaryEffect?.kind === "moveObject" ? `Moves ${label(world,primaryEffect.entityId)}.`
+    : primaryEffect?.kind === "openGate" ? `Opens ${label(world,primaryEffect.entityId)}.`
+    : primaryEffect?.kind === "jumpBoost" ? `Jump ×${number.format(afterEffects.jumpMultiplier)}.`
+    : primaryEffect?.kind === "moveSpeedBoost" ? `Speed ×${number.format(afterEffects.moveSpeedMultiplier)}.`
+    : consequence;
+  let closesChoice = false;
   const choice = world.interactions?.choiceGroups?.find(group => group.actionIds.includes(action.id));
   if (choice) {
     const alternatives = choice.actionIds.filter(id => id !== action.id)
       .map(id => world.interactions!.actions.find(candidate => candidate.id === id)!)
       .filter(candidate => !interactionChoiceBlockedReason(world, progress, candidate));
+    closesChoice = alternatives.length > 0;
+    if (alternatives.length) fullConsequence += ` Closes ${alternatives.map(candidate => `“${candidate.label}”`).join(" and ")}.`;
     const tradeoff = alternatives.length ? `Closes ${alternatives.slice(0, 2).map(candidate => `“${compact(candidate.label, 32)}”`).join(" and ")}${alternatives.length > 2 ? ` and ${alternatives.length - 2} more` : ""}.` : "";
     // Canvas menus show 160 characters. Keep the effect first when both fit;
     // otherwise lead with the commitment so that clipping cannot conceal it.
     if (tradeoff) consequence = consequence.length + tradeoff.length + 1 <= 160
       ? `${consequence} ${tradeoff}` : `${tradeoff} ${consequence}`;
   }
+  // Spending is a commitment. Keep it first so short canvas previews cannot
+  // conceal the resource price behind long effect or choice labels.
+  let canvasConsequence: string | undefined;
+  let costDescription: string | undefined;
+  if (action.costs?.length) {
+    const costs = action.costs.map(cost => ({amount: cost.amount, name: world.entities.find(entity => entity.id === cost.entityId)?.label?.trim() || "object"}));
+    costDescription = `Spends ${costs.map(cost => `${cost.amount} from ${cost.name}`).join("; ")}.`;
+    fullConsequence = `${costDescription} ${fullConsequence}`;
+    canvasConsequence = canvasCostSummary(costs, fullConsequence, `${outcome}${(action.effects?.length ?? 0) > 1 ? ` +${action.effects!.length - 1} effects.` : ""}`, closesChoice);
+  }
+  if (!canvasConsequence && consequence !== fullConsequence) canvasConsequence = consequence;
   const prerequisite = action.requires?.find(id => !progress.completed.includes(id));
   const preceding = world.interactions?.actions.find(candidate => candidate.id === prerequisite);
   return {id: action.id, label: action.label, available: result.ok,
-    ...(!result.ok ? {reason: preceding && result.reason === "Complete the earlier step first." ? `First: ${preceding.label}` : result.reason} : {}), consequence};
+    ...(!result.ok ? {reason: preceding && result.reason === "Complete the earlier step first." ? `First: ${preceding.label}` : result.reason} : {}), consequence: fullConsequence, ...(canvasConsequence ? {canvasConsequence} : {}), ...(costDescription ? {costDescription} : {})};
 }
 
 /** Inspect only this target with the currently active source. No tool is silently
@@ -98,6 +146,7 @@ export function interactionOutcomeMessage(world: WorldDefinition, before: PlaySt
   const beforeProgress = interactionState(world, before), afterProgress = interactionState(world, after);
   const candidates = (world.interactions?.actions ?? []).filter(candidate => candidate.id !== action.id && !afterProgress.completed.includes(candidate.id) &&
     ((candidate.requires ?? []).includes(action.id) || (candidate.requiresResourceIds ?? []).some(id => beforeProgress.quantities[id] !== afterProgress.quantities[id]) ||
+      (candidate.costs ?? []).some(cost => beforeProgress.quantities[cost.entityId] !== afterProgress.quantities[cost.entityId]) ||
       (candidate.kind === "transfer" && [candidate.toolId, candidate.targetId].some(id => beforeProgress.quantities[id] !== afterProgress.quantities[id]))));
   const toolIds = [...new Set(candidates.map(candidate => candidate.toolId))];
   const enabled = new Set<string>(), previouslyEnabled = new Set<string>();

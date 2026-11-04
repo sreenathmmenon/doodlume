@@ -105,7 +105,11 @@ export function drawingRequest(
             json_schema: { name: "drawing_world", strict: true, schema },
           },
         }
-      : { reasoning_effort: "low" }),
+      : { reasoning_effort: "low", ...(connection.provider === "fireworks" ? {
+          // Fireworks accepts its JSON-mode schema field for Muse Spark Open.
+          // Local schema and gameplay validation remain authoritative.
+          response_format: { type: "json_object" as const, schema },
+        } : {}) }),
     max_tokens: 5000,
   };
 }

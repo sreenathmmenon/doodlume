@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
+import { applyConfirmedSourceOutlines, sourceOutlineFingerprint } from "./source-outline.js";
+import { imageData, pixelBox } from "./images.js";
 import { sourcePlatformScene } from "./source-platform-scene.js";
 import { compileCreativeAdaptation, type GameplayPlan, type SourceSelection } from "./creative-adaptation.js";
 import { validateWorld } from "../shared/world.js";
@@ -117,6 +119,23 @@ let pending='';process.stdin.on('data',chunk=>{pending+=chunk;let end;while((end
       assert.deepEqual(review.draft.entities.find(entity=>entity.id==="supply")!.artSource,{x:110,y:540,width:35,height:55});
       assert.deepEqual(review.draft.interactions!.actions.map(action=>action.id),plan.interactions!.actions.map(action=>action.id));
       assert.deepEqual(review.draft.goalRules!.requiredInteractionIds,plan.requiredInteractionIds);
+      return true;
+    });
+    const supply=objects.find(object=>object.id==="supply")!;
+    const sourceBox={x:supply.x,y:supply.y,width:supply.width,height:supply.height};
+    const crop=pixelBox(sourceBox,1000,600);
+    const mask=imageData(await sharp({create:{width:crop.width,height:crop.height,channels:4,background:{r:0,g:0,b:0,alpha:.8}}}).png().toBuffer());
+    const outlineWorld=await applyConfirmedSourceOutlines(source,{...result,sourceImage:imageData(source)},[{entityId:"supply",sourceBox,mask,sourceFingerprint:sourceOutlineFingerprint(imageData(source))}]);
+    const confirmed=outlineWorld.entities.find(entity=>entity.id==="supply")!;
+    const withConfirmation=objects.map(object=>object.id==="supply"?{...object,artwork:{art:confirmed.art,artMethod:confirmed.artMethod,artNote:confirmed.artNote,sourceOutline:confirmed.sourceOutline}}:object);
+    await assert.rejects(()=>compileCreativeAdaptation({source,inputKind:"drawing",name:"Test",description:"Test",theme:"grove",objects:withConfirmation,plan,
+      segmentation:{enabled:true,apiKey:"",provider:"local-sam2",local:{python:executable,checkpoint:"synthetic-protocol-only",worker:"synthetic-protocol-only",configured:true}},
+      signal:new AbortController().signal,transport:async()=>{throw Error("No network expected");},validateGeneratedChoices:false}),error=>{
+      assert.ok(error instanceof RecognitionReviewError);
+      const review=validateRecognitionReview(error.recovery);
+      assert.equal(review.issues[0].objectId,"part","The confirmed source is skipped; a different unverified object still requires review");
+      assert.equal(review.draft.entities.find(entity=>entity.id==="supply")!.art,confirmed.art);
+      assert.deepEqual(review.draft.entities.find(entity=>entity.id==="supply")!.sourceOutline,confirmed.sourceOutline);
       return true;
     });
   } finally { closeLocalSegmentationWorkers(); await rm(directory,{recursive:true,force:true}); }

@@ -43,7 +43,9 @@ else:
         crop = source[top:bottom, left:right, :3]
         crop_mask = mask[top:bottom, left:right]
         ch, cw = crop_mask.shape
-        scale = min(1.0, 1024 / max(ch, cw))
+        # Bound background-only inference cost; original foreground artwork is
+        # never resized here. Composite the repaired region at source resolution.
+        scale = min(1.0, 512 / max(ch, cw))
         size = (max(8, round(cw * scale)), max(8, round(ch * scale)))
         image = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB), size, interpolation=cv2.INTER_AREA)
         small_mask = cv2.resize(crop_mask, size, interpolation=cv2.INTER_NEAREST)

@@ -5,7 +5,9 @@ import {applyWorldPatch, type WorldPatch} from '../shared/revisions.js';
 import {isSourceAlignedScenery} from '../shared/source-scenery.js';
 import {normalizeDrawing} from './images.js';
 import {sourceScenery} from './source-scenery.js';
+import {validateConfirmedSourceOutline, sourceOutlineFingerprint} from './source-outline.js';
 import {recoverSourceObjectLayer} from './source-object-layer.js';
+import {interpretationErrorResponse} from './interpretation-response.js';
 
 /** Local preparation: source-mask removal and background reconstruction, with
  * local Meta SAM recovery when an older selection contains only a landing lip.
@@ -15,6 +17,9 @@ export function installSourceScenery(app: FastifyInstance) {
   app.post<{Body:{world?:unknown;image?:unknown;additions?:unknown;updates?:unknown;bounds?:WorldPatch['bounds'];interactions?:WorldPatch['interactions'];goalRules?:WorldPatch['goalRules']}}>('/api/source-scenery',async(request,reply)=>{
     if(preparing)return reply.code(429).send({error:'An image update is already being prepared. Try applying again in a moment.'});
     preparing=true;
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),120_000);
+    const onClose=()=>{if(!reply.raw.writableFinished)controller.abort();};
+    reply.raw.on('close',onClose);
     try{
       const world=validateWorld(request.body?.world);
       const backdrop=world.entities.find(isSourceAlignedScenery);
@@ -38,6 +43,10 @@ export function installSourceScenery(app: FastifyInstance) {
         (entity.kind==='gate'&&(interactionGates.has(entity.id)||candidate.entities.some(other=>other.kind==='lever'&&other.targetId===entity.id)))));
       if(moving.some(entity=>!entity.art))throw Error('Missing moving artwork');
       const source=await normalizeDrawing(request.body?.image);
+      for (const entity of candidate.entities.filter(item => item.artMethod === 'outline')) {
+        if (typeof request.body?.image !== 'string' || entity.sourceOutline?.sourceFingerprint !== sourceOutlineFingerprint(request.body.image)) throw Error('Changed confirmed source');
+        await validateConfirmedSourceOutline(source, entity);
+      }
       const [before,after]=await Promise.all([sharp(Buffer.from(world.sourceImage!.split(',')[1],'base64')).metadata(),sharp(source).metadata()]);
       if(!before.width||!before.height||!after.width||!after.height||Math.abs(before.width/before.height/(after.width/after.height)-1)>.08)throw Error('Changed page shape');
       const sourceLayers: NonNullable<WorldPatch['sourceLayers']> = [];
@@ -45,8 +54,8 @@ export function installSourceScenery(app: FastifyInstance) {
         const original = world.entities.find(item => item.id === entity.id);
         if (!entity.sourceLayer || original?.sourceLayer || !original?.artSource || !['terrain','bridge'].includes(entity.kind)) continue;
         const thinLegacySelection = !original.sourcePlacement && original.artSource.height / 1000 * backdrop.height <= entity.sourceLayer.height * 2;
-        if (thinLegacySelection || original.sourcePlacement && original.artMethod !== 'sam') {
-          const recovered = await recoverSourceObjectLayer(source, original, AbortSignal.timeout(45_000));
+        if (original.artMethod !== 'outline' && (thinLegacySelection || original.sourcePlacement && original.artMethod !== 'sam')) {
+          const recovered = await recoverSourceObjectLayer(source, original, AbortSignal.any([controller.signal,AbortSignal.timeout(45_000)]));
           if (!recovered.art || !recovered.artSource) throw Error('Incomplete source cutout');
           Object.assign(entity, recovered);
           // Older ledge-only boxes can include paper and miss the real edge.
@@ -61,10 +70,12 @@ export function installSourceScenery(app: FastifyInstance) {
           sourceLayers.push({ id: entity.id, art: recovered.art, artSource: recovered.artSource, artMethod: recovered.artMethod, artNote: recovered.artNote, sourceLayer: entity.sourceLayer });
         }
       }
-      const art=await sourceScenery(source,candidate.entities,candidate.interactions);
+      const art=await sourceScenery(source,candidate.entities,candidate.interactions,undefined,undefined,controller.signal);
       return {sourceScenery:{id:backdrop.id,art}, ...(sourceLayers.length ? {sourceLayers} : {})};
-    }catch{
-      return reply.code(422).send({error:'The edited source artwork could not be prepared. Keep the same page framing and try again. Your draft is still here.'});
-    }finally{preparing=false;}
+    }catch(error){
+      const response=interpretationErrorResponse(error);
+      if(response)return reply.code(response.status).send(response.body);
+      return reply.code(controller.signal.aborted?504:422).send({error:'The edited source artwork could not be prepared. Keep the same page framing and try again. Your draft is still here.'});
+    }finally{clearTimeout(timeout);reply.raw.off('close',onClose);preparing=false;}
   });
 }

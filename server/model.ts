@@ -16,6 +16,14 @@ export class ModelPlanError extends InterpretationError {
   }
 }
 
+/** A completed provider response contained malformed JSON. Raw content is bounded
+ * diagnostic data for one correction sequence, never a public error message. */
+export class MalformedModelJSONError extends ModelPlanError {
+  constructor(public readonly rawContent: string) {
+    super("The completed response is not valid JSON. Return one complete JSON object with balanced syntax and the requested schema; preserve the original image and creator intent.");
+  }
+}
+
 export async function modelJSON(
   connection: ModelConnection,
   payload: unknown,
@@ -68,16 +76,27 @@ export async function modelJSON(
   }
   try {
     const result = (await response.json()) as {
-      choices?: { finish_reason?: string; message?: { content?: string } }[];
+      error?: unknown;
+      choices?: { finish_reason?: string; message?: { content?: string; refusal?: unknown } }[];
     };
-    if (result.choices?.[0]?.finish_reason === "length")
+    if (!result || typeof result !== "object" || Array.isArray(result) || result.error ||
+        !Array.isArray(result.choices) || !result.choices[0] || typeof result.choices[0] !== "object") throw new Error();
+    const choice = result.choices[0];
+    if (choice.finish_reason === "length")
       throw new InterpretationError("Meta stopped before completing the game plan. Try again; your image and idea are unchanged.", 502);
-    const content = result.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || content.length > 150_000)
+    if (!choice.message || typeof choice.message !== "object" || Array.isArray(choice.message) ||
+        choice.message.refusal != null || choice.finish_reason === "content_filter" || choice.finish_reason === "tool_calls") throw new Error();
+    const content = choice.message.content;
+    if (typeof content !== "string" || !content.trim() || content.length > 150_000) throw new Error();
+    const json = content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, "$1");
+    try { return JSON.parse(json); }
+    catch {
+      // Only an explicitly completed, bounded model message enters correction.
+      // Invalid envelopes, refusals, truncation and transport failures do not.
+      if (choice.finish_reason === "stop" && content.length <= 60_000)
+        throw new MalformedModelJSONError(content);
       throw new Error();
-    return JSON.parse(
-      content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, "$1"),
-    );
+    }
   } catch (error) {
     signal.throwIfAborted();
     if (error instanceof InterpretationError) throw error;

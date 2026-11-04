@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { validateInteractions, reduceInteraction } from "../shared/interactions.js";
+import { validateInteractions, reduceInteraction, interactionCompletionStatus } from "../shared/interactions.js";
 import { emptyPlayState, type WorldDefinition } from "../shared/world.js";
 import { validateGeneratedRetryablePlan } from "./retryable-planning.js";
 
@@ -77,4 +77,31 @@ test("retryable proof executes a prepared stationary control without inventing a
   world.interactions!.actions.push({id:"launch",kind:"operate",label:"Launch",toolId:"goal",targetId:"goal",requiresResourceIds:["goal"],effects:[{kind:"moveObject",entityId:"payload",x:500,y:300}]});
   world.goalRules!.requiredInteractionIds=["launch"];
   validateInteractions(world);validateGeneratedRetryablePlan(world);
+});
+
+test("retryable admission proves a shared-cost fork after preparation without relying on transfers",async()=>{
+  const world=fixture();
+  const art=`data:image/png;base64,${(await sharp({create:{width:30,height:30,channels:4,background:"#456"}}).png().toBuffer()).toString("base64")}`;
+  for(const entity of world.entities)entity.art=art;
+  world.interactions!.objects=[{entityId:"a",resource:{type:"power",capacity:4,initial:4}},
+    ...["b","goal","receiver-a","receiver-b"].map(entityId=>({entityId}))];
+  world.interactions!.actions=[
+    {id:"prepare",kind:"operate",label:"Position the carrier",toolId:"goal",targetId:"goal",costs:[{entityId:"a",amount:1}],effects:[{kind:"moveObject",entityId:"b",x:100,y:200}]},
+    {id:"delivery",kind:"operate",label:"Deliver the first object",toolId:"goal",targetId:"goal",requires:["prepare"],costs:[{entityId:"a",amount:2}],effects:[{kind:"moveObject",entityId:"receiver-a",x:500,y:200}]},
+    {id:"detour",kind:"operate",label:"Move the other object",toolId:"goal",targetId:"goal",requires:["prepare"],costs:[{entityId:"a",amount:2}],effects:[{kind:"moveObject",entityId:"receiver-b",x:600,y:200}]},
+    {id:"finish",kind:"operate",label:"Return the carrier",toolId:"goal",targetId:"goal",requires:["delivery"],costs:[{entityId:"a",amount:1}],effects:[{kind:"moveObject",entityId:"b",x:100,y:300}]},
+  ];
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredInteractionIds:["finish"]};
+  validateInteractions(world);validateGeneratedRetryablePlan(world);
+  const before=JSON.stringify(world);
+  const prepared=reduceInteraction(world,emptyPlayState(),{type:"perform",actionId:"prepare"});assert.equal(prepared.ok,true);
+  for(const [id,status] of [["delivery","possible"],["detour","impossible"]] as const){
+    const result=reduceInteraction(world,prepared.state,{type:"perform",actionId:id});
+    assert.equal(result.ok,true);assert.equal(result.state.interactions!.heldEntityId,null);
+    assert.equal(interactionCompletionStatus(world,result.state),status);
+  }
+  assert.equal(JSON.stringify(world),before);
+  const enoughForBoth=structuredClone(world);enoughForBoth.interactions!.objects[0].resource={type:"power",capacity:6,initial:6};
+  validateInteractions(enoughForBoth);
+  assert.throws(()=>validateGeneratedRetryablePlan(enoughForBoth),/real allocation decision/,"Spending alone does not establish a meaningful losing allocation.");
 });

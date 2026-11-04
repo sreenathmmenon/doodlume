@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyPlayState, goalProgress, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "./world.js";
+import { emptyPlayState, getRetryCheckpoint, pinRetryCheckpoint, goalProgress, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "./world.js";
 import { activeInteractionSource, selectInteractionSourceCommand, availableInteractions, safeAvailableInteractions, playerAvailableInteractions, interactionCompletionStatus, interactionEffects, interactionState, reduceInteraction, validateInteractionChoiceOutcomes, type InteractionCommand } from "./interactions.js";
 import { applyWorldPatch, undoWorldPatch } from "./revisions.js";
 import { validSavedWorlds } from "../src/lib/library.js";
@@ -923,4 +923,99 @@ test("operation requires one uncarried controller and real supported effects, in
   const fixedMove=structuredClone(dual);fixedMove.entities.find(entity=>entity.id==="supply")!.art="/art/controller.png";
   fixedMove.interactions!.actions.at(-1)!.effects=[{kind:"moveObject",entityId:"supply",x:700,y:100}];
   assert.throws(()=>validateWorld(fixedMove),/moving object/);
+});
+
+test("action costs spend once after readiness and keep capacity-freeing and refill paths in completion search",()=>{
+  const w=operatingWorld();
+  w.interactions!.objects[0].resource={type:"charge",capacity:3,initial:3};
+  w.interactions!.objects[1].resource={type:"charge",capacity:3,initial:3};
+  const fill=w.interactions!.actions[0];assert.equal(fill.kind,"transfer");if(fill.kind==="transfer")fill.amount=3;
+  const operate=w.interactions!.actions[1];operate.requires=[];operate.costs=[{entityId:"receiver",amount:3}];
+  w.interactions!.actions.push({id:"later",kind:"operate",label:"Use the refilled controller",toolId:"receiver",targetId:"receiver",requires:["fill"],requiresResourceIds:["receiver"],costs:[{entityId:"receiver",amount:2}],effects:[{kind:"moveSpeedBoost",multiplier:1.5}]});
+  w.goalRules!.requiredInteractionIds=["later"];
+  validateWorld(w);
+  const initial=emptyPlayState();
+  assert.equal(interactionCompletionStatus(w,initial),"possible","An optional cost action must free space before the required refill.");
+  const operated=step(w,initial,{type:"perform",actionId:"operate"});
+  assert.equal(operated.interactions!.quantities.receiver,0);
+  assert.deepEqual(interactionEffects(w,operated).openGateIds,["barrier"]);
+  assert.equal(reduceInteraction(w,operated,{type:"perform",actionId:"operate"}).ok,false);
+  let state=step(w,operated,{type:"pickup",entityId:"supply"});
+  state=step(w,state,{type:"perform",actionId:"fill"});
+  state=step(w,state,{type:"perform",actionId:"later"});
+  assert.equal(state.interactions!.quantities.receiver,1);
+  assert.equal(goalProgress(w,state).ready,true);
+  const saved=validSavedWorlds(JSON.parse(JSON.stringify([{world:w,state,savedAt:new Date().toISOString()}])))[0];
+  assert.deepEqual(interactionState(w,saved.state),state.interactions,"Replay deducts each paid receipt once even after a refill.");
+  assert.deepEqual(interactionState(w,retainPlayState(w,saved.state)),state.interactions);
+  assert.equal(interactionState(w,initial).quantities.receiver,3,"Undo to the captured pre-action state restores the original stock.");
+});
+
+test("cost validation rejects malformed spends and insufficient multi-resource actions are atomic",()=>{
+  for(const costs of [null,[{entityId:"missing",amount:1}],[{entityId:"part",amount:1}],[{entityId:"receiver",amount:0}],
+    [{entityId:"receiver",amount:-1}],[{entityId:"receiver",amount:Infinity}],[{entityId:"receiver",amount:7}],
+    [{entityId:"receiver",amount:1,extra:true}],[{entityId:"receiver",amount:1},{entityId:"receiver",amount:2}],
+    Array.from({length:9},()=>({entityId:"receiver",amount:1}))]){
+    const invalid=operatingWorld();invalid.interactions!.actions[1].costs=costs as never;
+    assert.throws(()=>validateWorld(invalid),/non-transfer actions can have costs/);
+  }
+  const transfer=operatingWorld();transfer.interactions!.actions[0].costs=[];
+  assert.throws(()=>validateWorld(transfer),/non-transfer actions can have costs/);
+  const w=operatingWorld();w.interactions!.actions[1].requires=[];w.interactions!.actions[1].requiresResourceIds=[];
+  w.interactions!.actions[1].costs=[{entityId:"supply",amount:1},{entityId:"receiver",amount:1}];
+  validateWorld(w);
+  const initial=emptyPlayState(),before=structuredClone(initial);
+  const denied=reduceInteraction(w,initial,{type:"perform",actionId:"operate"});
+  assert.equal(denied.ok,false);assert.equal(denied.state,initial);assert.match(denied.reason!,/Not enough left/);
+  assert.deepEqual(initial,before);assert.equal(interactionState(w,denied.state).quantities.supply,10);
+  assert.deepEqual(interactionEffects(w,denied.state).openGateIds,[]);
+});
+
+test("cost receipts survive save order changes but never grant an edited or newly paid effect",()=>{
+  const free=operatingWorld(),freeDone=step(free,filled(free),{type:"perform",actionId:"operate"});
+  const emptyCosts=structuredClone(free);emptyCosts.interactions!.actions[1].costs=[];
+  assert.deepEqual(interactionState(emptyCosts,freeDone),freeDone.interactions,"Absent and empty costs preserve legacy free receipts.");
+  const paid=structuredClone(free);paid.interactions!.actions[1].costs=[{entityId:"receiver",amount:1},{entityId:"supply",amount:1}];validateWorld(paid);
+  assert.deepEqual(interactionState(paid,freeDone).completed,["fill"],"Adding a price invalidates an earlier free receipt.");
+  assert.deepEqual(interactionEffects(paid,freeDone).openGateIds,[]);
+  const paidDone=step(paid,filled(paid),{type:"perform",actionId:"operate"});
+  assert.equal(paidDone.interactions!.quantities.receiver,5);assert.equal(paidDone.interactions!.quantities.supply,3);
+  const reordered=structuredClone(paid);reordered.interactions!.actions[1].costs!.reverse();
+  assert.deepEqual(interactionState(reordered,paidDone),paidDone.interactions,"Cost ordering does not change executable meaning.");
+  const changed=structuredClone(paid);changed.interactions!.actions[1].costs![0].amount=2;
+  assert.deepEqual(interactionState(changed,paidDone).completed,["fill"]);
+  assert.equal(interactionState(changed,paidDone).quantities.receiver,6);
+  const forged=structuredClone(paidDone);forged.interactions!.completed.push("operate");forged.interactions!.quantities.receiver=6;
+  assert.equal(interactionState(paid,forged).quantities.receiver,5,"Duplicate receipts and saved counters cannot refund or double-spend a cost.");
+});
+
+test("budgeted alternatives preserve protected play and retry checkpoints include paid losses",()=>{
+  const w=operatingWorld();w.interactions!.objects[0].resource={type:"charge",capacity:5,initial:5};
+  w.interactions!.actions=[
+    {id:"gate",kind:"operate",label:"Open gate",toolId:"receiver",targetId:"receiver",costs:[{entityId:"supply",amount:3}],effects:[{kind:"openGate",entityId:"barrier"}]},
+    {id:"speed",kind:"operate",label:"Power speed",toolId:"receiver",targetId:"receiver",costs:[{entityId:"supply",amount:1}],effects:[{kind:"moveSpeedBoost",multiplier:1.5}]},
+    {id:"finish",kind:"operate",label:"Power arrival",toolId:"receiver",targetId:"receiver",costs:[{entityId:"supply",amount:2}],effects:[{kind:"moveSpeedBoost",multiplier:1.7}]},
+    {id:"waste",kind:"operate",label:"Spend elsewhere",toolId:"receiver",targetId:"receiver",costs:[{entityId:"supply",amount:3}],effects:[{kind:"moveSpeedBoost",multiplier:1.1}]},
+  ];
+  w.interactions!.choiceGroups=[{id:"route",label:"Route",actionIds:["gate","speed"]}];
+  w.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredInteractionIds:["finish"],requiredChoiceGroupIds:["route"]};
+  validateWorld(w);validateInteractionChoiceOutcomes(w);
+  for(const branch of ["gate","speed"]){
+    const branchState=step(w,emptyPlayState(),{type:"perform",actionId:branch});
+    const done=step(w,branchState,{type:"perform",actionId:"finish"});
+    assert.equal(goalProgress(w,done).ready,true);assert.equal(done.interactions!.quantities.supply,branch==="gate"?0:2);
+  }
+  const before=emptyPlayState();assert.equal(reduceInteraction(w,before,{type:"perform",actionId:"waste"}).ok,false);
+  assert.equal(safeAvailableInteractions(w,before).some(action=>action.id==="waste"),false);
+  w.interactions!.completionPolicy="retryable";
+  const paidCheckpoint=step(w,before,{type:"perform",actionId:"speed"});
+  const lost=pinRetryCheckpoint(w,paidCheckpoint,step(w,paidCheckpoint,{type:"perform",actionId:"waste"}));
+  assert.equal(interactionCompletionStatus(w,lost),"impossible");assert.equal(interactionState(w,lost).quantities.supply,1);
+  const persisted=validSavedWorlds(JSON.parse(JSON.stringify([{world:w,state:lost,savedAt:new Date().toISOString()}])))[0];
+  const restored=getRetryCheckpoint(w,persisted.state);assert.ok(restored);assert.equal(interactionState(w,restored).quantities.supply,4);
+  assert.deepEqual(interactionState(w,restored).completed,["speed"]);
+  const staleCheckpoint=structuredClone(w);staleCheckpoint.interactions!.actions[1].costs![0].amount=2;
+  assert.equal(getRetryCheckpoint(staleCheckpoint,persisted.state),undefined,"A checkpoint cannot restore an earlier receipt after its cost changes.");
+  const revised=structuredClone(w);revised.interactions!.actions[0].costs![0].amount=4;
+  assert.throws(()=>validateInteractionChoiceOutcomes(revised),/gate.*no completing run/);
 });

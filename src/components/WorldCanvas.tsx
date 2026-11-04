@@ -67,6 +67,8 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
   function WorldCanvas(props, ref) {
     const host = useRef<HTMLDivElement>(null);
     const discoveryChoice = useRef<HTMLSelectElement>(null);
+    const objectChoice = useRef<HTMLSelectElement>(null);
+    const keyboardObjectAction = useRef<HTMLButtonElement | null>(null);
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
     const [openingSlow, setOpeningSlow] = useState(false);
@@ -534,6 +536,31 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const retryCheckpointKey = JSON.stringify(discoveryProgress.retryCheckpoint);
     const retryPoint = useMemo(() => getRetryCheckpoint(props.world, discoveryProgress), [props.world, progressKey, retryCheckpointKey]);
     const finished = discoveryProgress.completed && !discoveryProgress.exploring;
+    useEffect(() => {
+      const origin = keyboardObjectAction.current;
+      if (!origin) return;
+      let frame = 0;
+      let attempts = 0;
+      const restore = () => {
+        const active = document.activeElement;
+        if (active !== origin && active !== document.body) {
+          keyboardObjectAction.current = null;
+          return;
+        }
+        if (!origin.isConnected || origin.disabled) {
+          // Chrome can report the just-disabled button as active until the
+          // following frame. Wait for its actual blur before restoring.
+          if (active === origin && attempts++ < 2) { frame = requestAnimationFrame(restore); return; }
+          keyboardObjectAction.current = null;
+          // A completed control may disappear or become disabled. Restore only
+          // lost keyboard focus; dialogs and a player's new focus own priority.
+          if (active === document.body && !document.querySelector("dialog[open]"))
+            (objectChoice.current ?? host.current)?.focus({preventScroll: true});
+        }
+      };
+      frame = requestAnimationFrame(restore);
+      return () => cancelAnimationFrame(frame);
+    }, [progressKey, ready, finished, pendingObjectMotion]);
     function revisitChoice() {
       const scope = JSON.stringify([props.world.id, props.world.revision, props.run]);
       if (!retryPoint || !ready || failed || !props.playing || !scene.current?.canUndoObjectAction() || undoHistory.current.scope !== scope) return;
@@ -578,7 +605,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         <summary>Object controls</summary>
         <div>
           <label>Choose an object
-            <select aria-label="Choose interactive object" aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); if (event.target.value) scene.current?.revealObjectHint(event.target.value); }}>
+            <select ref={objectChoice} aria-label="Choose interactive object" aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); if (event.target.value) scene.current?.revealObjectHint(event.target.value); }}>
               <option value="">Choose an object…</option>
               {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
             </select>
@@ -589,9 +616,17 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
               {targetPreviews.map(action => <option key={action.id} value={action.id}>{action.label}{action.available ? "" : " · unavailable"}</option>)}
             </select>
           </label>}
-          {selectedPreview && <p className="object-action-preview" id={objectPreviewId}>{selectedPreview.available ? selectedPreview.consequence : selectedPreview.reason}</p>}
+          {selectedPreview && <p className="object-action-preview" id={objectPreviewId}>{selectedPreview.available ? selectedPreview.consequence : <>{selectedPreview.reason}{selectedPreview.costDescription && <><br />When available: {selectedPreview.costDescription}</>}</>}</p>}
           {!selectedPreview && incompatibleReason && <p className="object-action-preview" id={objectPreviewId}>{incompatibleReason}</p>}
-          <button aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={() => scene.current?.interactWithObject(selectedDiscovery, selectedPreview?.id)}>{selectedPreview?.label ?? (canSelectSource ? `${selectedObject?.usableInPlace ? "Select" : "Take"} ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
+          <button aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={event => {
+            const origin = event.currentTarget;
+            keyboardObjectAction.current = event.detail === 0 && document.activeElement === origin ? origin : null;
+            if (!scene.current?.interactWithObject(selectedDiscovery, selectedPreview?.id)) keyboardObjectAction.current = null;
+            else if (keyboardObjectAction.current === origin) window.setTimeout(() => {
+              if (document.activeElement === document.body && (!origin.isConnected || origin.disabled) && !document.querySelector("dialog[open]"))
+                (objectChoice.current ?? host.current)?.focus({preventScroll: true});
+            }, 0);
+          }}>{selectedPreview?.label ?? (canSelectSource ? `${selectedObject?.usableInPlace ? "Select" : "Take"} ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
           {canSelectSource && selectedObject?.usableInPlace && targetPreviews.length > 0 && <button disabled={!props.playing} onClick={() => scene.current?.selectFixedSource(selectedDiscovery)}>Select as source</button>}
           <button disabled={!props.playing || !activeSourceId} onClick={() => scene.current?.dropHeldObject()}>{releaseLabel}</button>
         </div>

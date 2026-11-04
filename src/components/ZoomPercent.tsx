@@ -14,7 +14,7 @@ export function ZoomPercent({ value, min, max, onChange }: {
     } else setDraft(String(Math.round(value)));
   }
   return <label className="zoom-percent">
-    <input aria-label="Zoom percentage" type="number" inputMode="decimal" min={min} max={max}
+    <input aria-label="Zoom percentage" type="number" inputMode="decimal" step="any" min={Math.floor(min)} max={Math.ceil(max)}
       value={draft} onChange={event => setDraft(event.target.value)} onBlur={commit}
       onKeyDown={event => {
         if (event.key === "Enter") { event.preventDefault(); commit(); }

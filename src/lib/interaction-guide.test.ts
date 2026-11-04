@@ -167,7 +167,10 @@ test("long choice previews retain named tradeoffs inside the canvas menu cutoff"
   validateWorld(world);
   const held=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"pitcher"}).state;
   const preview=previewInteraction(world,held,refill);
-  const canvasDetail=preview.consequence.length>160?`${preview.consequence.slice(0,157)}…`:preview.consequence;
+  const canvas=preview.canvasConsequence ?? preview.consequence;
+  const canvasDetail=canvas.length>160?`${canvas.slice(0,157)}…`:canvas;
+  assert.ok(preview.consequence.includes(first));
+  assert.ok(preview.consequence.includes(second));
   assert.match(canvasDetail,/Closes/);
   assert.ok(canvasDetail.includes(first.slice(0,31).trimEnd()+"…"));
   assert.ok(canvasDetail.includes(second.slice(0,31).trimEnd()+"…"));
@@ -377,4 +380,58 @@ test("a completed controller can still be selected for its remaining resource us
   const selected=reduceInteraction(world,operated.state,{type:"selectSource",entityId:"pitcher"});
   assert.equal(selected.ok,true,selected.reason);
   assert.equal(reduceInteraction(world,selected.state,{type:"perform",actionId:"refill"}).ok,true);
+});
+
+test("paid route hints expose refill preparation without choosing an alternative for the player",()=>{
+  const world=preparedRouteFixture();
+  const gate=world.interactions!.actions.find(action=>action.id==="operate-gate")!;
+  gate.requires=[];gate.requiresResourceIds=[];gate.costs=[{entityId:"cup",amount:2}];
+  validateWorld(world);
+  const initial=emptyPlayState(),before=JSON.stringify([world,initial]);
+  assert.match(nextInteractionHint(world,initial)!.text,/^Choose: Press button to open gate \(first: Charge the button\) or Fit spring/);
+  const held=reduceInteraction(world,initial,{type:"pickup",entityId:"pitcher"}).state;
+  const charged=reduceInteraction(world,held,{type:"perform",actionId:"charge"}).state;
+  assert.match(nextInteractionHint(world,charged)!.text,/^Choose: Press button to open gate or Fit spring/);
+  assert.equal(JSON.stringify([world,initial]),before);
+});
+
+test("blocked paid actions disclose their exact known price without predicting effects or spending",async()=>{
+  const {previewInteraction}=await import("../../shared/interaction-preview");
+  const world=preparedRouteFixture();
+  const action=world.interactions!.actions.find(action=>action.id==="operate-gate")!;
+  action.requires=["charge"]; action.requiresResourceIds=[]; action.costs=[{entityId:"cup",amount:2}];
+  const initial=emptyPlayState(),before=JSON.stringify([world,initial]);
+  const blocked=previewInteraction(world,initial,action);
+  assert.equal(blocked.available,false);
+  assert.match(blocked.reason!,/^First: Charge the button/);
+  assert.equal(blocked.costDescription,"Spends 2 from Button.");
+  assert.doesNotMatch(blocked.costDescription!,/Opens|Moves|Jump|Speed/);
+  action.requires=[]; action.requiresResourceIds=[];
+  const insufficient=previewInteraction(world,initial,action);
+  assert.equal(insufficient.available,false);
+  assert.match(insufficient.reason!,/Not enough left in Button/);
+  assert.equal(insufficient.costDescription,blocked.costDescription);
+  action.requires=["charge"];
+  // Only the intentional test setup changed; neither preview touched progress.
+  assert.equal(JSON.stringify(initial),JSON.stringify(emptyPlayState()));
+  assert.equal(JSON.stringify([world,initial]),before);
+});
+
+test("hints find spending that frees capacity for a required refill and later paid operation",()=>{
+  const world=preparedRouteFixture();
+  world.interactions!.choiceGroups=[];
+  world.interactions!.objects.find(object=>object.entityId==="cup")!.resource!.initial=2;
+  world.interactions!.actions=world.interactions!.actions.filter(action=>action.id!=="fit-spring");
+  const gate=world.interactions!.actions.find(action=>action.id==="operate-gate")!;
+  gate.requires=[];gate.requiresResourceIds=["cup"];gate.costs=[{entityId:"cup",amount:2}];
+  world.interactions!.actions.push({id:"finish",kind:"operate",label:"Power the return journey",toolId:"cup",targetId:"cup",requires:["charge"],costs:[{entityId:"cup",amount:2}],effects:[{kind:"moveSpeedBoost",multiplier:1.5}]});
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredInteractionIds:["finish"]};
+  validateWorld(world);
+  let state=emptyPlayState();
+  assert.match(nextInteractionHint(world,state)!.text,/^Press button to open gate/);
+  state=reduceInteraction(world,state,{type:"perform",actionId:"operate-gate"}).state;
+  assert.match(nextInteractionHint(world,state)!.text,/Take Battery to charge the button/);
+  state=reduceInteraction(world,state,{type:"pickup",entityId:"pitcher"}).state;
+  state=reduceInteraction(world,state,{type:"perform",actionId:"charge"}).state;
+  assert.match(nextInteractionHint(world,state)!.text,/^Power the return journey/);
 });

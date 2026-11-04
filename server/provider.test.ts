@@ -50,7 +50,7 @@ test("provider selection keeps credentials and endpoints separate and only allow
   );
 });
 
-test("Baseten gets a JSON instruction without unsupported schema mode; direct Meta gets constrained output", () => {
+test("provider output modes retain local schema instructions and use only documented constraints", () => {
   const schema = { type: "object", properties: { name: { type: "string" } } };
   const baseten = drawingRequest(
     modelConnection({ MODEL_PROVIDER: "baseten" }),
@@ -72,6 +72,15 @@ test("Baseten gets a JSON instruction without unsupported schema mode; direct Me
     schema,
   );
   assert.ok("response_format" in meta);
-  assert.equal(meta.response_format.json_schema.strict, true);
-  assert.equal(meta.response_format.json_schema.schema, schema);
+  assert.ok(meta.response_format && "json_schema" in meta.response_format);
+  const constrained = meta.response_format.json_schema;
+  assert.ok(constrained);
+  assert.equal(constrained.strict, true);
+  assert.equal(constrained.schema, schema);
+  const fireworks = drawingRequest(
+    modelConnection({MODEL_PROVIDER:"fireworks"}),
+    "data:image/png;base64,dGVzdA==", "Collect stars", "Interpret this page.", schema,
+  );
+  assert.deepEqual(fireworks.response_format, {type:"json_object",schema});
+  assert.match(fireworks.messages[0].content as string, /JSON Schema/);
 });

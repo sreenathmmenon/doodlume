@@ -3,6 +3,7 @@ import { setupFeedback } from "./setup.js";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit } from "./source-scenery.js";
 import {
   retainPlayState,
+  getRetryCheckpoint,
   movementMode,
   validateWorld,
   type PlayState,
@@ -31,7 +32,8 @@ export interface WorldPatch {
   additions: WorldEntity[];
   updates?: WorldEntityUpdate[];
   sourceImage?: string;
-  sourceScenery?: { id: string; art: string };
+  sourceScenery?: { id: string; art: string; artNote?: string };
+  sourceRefinements?: (Required<Pick<WorldEntity, "id" | "art" | "artSource" | "sourceOutline">> & Pick<WorldEntity, "artMethod" | "artNote">)[];
   sourceLayers?: (Required<Pick<WorldEntity, "id" | "art" | "artSource">> & Pick<WorldEntity, "artMethod" | "artNote" | "sourceLayer">)[];
   bounds?: { width: number; height: number };
   goalRules?: GoalRules;
@@ -41,6 +43,24 @@ export interface WorldPatch {
 export interface RevisionCheckpoint {
   before: WorldDefinition;
   appliedRevision: number;
+}
+
+/** Only artwork-only revisions can reuse a validated recovery position. Source
+ * selection, placement, rules, quantities and every other world field must match. */
+function retainRevisionPlayState(world: WorldDefinition, state: PlayState, before: WorldDefinition): PlayState {
+  const mechanics = (value: WorldDefinition) => {
+    const { revision: _revision, entities, ...rest } = value;
+    return JSON.stringify({ ...rest, entities: entities.map(entity => {
+      const { art: _art, artMethod: _method, artNote: _note, sourceOutline: _outline, ...unchanged } = entity;
+      return unchanged;
+    }) });
+  };
+  const progress = structuredClone(state);
+  if (progress.retryCheckpoint && mechanics(before) === mechanics(world)) {
+    const recovery = getRetryCheckpoint(before, state);
+    if (recovery) progress.retryCheckpoint = { worldId: world.id, revision: world.revision, state: recovery };
+  }
+  return retainPlayState(world, progress);
 }
 
 function safePlayerPosition(world: WorldDefinition, state: PlayState, before: WorldDefinition, beforeState: PlayState) {
@@ -98,15 +118,19 @@ export function applyWorldPatch(
     !patch.id ||
     !["manual", "meta"].includes(patch.origin) ||
     !Array.isArray(patch.additions) ||
-    (!patch.additions.length && !patch.updates?.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined && patch.interactions === undefined)
+    (!patch.additions.length && !patch.updates?.length && !patch.sourceRefinements?.length && !patch.bounds && patch.goalRules === undefined && patch.gameplay === undefined && patch.interactions === undefined)
   )
     throw new Error("Add something to your world before applying this change.");
+  if (patch.sourceImage && patch.sourceImage !== world.sourceImage && world.entities.some(entity => entity.artMethod === "outline" || entity.sourceOutline))
+    throw new Error("This image has creator-confirmed outlines. Confirm them again in a new source review before replacing the original image. Your current world is unchanged.");
   const derivedBackdrops = world.entities.filter(isSourceAlignedScenery);
   if (patch.sourceImage && derivedBackdrops.length && !patch.sourceScenery)
     throw new Error("The revised image needs a refreshed scenery preview. Review the image update again before applying.");
-  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || (!patch.sourceImage && !patch.updates?.length && !patch.additions.length && patch.interactions === undefined) ||
+  if (patch.sourceScenery !== undefined && (!patch.sourceScenery || !["meta", "manual"].includes(patch.origin) || (!patch.sourceImage && !patch.updates?.length && !patch.additions.length && !patch.sourceRefinements?.length && patch.interactions === undefined) ||
       derivedBackdrops.length !== 1 || patch.sourceScenery.id !== derivedBackdrops[0].id || typeof patch.sourceScenery.art !== "string"))
     throw new Error("The scenery update does not match this image review. Review the image update again before applying.");
+  if (patch.sourceScenery?.artNote !== undefined && (typeof patch.sourceScenery.artNote !== "string" || patch.sourceScenery.artNote.length > 500 || !isSourceAlignedScenery({kind:"decoration",artNote:patch.sourceScenery.artNote})))
+    throw new Error("Keep valid source-background preparation details with this artwork.");
   const changes = new Map<string, WorldEntityUpdate>();
   if (patch.updates !== undefined) {
     if (patch.origin !== "manual" || !Array.isArray(patch.updates) || patch.updates.length > world.entities.length)
@@ -146,6 +170,25 @@ export function applyWorldPatch(
       sourceLayers.set(entity.id, layer);
     }
   }
+  const refinements = new Map<string, NonNullable<WorldPatch["sourceRefinements"]>[number]>();
+  if (patch.sourceRefinements !== undefined) {
+    if (patch.origin !== "manual" || !Array.isArray(patch.sourceRefinements) || !patch.sourceRefinements.length ||
+        patch.sourceRefinements.length > 24 || !patch.sourceScenery || patch.sourceImage !== undefined ||
+        patch.additions.length || patch.updates?.length || patch.sourceLayers !== undefined || patch.bounds !== undefined ||
+        patch.goalRules !== undefined || patch.gameplay !== undefined || patch.interactions !== undefined)
+      throw new Error("Apply an outline with its prepared background, separately from other world changes.");
+    const sameBox = (a: WorldEntity["artSource"], b: WorldEntity["artSource"]) => Boolean(a && b &&
+      Object.keys(a).length === 4 && (["x", "y", "width", "height"] as const).every(key => a[key] === b[key]));
+    for (const refinement of patch.sourceRefinements) {
+      const original = world.entities.find(entity => entity.id === refinement?.id);
+      if (!original?.art || !original.artSource || isSourceBackdrop(original) || refinements.has(original.id) ||
+          Object.keys(refinement).some(key => !["id", "art", "artSource", "artMethod", "artNote", "sourceOutline"].includes(key)) ||
+          typeof refinement.art !== "string" || refinement.artMethod !== "outline" || !refinement.sourceOutline ||
+          !sameBox(refinement.artSource, original.artSource) || !sameBox(refinement.sourceOutline.sourceBox, original.artSource))
+        throw new Error("Refine the existing object's outline without changing its source selection or placement.");
+      refinements.set(original.id, refinement);
+    }
+  }
   if (patch.additions.some((e) => e.kind === "player"))
     throw new Error(
       "Your character stays with this world. Add a path or another possibility instead.",
@@ -170,11 +213,12 @@ export function applyWorldPatch(
     entities: [
       ...structuredClone(world.entities).map(entity => {
         const update = changes.get(entity.id);
-        const changed = update ? { ...entity, ...structuredClone(update),
+        let changed = update ? { ...entity, ...structuredClone(update),
           ...(sourceLayerForEdit(world, entity, update) ? { sourceLayer: sourceLayerForEdit(world, entity, update) } : {}),
           ...(sourceLayers.get(entity.id) ? structuredClone(sourceLayers.get(entity.id)) : {}),
           ...(Object.hasOwn(update, "targetId") ? { targetId: update.targetId || undefined } : {}) } : entity;
-        if (patch.sourceScenery?.id === entity.id) return { ...changed, art: patch.sourceScenery.art };
+        if (refinements.has(entity.id)) changed = { ...changed, ...structuredClone(refinements.get(entity.id)!) };
+        if (patch.sourceScenery?.id === entity.id) return { ...changed, art: patch.sourceScenery.art, ...(patch.sourceScenery.artNote !== undefined ? {artNote:patch.sourceScenery.artNote} : {}) };
         return patch.sourceImage && entity.artNote === "Full original image used as the world backdrop; generated gameplay is separate."
           ? { ...changed, art: patch.sourceImage } : changed;
       }),
@@ -185,7 +229,7 @@ export function applyWorldPatch(
     const issue = setupFeedback(next).errors[0];
     if (issue) throw new Error(issue);
   }
-  const progress = retainPlayState(next, structuredClone(state));
+  const progress = retainRevisionPlayState(next, state, world);
   validateInteractionFeasibility(next, progress);
   safePlayerPosition(next, progress, world, state);
   return {
@@ -214,7 +258,7 @@ export function undoWorldPatch(
     ...structuredClone(checkpoint.before),
     revision: world.revision + 1,
   });
-  const progress = retainPlayState(previous, structuredClone(state));
+  const progress = retainRevisionPlayState(previous, state, world);
   validateInteractionFeasibility(previous, progress);
   safePlayerPosition(previous, progress, world, state);
   return { world: previous, state: progress };

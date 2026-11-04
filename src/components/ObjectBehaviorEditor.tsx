@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { validateInteractions, type InteractionAction, type InteractionPlan } from "../../shared/interactions";
 import type { GoalRules, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop } from "../../shared/source-scenery";
 import { movementMode } from "../../shared/world";
 import "./object-behavior-editor.css";
+import {withActionCosts, type ActionCosts} from "../lib/action-cost-authoring";
 
 interface AbilityDraft {
   targetId: string; behavior: string; label: string; resourceType: string;
   amount: number; supply: number; capacity: number; useInPlace?: boolean;
-  destination?: {x:number;y:number}; prerequisites: string[]; resourcePrerequisites?: string[]; alternativeTo?: string; dirty: boolean;
+  costs?: ActionCosts; destination?: {x:number;y:number}; prerequisites: string[]; resourcePrerequisites?: string[]; alternativeTo?: string; dirty: boolean;
 }
 const abilityDrafts = new Map<string, AbilityDraft>();
 export function clearObjectAbilityDrafts(worldId: string, revision: number) {
@@ -51,17 +52,26 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   const [prerequisites, setPrerequisites] = useState<string[]>(draft?.prerequisites ?? []);
   const [resourcePrerequisites, setResourcePrerequisites] = useState<string[]>(draft?.resourcePrerequisites ?? []);
   const [alternativeTo, setAlternativeTo] = useState(draft?.alternativeTo ?? "");
+  const [costs, setCosts] = useState<ActionCosts>(draft?.costs ?? []);
   const originalResource = plan?.objects.find(object => object.entityId === item.id)?.resource?.type ?? "energy";
-  const dirty = Boolean((!plan?.actions.some(action => action.toolId === item.id) && useInPlace !== initialUseInPlace) || alternativeTo || targetId || label.trim() || destination || prerequisites.length || resourcePrerequisites.length || behavior !== defaultBehavior || resourceType !== originalResource || amount !== 1 || supply !== 1 || capacity !== 1);
+  const dirty = Boolean((!plan?.actions.some(action => action.toolId === item.id) && useInPlace !== initialUseInPlace) || costs.length || alternativeTo || targetId || label.trim() || destination || prerequisites.length || resourcePrerequisites.length || behavior !== defaultBehavior || resourceType !== originalResource || amount !== 1 || supply !== 1 || capacity !== 1);
   useEffect(() => {
-    abilityDrafts.set(cacheKey, {targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, useInPlace, dirty});
+    abilityDrafts.set(cacheKey, {targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, costs, useInPlace, dirty});
     const prefix = `${world.id}:${world.revision}:`;
     onDraftChange?.([...abilityDrafts].some(([key, value]) => key.startsWith(prefix) && value.dirty));
-  }, [cacheKey, targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, useInPlace, dirty, onDraftChange, world.id, world.revision]);
+  }, [cacheKey, targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, costs, useInPlace, dirty, onDraftChange, world.id, world.revision]);
   const operates = behavior.startsWith("operate-");
   const effectBehavior = operates ? behavior.slice(8) : behavior;
   const movesObject = effectBehavior === "move" || effectBehavior === "attach-move";
   const [error, setError] = useState("");
+  const newAbilityForm = useRef<HTMLDetailsElement>(null);
+  function cancelAbilityDraft() {
+    onCancelDestination?.();
+    setTargetId(""); setBehavior(defaultBehavior); setLabel(""); setResourceType(originalResource);
+    setUseInPlace(initialUseInPlace); setCosts([]); setAmount(1); setSupply(1); setCapacity(1);
+    setPrerequisites([]); setResourcePrerequisites([]); setAlternativeTo(""); setDestination(undefined); setError("");
+    requestAnimationFrame(() => newAbilityForm.current?.querySelector("summary")?.focus());
+  }
   const sourceResource = plan?.objects.find(object => object.entityId === item.id)?.resource;
   const targetResource = plan?.objects.find(object => object.entityId === targetId)?.resource;
   const actions = plan?.actions.filter(a => a.toolId === item.id) ?? [];
@@ -122,7 +132,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     }
     if (!next.objects.some(o => o.entityId === source.entityId)) next.objects.push(source);
     if (!next.objects.some(o => o.entityId === target.entityId)) next.objects.push(target);
-    const base = { id: `action-${crypto.randomUUID()}`, label: label.trim(), toolId: item.id, targetId: operates ? item.id : targetId, ...(prerequisites.length ? {requires: prerequisites.filter(id => next.actions.some(action => action.id === id))} : {}), ...(resourcePrerequisites.length ? {requiresResourceIds:resourcePrerequisites.filter(id=>next.objects.some(object=>object.entityId===id && object.resource))} : {}) };
+    const base = { ...(behavior !== "transfer" && costs.length ? {costs: structuredClone(costs)} : {}), id: `action-${crypto.randomUUID()}`, label: label.trim(), toolId: item.id, targetId: operates ? item.id : targetId, ...(prerequisites.length ? {requires: prerequisites.filter(id => next.actions.some(action => action.id === id))} : {}), ...(resourcePrerequisites.length ? {requiresResourceIds:resourcePrerequisites.filter(id=>next.objects.some(object=>object.entityId===id && object.resource))} : {}) };
     const action: InteractionAction = behavior === "transfer" ? { ...base, kind: "transfer", amount } :
       behavior === "place" ? { ...base, kind: "place", effects: [{kind: "moveObject", entityId: item.id, ...placement, durationMs: 900}] } :
       movesObject ? { ...base, kind: operates ? "operate" : behavior === "attach-move" ? "attach" : "use", effects: [{ kind: "moveObject", entityId: targetId, x: destination!.x, y: destination!.y, durationMs: 1600 }] } :
@@ -171,7 +181,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     setAlternativeTo("");
     setTargetId(""); setBehavior(mode !== "discover" && (!canCarry || hasOperation || operates) ? "" : "transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
     setUseInPlace(Boolean(source.usableInPlace));
-    setAmount(1); setSupply(1); setCapacity(1); setPrerequisites([]); setResourcePrerequisites([]); setDestination(undefined); setError("");
+    setCosts([]); setAmount(1); setSupply(1); setCapacity(1); setPrerequisites([]); setResourcePrerequisites([]); setDestination(undefined); setError("");
   }
   function removeAction(id: string) {
     const choice = plan?.choiceGroups?.find(group => group.actionIds.includes(id));
@@ -190,9 +200,14 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     }
     const used = new Set([
       ...requiredResources,
-      ...remaining.flatMap(a => [a.toolId, a.targetId, ...(a.requiresResourceIds ?? []), ...(a.effects ?? []).flatMap(effect => "entityId" in effect ? [effect.entityId] : [])]),
+      ...remaining.flatMap(a => [a.toolId, a.targetId, ...(a.requiresResourceIds ?? []), ...(a.costs ?? []).map(cost => cost.entityId), ...(a.effects ?? []).flatMap(effect => "entityId" in effect ? [effect.entityId] : [])]),
     ]);
     onChange({ ...plan!, actions: remaining, objects: remainingObjects.filter(o => used.has(o.entityId)) });
+  }
+  function changeCosts(actionId: string, costs: ActionCosts) {
+    if (!plan) return;
+    try { const next = withActionCosts(world, plan, actionId, costs); setError(""); onChange(next); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "This resource cost could not be applied."); }
   }
   function changeSourceHandling(stationary: boolean) {
     if (!plan) return;
@@ -217,7 +232,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   }
   return <details className="object-purpose" open={actions.length > 0 || dirty || undefined}>
     <summary>Give it a purpose</summary>
-    {actions.length > 0 && <ul>{actions.map(a => <li key={a.id}><strong>{a.label}</strong><span>{world.entities.find(e => e.id === a.targetId)?.label ?? "Object"}</span><button className="text-button" aria-label={`Remove ability ${a.label}`} onClick={() => removeAction(a.id)}>Remove</button></li>)}</ul>}
+    {actions.length > 0 && <ul>{actions.map(a => <li key={a.id}><strong>{a.label}</strong><span>{world.entities.find(e => e.id === a.targetId)?.label ?? "Object"}</span>{a.kind !== "transfer" && <ResourceCostFields world={world} plan={plan} costs={a.costs ?? []} onChange={costs => changeCosts(a.id, costs)} context={a.label} inAbilityList />}<button className="text-button" aria-label={`Remove ability ${a.label}`} onClick={() => removeAction(a.id)}>Remove</button></li>)}</ul>}
     {plan?.objects.some(object => object.entityId === item.id) && <details className="purpose-sequence">
       <summary>Arrangement</summary>
       {mode === "discover" && existingSource?.resource && actions.some(action => action.kind === "transfer") && <label>Source handling
@@ -231,7 +246,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
         <option value="surface">Under other objects</option>
       </select></label>
     </details>}
-    <details className="purpose-new" open={!actions.length}><summary>{actions.length ? "Add another ability" : "New ability"}</summary>
+    <details ref={newAbilityForm} className="purpose-new" open={!actions.length}><summary>{actions.length ? "Add another ability" : "New ability"}</summary>
     <label>What can it do?
       <select aria-label="Object ability" value={behavior} onChange={e => { onCancelDestination?.(); setBehavior(e.target.value); setTargetId(""); setDestination(undefined); setError(""); }}>
         {!defaultBehavior && <option value="">Choose an ability…</option>}
@@ -273,6 +288,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       <label>Starting supply<input aria-label="Starting supply" type="number" min="1" max="10000" disabled={Boolean(sourceResource)} value={sourceResource?.initial ?? supply} onChange={e => setSupply(Number(e.target.value))} /></label>
       <label>Target capacity<input aria-label="Target capacity" type="number" min="1" max="10000" disabled={Boolean(targetResource)} value={targetResource?.capacity ?? capacity} onChange={e => setCapacity(Number(e.target.value))} /></label>
     </div>}
+    {behavior && behavior !== "transfer" && <ResourceCostFields world={world} plan={plan} costs={costs} onChange={setCosts} context="New ability" />}
     <label>Action name<input aria-label="Action name" placeholder="What should the player do?" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} /></label>
     {Boolean(plan?.actions.length || plan?.objects.some(object=>object.resource)) && <details className="purpose-sequence"><summary>Requirements</summary>
       {Boolean(plan?.actions.length) && <label style={{display: "grid"}}>Alternative to
@@ -297,9 +313,60 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       </label>)}
     </details>}
     <button className="secondary-button" onClick={addAction}>Add ability</button>
+    {dirty && <button className="text-button" onClick={cancelAbilityDraft}>Cancel ability draft</button>}
     </details>
     {error && <p role="alert">{error}</p>}
   </details>;
+}
+
+/** Spending is optional and uses only resources already authored in this world. */
+function ResourceCostFields({world, plan, costs, onChange, context, inAbilityList}: {
+  world: WorldDefinition; plan?: InteractionPlan; costs: ActionCosts;
+  onChange: (costs: ActionCosts) => void; context: string; inAbilityList?: boolean;
+}) {
+  const resources = plan?.objects.filter(object => object.resource) ?? [];
+  if (!resources.length) return null;
+  return <details style={{marginTop: 12, marginRight: inAbilityList ? -55 : 0}}>
+    <summary>Resource costs{costs.length ? ` · ${costs.length}` : ""}</summary>
+    <div style={{marginTop: 8, fontSize: 12, color: "#667085"}}>Spent once when this ability succeeds.</div>
+    {resources.map(object => {
+      const cost = costs.find(cost => cost.entityId === object.entityId);
+      const name = world.entities.find(entity => entity.id === object.entityId)?.label || "Object";
+      return <div key={object.entityId} style={{display: "grid", gridTemplateColumns: cost ? "minmax(0, 1fr) 70px" : "minmax(0, 1fr)", gap: 10, alignItems: "end"}}>
+        <label style={{display: "flex", flexDirection: "row", alignItems: "center", gap: 8}}>
+          <input type="checkbox" aria-label={`${context}: spend from ${name}`} checked={Boolean(cost)} disabled={!cost && costs.length >= 8}
+            style={{width: 16, height: 16, minHeight: 16, padding: 0, margin: 0, flexShrink: 0}}
+            onChange={event => onChange(event.target.checked ? [...costs, {entityId: object.entityId, amount: Math.min(1, object.resource!.capacity)}] : costs.filter(cost => cost.entityId !== object.entityId))} />
+          <span>{name} · {object.resource!.type}</span>
+        </label>
+        {cost && <CostAmountField amount={cost.amount} capacity={object.resource!.capacity} label={`${context}: amount spent from ${name}`}
+          onChange={amount => onChange(costs.map(value => value.entityId === object.entityId ? {...value, amount} : value))} />}
+      </div>;
+    })}
+  </details>;
+}
+
+/** Keep incomplete numeric keystrokes local; never substitute a different amount. */
+function CostAmountField({amount, capacity, label, onChange}: {
+  amount: number; capacity: number; label: string; onChange: (amount: number) => void;
+}) {
+  const [text, setText] = useState(String(amount));
+  const [notice, setNotice] = useState("");
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setText(String(amount)); }, [amount]);
+  const valid = (value: string) => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) <= capacity;
+  return <><label>Amount<input type="number" step="any" min="0" max={capacity} aria-label={label} value={text}
+    onFocus={() => { focused.current = true; }}
+    onChange={event => {
+      const value = event.target.value;
+      setText(value); setNotice("");
+      if (valid(value)) onChange(Number(value));
+    }}
+    onBlur={() => {
+      focused.current = false;
+      if (!valid(text)) setNotice(`Kept ${amount}. Enter an amount above 0, up to ${capacity}.`);
+      setText(String(amount));
+    }} /></label>{notice && <span role="status" style={{gridColumn: "1 / -1", fontSize: 12, lineHeight: 1.4}}>{notice}</span>}</>;
 }
 
 export interface ChoiceDraft {

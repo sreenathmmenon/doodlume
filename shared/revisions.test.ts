@@ -313,3 +313,52 @@ test("unchanged terrain overlap in saved progress does not block a remote edit o
   assert.throws(() => applyWorldPatch(world, progress, { ...patch,
     additions: [{ id: "new-overlap", kind: "bridge", x: 175, y: 615, width: 80, height: 50 }] }), /cover your character/);
 });
+
+
+test("source replacement cannot retain an outline confirmed against the previous image", () => {
+  const {world,patch}=setup();
+  const entity=world.entities.find(item=>item.kind==="coin")!;
+  const art="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+  const sourceBox={x:100,y:100,width:100,height:100};
+  Object.assign(entity,{art,artMethod:"outline",artSource:sourceBox,sourceOutline:{sourceFingerprint:"a".repeat(64),sourceBox:{...sourceBox}}});
+  const before=structuredClone(world);
+  assert.throws(()=>applyWorldPatch(world,progress,{...patch,sourceImage:art}),/creator-confirmed outlines.*new source review/);
+  assert.deepEqual(world,before,"Rejected replacement leaves the confirmed source intact");
+  const sameSource=applyWorldPatch(world,progress,{...patch,sourceImage:world.sourceImage});
+  assert.deepEqual(sameSource.world.entities.find(item=>item.id===entity.id)!.sourceOutline,entity.sourceOutline);
+});
+
+test("outline refinement preserves earned resources, executed moves and paired undo; rejects broader or stale patches", async () => {
+  const { SOURCE_SCENERY_NOTE } = await import("./source-scenery.js");
+  const { interactionState, interactionEffects } = await import("./interactions.js");
+  const base = freshExample(EXAMPLES[0].id);
+  const art = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+  const repaired = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZuoAAAAASUVORK5CYII=";
+  const sourceBox = {x:100,y:100,width:100,height:100};
+  const world = validateWorld({...base, entities:[...base.entities,
+    {id:"source-scenery",kind:"decoration",x:0,y:0,width:base.width,height:base.height,art,artNote:SOURCE_SCENERY_NOTE},
+    {id:"boat",kind:"decoration",x:100,y:100,width:100,height:100,art,artSource:sourceBox,sourceLayer:{x:100,y:100,width:100,height:100}},
+    {id:"battery",kind:"decoration",x:300,y:100,width:40,height:40}],
+    interactions:{version:1,objects:[{entityId:"boat"},{entityId:"battery",resource:{type:"power",capacity:5,initial:5}}],
+      actions:[{id:"sail",kind:"operate",label:"Sail",toolId:"boat",targetId:"boat",costs:[{entityId:"battery",amount:2}],effects:[{kind:"moveObject",entityId:"boat",x:500,y:100}]}]}});
+  const result = reduceInteraction(world,emptyPlayState(),{type:"perform",actionId:"sail"});
+  assert.equal(result.ok,true,result.reason);
+  const patch:WorldPatch = {id:"refine",worldId:world.id,baseRevision:world.revision,origin:"manual",additions:[],
+    sourceScenery:{id:"source-scenery",art:repaired},sourceRefinements:[{id:"boat",art:repaired,artSource:sourceBox,artMethod:"outline",
+      sourceOutline:{sourceFingerprint:"a".repeat(64),sourceBox,repairMargin:4}}]};
+  const next = applyWorldPatch(world,result.state,patch);
+  assert.deepEqual(interactionState(next.world,next.state),interactionState(world,result.state));
+  assert.deepEqual(interactionEffects(next.world,next.state),interactionEffects(world,result.state));
+  assert.deepEqual(next.world.interactions,world.interactions);
+  assert.equal(next.world.entities.find(item=>item.id==="boat")!.x,100,"Home geometry must not replace the earned move");
+  assert.equal(next.world.entities.find(item=>item.id==="source-scenery")!.art,repaired);
+  const undone = undoWorldPatch(next.world,next.state,next.checkpoint);
+  assert.deepEqual(undone.world.entities,world.entities);
+  assert.deepEqual(interactionState(undone.world,undone.state),interactionState(world,result.state));
+  for (const invalid of [
+    {...patch,sourceScenery:undefined}, {...patch,origin:"meta"}, {...patch,baseRevision:0},
+    {...patch,goalRules:world.goalRules}, {...patch,sourceRefinements:[patch.sourceRefinements![0],patch.sourceRefinements![0]]},
+    {...patch,sourceRefinements:[{...patch.sourceRefinements![0],x:200}]},
+    {...patch,sourceRefinements:[{...patch.sourceRefinements![0],artSource:{...sourceBox,x:101}}]},
+  ]) assert.throws(()=>applyWorldPatch(world,result.state,invalid as WorldPatch));
+});

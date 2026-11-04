@@ -17,7 +17,9 @@ export function ArtworkReview({ entities }: { entities: WorldEntity[] }) {
             </div>
             <strong>{e.label || e.kind}</strong>
             <span>
-              {e.artMethod === "sam"
+              {e.artMethod === "outline"
+                ? "Outline confirmed by you"
+                : e.artMethod === "sam"
                 ? "Precise cutout"
                 : e.artMethod === "crop"
                   ? e.artShape === "ellipse"

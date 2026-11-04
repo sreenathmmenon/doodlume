@@ -14,9 +14,13 @@ import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
 import { loadLocalProviderKeys } from "./credentials.js";
 import { segmentationConnection, segmentationConfigured } from "./segmentation.js";
+import { applyConfirmedSourceOutlines } from "./source-outline.js";
+import { normalizeDrawing } from "./images.js";
+import { validateWorld } from "../shared/world.js";
 import { prepareSourceInteractionReview } from "./creative-adaptation.js";
 import { closeLocalSegmentationWorkers, localSegmentationConfig } from "./local-segmentation.js";
 import { installStudioFallback } from "./static-routing.js";
+import { installSourceRefinement } from "./source-refinement.js";
 import { installSourceScenery } from "./source-scenery-route.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,6 +71,7 @@ app.addHook("onRequest", async (request, reply) => {
     return reply.code(403).send({ error: "Use the local studio address." });
 });
 installSourceScenery(app);
+installSourceRefinement(app);
 app.get("/api/status", async () => ({
   configured: Boolean(connection.apiKey),
   provider: connection.provider,
@@ -167,6 +172,20 @@ for (const action of ["interpret", "amend"] as const)
       inFlight = false;
     }
   });
+app.post<{Body:{world?:unknown;outlines?:unknown}}>("/api/source-outline",async(request,reply)=>{
+  if(inFlight)return reply.code(429).send({error:"Another image is being prepared. Your outline is still here."});
+  inFlight=true;
+  try {
+    const world=validateWorld(request.body?.world,{allowIncomplete:true});
+    if(world.source!=="meta")throw new InterpretationError("Choose an original source review before confirming an outline.",400);
+    const source=await normalizeDrawing(world.sourceImage);
+    return {world:await applyConfirmedSourceOutlines(source,world,request.body?.outlines)};
+  } catch(error) {
+    const response=interpretationErrorResponse(error);
+    if(response)return reply.code(response.status).send(response.body);
+    return reply.code(422).send({error:"The outline could not be confirmed. Your original image and selection are still here."});
+  } finally {inFlight=false;}
+});
 app.post<{Body:{world?:unknown}}>("/api/source-review",async(request,reply)=>{
   if(inFlight)return reply.code(429).send({error:"Another image is being prepared. Your review is still here."});
   const local=localSegmentationConfig(process.env);

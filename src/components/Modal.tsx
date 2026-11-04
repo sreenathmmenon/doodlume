@@ -79,6 +79,7 @@ export function Modal({
       }}
       onCancel={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       }}
       onClick={(e) => {

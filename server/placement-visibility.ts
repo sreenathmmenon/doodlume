@@ -21,6 +21,7 @@ export async function validateGeneratedPlacementVisibility(world: WorldDefinitio
     const action=plan.actions.find(candidate=>candidate.id===id); if(!action)return;
     protectedIds.add(action.toolId); protectedIds.add(action.targetId);
     for(const id of action.requiresResourceIds??[])protectedIds.add(id);
+    for(const cost of action.costs??[])protectedIds.add(cost.entityId);
     for(const prior of action.requires??[])if(!required.has(prior)){required.add(prior);include(prior);}
   };
   for(const id of [...required])include(id);

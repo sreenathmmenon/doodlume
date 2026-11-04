@@ -81,8 +81,13 @@ export async function refinePlatformSelections(source: Buffer, objects: SourceSe
     const seed = agree ? {...actor, x:Math.min(actor.x,corrected.x), y:Math.min(actor.y,corrected.y),
       width:Math.max(actor.x+actor.width,corrected.x+corrected.width)-Math.min(actor.x,corrected.x),
       height:Math.max(actor.y+actor.height,corrected.y+corrected.height)-Math.min(actor.y,corrected.y)} : actor;
-    try { refined[index] = await groundWholeActor(source, actor, segmentation.local, signal, refined, seed); }
-    catch { signal.throwIfAborted(); }
+    const uncertain = () => ({...corrected,groundingIssue:"The complete character outline could not be verified. Confirm its whole outline before preparing this scene."});
+    try {
+      const recovered=await groundWholeActor(source, actor, segmentation.local, signal, refined, seed);
+      // The extractor returns its input when no safe mask exists. That fallback
+      // must not overwrite the later model correction or become a partial crop.
+      refined[index]=recovered.artwork ? recovered : uncertain();
+    } catch { signal.throwIfAborted(); refined[index]=uncertain(); }
   }
   return refined;
 }
