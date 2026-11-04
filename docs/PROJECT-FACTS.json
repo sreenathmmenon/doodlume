@@ -21,7 +21,8 @@
     "final_demo_video_url": null,
     "final_demo_video_status": "Replacement film pending final assembly, owner-voice narration, full playback review and publication.",
     "positioning": "An indie creation studio for turning personal pictures into playable, editable worlds.",
-    "value_proposition": "Start with your own visual idea, test it by playing, then author new actions and goals in the same persistent world."
+    "value_proposition": "Start with your own visual idea, test it by playing, then author new actions and goals in the same persistent world.",
+    "product_story": "BLOG.md"
   },
   "pipeline": [
     {
@@ -215,6 +216,7 @@
   ],
   "evidence_documents": [
     "README.md",
+    "BLOG.md",
     "docs/JUDGING-GUIDE.md",
     "docs/REVIEW-EVIDENCE.md",
     "docs/LIVE-VALIDATION.md",

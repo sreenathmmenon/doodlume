@@ -6,7 +6,7 @@
 
 **Turn your drawings and photographs into playable worlds. Then invent what happens next.**
 
-[Open Doodlume](https://doodlume-production-9df2.up.railway.app/) · [Create a world](https://doodlume-production-9df2.up.railway.app/#studio) · [Try the spring game](https://doodlume-production-9df2.up.railway.app/#studio?example=rooftop-springs)
+[Read the story](BLOG.md) · [Open Doodlume](https://doodlume-production-9df2.up.railway.app/) · [Create a world](https://doodlume-production-9df2.up.railway.app/#studio) · [Try the spring game](https://doodlume-production-9df2.up.railway.app/#studio?example=rooftop-springs)
 
 </div>
 
