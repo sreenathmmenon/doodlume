@@ -10,6 +10,7 @@
   --selection:var(--primary); --selection-muted:#945c50; --accent-ink:#fff;
   --paper:#fff; --workspace:#f6f7f9; --field:#f2f4f7; --border:#d9dde4;
   --surface-hover:#fbece7; --focus:#264eb4;
+  --read:#1f3bff; --rule:#f7f02a;
   --danger:#9d1845; --danger-surface:#fff0f4;
   --disabled-ink:#656d79; --disabled-surface:#e8ebef;
   --stage:#202733; --stage-border:#434d5e; --stage-hover:#354252;

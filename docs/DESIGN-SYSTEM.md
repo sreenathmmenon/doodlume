@@ -23,10 +23,14 @@ The selected direction uses cool white, dark ink and a restrained vermilion acti
 | Keyboard focus | `--focus` / #264eb4 | Separate from selection and error |
 | Selection | `--selection` + border/check/label | Never color alone |
 | Error | `--danger` / #9d1845 | Pair with an explanatory message |
+| What Doodlume read | `--read` / #1f3bff | Only inside the lens and on tags that name what the model found in a picture |
+| A rule you decide | `--rule` / #f7f02a | Only as a highlighter behind an editable verb |
 | UI face | Manrope | Labels, body, controls and studio titles |
 | Editorial face | Fraunces | Selected display headings only |
 
 Spacing steps are 4, 8, 12, 16, 24, 32, 48 and 64px. Standard control radius is 8px; panels 16px; hero frame 20px. Play is intentionally a white pill over artwork, visually distinct from the filled creation action. Composite frame corners and tiny icon details can differ for their geometry. Desktop action targets are at least 36px; primary actions 44–48px. Normal interface body text is 13–16px. Smaller text is restricted to supporting provenance and ordinal labels.
+
+Colour carries meaning on Home and should keep it in the studio: ink is what the person drew, `--read` is what Doodlume saw, `--rule` is a verb the person decides, `--primary` marks goals and progress. Each appears in one kind of place only; none is decoration.
 
 ## Interaction and content rules
 
