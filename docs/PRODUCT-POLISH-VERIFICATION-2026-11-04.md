@@ -35,3 +35,11 @@ Automatic selection of rich activities on unfamiliar images remains inconsistent
 Some model wording can still overstate the resulting mechanic. Provider stalls remain possible. Moving actor extraction/background repair is distinct from fixed photo resource play. Watering changes authored game quantities, not photographed water, plant growth or fluid physics. The four examples demonstrate different authored/source-supported interactions; they do not establish universal automatic input quality.
 
 Local browser modal-background raster sometimes omits the paused WebGL artwork while a native dialog is open. Canvas size/readiness remain correct and the artwork returns on closing without Play. Disabling backdrop blur did not change this. No speculative renderer restart was added; the review preview collapse is a separate verified fix.
+
+## Hosted and final checks
+
+Deployment `7cea4658-54ca-4d42-89d2-260691523f03` reached SUCCESS with source `119f8d8`. Hosted health/readiness/homepage/photo example passed; credential/source URLs remain inaccessible and unrelated-origin API access was rejected. The existing completed watering game reopened on the new release.
+
+A fresh hosted upload of a different bathroom photo produced a faucet→basin water-quantity game in46.910s without review, completed through normal controls, saved and fully reloaded with completion intact. This verifies a second source-supported material relationship; it does not establish richer automatic gameplay. Locally, the post-contract abstract drawing was also imported normally with empty progress, completed by its actual three clues and source-bound final center, saved and reloaded. Its ambitious “calm the vortex” wording remains an identified mismatch with its modest pointing mechanics.
+
+A final homepage switching check caught an old preview image remaining visible briefly under the newly selected scene's caption while the new image loaded. The image element is now keyed by scene/source view, preventing that stale image identity. This is a presentation fix; example mechanics and source files are unchanged.

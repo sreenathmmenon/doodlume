@@ -106,3 +106,9 @@ The fresh robot generation that requested outline review was replayed against bo
 
 
 Final hosted result on deployment `31b99731-176c-41e9-a9a1-ff4dc47f722b`: the unchanged neutral request on the real watering photo returned **200 in 51.866 seconds**, with no outline review. Its generated can-to-pot transfer was completed through the normal source/target/action controls, saved after the save finished, and fully reloaded with completion intact. The action changed game water quantities from can 3/pot 0 to can 0/pot 3; it did not move or repaint the photo. The untouched generated world was imported with empty progress; no response or progress values were injected. This establishes one fresh hosted source-grounded interaction, not general deep gameplay or universal photo reliability.
+
+## November 4 product experience release
+
+Source `119f8d8` deployed to the same correct-account service as deployment `7cea4658-54ca-4d42-89d2-260691523f03`, which reached **SUCCESS**. No runtime secret or resource-limit change. Health, readiness, homepage and the new photo example returned200; environment/source paths returned404; an unrelated-origin API request returned403. The existing saved Patio Succulent Watering completion survived a full hosted reload.
+
+Fresh hosted verification uploaded a different bathroom photograph through the normal form with the intent “Use the faucet to fill the bathtub. Keep the photo recognizable and finish when the tub is full.” `/api/interpret` returned200 in **46.910 seconds**, without outline review. The generated fixed-faucet→basin action changed authored game-water quantities, completed normally, saved after the save finished, and retained completion after full reload. No generated response or game progress was injected. It does not animate photographed water, fill real pixels or bathe the dog. See `PRODUCT-POLISH-VERIFICATION-2026-11-04.md` for the broader local verification and retained generation failures.

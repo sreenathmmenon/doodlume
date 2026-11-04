@@ -154,7 +154,7 @@ export default function Home({onContinueInStudio}:{onContinueInStudio?:(entry:St
           }}>
             {world && <div className="home-game-layer" style={{visibility:showSource ? "hidden" : "visible"}} aria-hidden={showSource} inert={showSource}><Suspense fallback={<div className="home-stage-loading">Opening your world…</div>}><LiveWorld ref={game} world={world} initial={initial} controlsHost={controlsHost} playing={playing && !showSource && !drawing} muted run={run} overview={false}
               onUpdate={(state, metrics) => { const finished=metrics.completed && !metrics.exploring; setComplete(finished); setInventionUsed(Boolean(inventionAction && state.interactions?.completed.includes(inventionAction.id))); if (finished) setPlaying(false); setProgress(metrics.requiredTotal ? `${metrics.requiredDone}/${metrics.requiredTotal} done` : ""); }} onMoment={setMoment} onError={message => { setError(message); setPlaying(false); }}/></Suspense></div>}
-            {(!world || showSource) && <img className="home-source" src={showSource ? scene.image : `/art/showcase/${scene.id}-preview.webp`} alt={scene.alt} fetchPriority="high" width="1536" height="1024"/>}
+            {(!world || showSource) && <img key={`${scene.id}:${showSource ? "source" : "preview"}`} className="home-source" src={showSource ? scene.image : `/art/showcase/${scene.id}-preview.webp`} alt={scene.alt} fetchPriority="high" width="1536" height="1024"/>}
             {!playing && !complete && !showSource && !error && <div className={`home-play-prompt ${world ? "home-play-paused" : ""}`}>
               <button onClick={play} disabled={loading}>
                 <Play size={18} fill="currentColor"/>{loading ? "Opening…" : world ? "Continue playing" : "Play this example"}
