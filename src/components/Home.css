@@ -56,7 +56,7 @@
 .home-stage-footer button { display:grid; place-items:center; min-width:36px; min-height:36px; padding:7px; border-radius:var(--radius-control); }
 .home-stage-footer button:hover { background:var(--field); color:var(--ink); }
 .home-stage-footer .home-original-toggle { display:inline-flex; gap:7px; font-size:13px; font-weight:650; white-space:nowrap; }
-.home-example-tools { grid-area:tools; display:flex; align-items:center; gap:12px; margin-top:12px; }
+.home-example-tools { grid-area:tools; display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:12px; }
 .home-example-tools[hidden],.home-object-controls[hidden] { display:none; }
 .home-object-controls { position:relative; display:flex; justify-content:flex-end; min-height:0; margin-left:auto; }
 .home-object-controls .object-keyboard-play { position:relative; }
@@ -66,6 +66,9 @@
 .home-invent-button:hover { background:var(--primary-hover); }
 .home-keep-creating { display:inline-flex; align-items:center; gap:7px; min-height:40px; padding:8px 12px; border-radius:100px; font-size:13px; font-weight:650; }
 .home-keep-creating:hover { background:var(--paper); color:var(--primary); }
+.home-invent-button,.home-keep-creating { flex-shrink:0; white-space:nowrap; }
+.home-live-stage:has(.object-controls-open) > .goal-chip { max-width:calc(100% - 308px); }
+.home-live-stage > .goal-chip > span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .home-scene-picker { align-self:start; grid-area:picker; display:flex; flex-direction:column; gap:10px; }
 .home-scene-picker button { display:grid; position:relative; grid-template-columns:52px minmax(0,1fr) 12px; align-items:center; gap:10px; padding:10px; text-align:left; min-width:0; color:var(--muted); background:transparent; border:1px solid transparent; border-radius:12px; font-size:13.5px; line-height:1.35; }
 .home-scene-picker button[aria-pressed=true] { color:var(--ink); background:var(--paper); border-color:var(--ink); }
