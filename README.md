@@ -10,6 +10,8 @@
 
 </div>
 
+**Review the project:** [Problem, originality and working proof](docs/REVIEW-EVIDENCE.md) · [Rubric and hands-on route](docs/JUDGING-GUIDE.md) · [Structured facts (JSON)](docs/PROJECT-FACTS.json)
+
 A cat on a notebook page can become a character you control. A photograph can become a challenge built around the things in it. Draw a spring, give it an ability, and change how high your character can jump.
 
 Doodlume brings image understanding, original artwork and game creation into one experience. Start with a picture and an idea. Review the world it creates, play inside it, then keep shaping its objects, abilities and goals. You can create through drawing, photographs and an editor without writing game code.
@@ -17,6 +19,21 @@ Doodlume brings image understanding, original artwork and game creation into one
 [![Real Doodlume gameplay: a normal jump, picking up and fitting a drawn spring, a higher jump, and reaching the finish](docs/media/doodlume-spring-gameplay.gif)](https://doodlume-production-9df2.up.railway.app/#studio?example=rooftop-springs)
 
 *An uninterrupted excerpt from real product gameplay, converted to a looping GIF at normal speed. The rooftop source is an AI-generated rough drawing. The spring was drawn and given an ability in the studio.*
+
+## Why build Doodlume?
+
+An idea for a game often starts as a sketch, a familiar place or a story someone wants to bring to life. Turning that idea into objects, controls and rules is a separate creative task. Doodlume brings those steps together so a person can start with what they can draw or photograph, then shape the game through play.
+
+For an indie creator, the valuable part is control over what happens next. The first generated world is editable. Draw a tool, give it a purpose, connect objects through actions, change a goal and try the result. A small personal picture can become the start of a game that keeps developing.
+
+| Starting point | What the creator can do |
+| --- | --- |
+| A character and a place drawn on paper | Build an adventure, control the pictured character and add an ability that changes its movement. |
+| A photograph with recognizable objects | Create a discovery experience or a supported object-interaction challenge using the pictured details. |
+| An illustrated scene with a mission | Connect resources, prerequisites and object actions into a challenge through the editor. |
+| A world already in progress | Keep its identity, revise objects and finishing rules, undo changes, save and return. |
+
+The creative loop is **picture → idea → play → invention → play again**. Source-based artwork, editable consequences and persistent worlds give the creator something to develop beyond a single generated result.
 
 ## Create a world. Keep inventing inside it.
 
@@ -105,6 +122,10 @@ Doodlume addresses **Build for Your World**: it gives people a way to turn their
 | Demo | 25% | Real creation, a drawn ability changing gameplay, photo interaction and save/reopen. |
 
 The [reviewer guide](docs/JUDGING-GUIDE.md) maps the rubric to code and hands-on examples. The [submission package](docs/SUBMISSION-PACKAGE.md) contains the current project description, Meta usage, partner feedback and contribution notes. The final replacement film is being edited from real product recordings; its public link will be added when ready.
+
+## Where this can go next
+
+The next direction is richer game design from unfamiliar pictures: stronger object relationships, more expressive creator-authored abilities, and more varied missions with clearer feedback. The current engine and editing workflow provide the foundation. These are development goals, not additional capabilities being claimed in the demonstration.
 
 ## Run locally
 

@@ -4,6 +4,8 @@
 
 [Open the product](https://doodlume-production-9df2.up.railway.app/) · [Read the implementation overview](../README.md) · [Submission package](SUBMISSION-PACKAGE.md)
 
+For a claim-by-claim evidence map, see [claims and evidence](REVIEW-EVIDENCE.md). [Structured project facts](PROJECT-FACTS.json) provide the same project identities, models, service roles, capabilities and artifact paths as JSON.
+
 ## The problem and the contribution
 
 A person can picture a game before they know how to build one. Doodlume gives that person a way to begin with an image and an idea, turn recognizable artwork into play, and keep authoring the result. Objects, abilities, interactions and goals remain editable after creation.

@@ -1,0 +1,250 @@
+{
+  "schema_version": "1.0",
+  "path_convention": "Code and artifact paths are relative to the repository root.",
+  "project": {
+    "name": "Doodlume",
+    "tagline": "Your imagination, now playable.",
+    "summary": "Turn your drawings and photographs into playable worlds. Then invent what happens next.",
+    "problem_statement": "Build for Your World",
+    "problem": "People can imagine a game before they can program one. Creating interactive behavior from their own artwork requires tools and skills separate from drawing.",
+    "solution": "Image-and-intent interpretation, original-art extraction, validated gameplay and continued visual authoring in the same world.",
+    "intended_users": [
+      "People who want to turn drawings into playable experiences",
+      "Creators who want to make interactive challenges from photographs",
+      "People who want to author objects, abilities and game goals without writing game code"
+    ],
+    "impact_evidence": "Working source-to-play, ability-authoring and save/reopen demonstrations; user adoption and retention have not been measured.",
+    "live_url": "https://doodlume-production-9df2.up.railway.app/",
+    "repository_url": "https://github.com/sreenathmmenon/doodlume",
+    "repository_visibility": "PRIVATE",
+    "visibility_change_owner_managed": true,
+    "final_demo_video_url": null,
+    "final_demo_video_status": "Replacement film pending final assembly, owner-voice narration, full playback review and publication.",
+    "positioning": "An indie creation studio for turning personal pictures into playable, editable worlds.",
+    "value_proposition": "Start with your own visual idea, test it by playing, then author new actions and goals in the same persistent world."
+  },
+  "pipeline": [
+    {
+      "stage": "Interpret image and creator intent",
+      "technology": "Meta Muse Spark Open",
+      "model_id": "accounts/fireworks/models/muse-spark-open",
+      "inference_provider": "Fireworks AI",
+      "output": "Structured objects, actions, relationships and goals",
+      "implementation": [
+        "server/provider.ts",
+        "server/interpret.ts"
+      ]
+    },
+    {
+      "stage": "Separate source subjects",
+      "technology": "Meta SAM 2.1 tiny",
+      "execution": "Application-server local inference",
+      "output": "Masks retaining original image pixels with predicted alpha",
+      "implementation": [
+        "server/local-segmentation.ts",
+        "server/segmentation.ts",
+        "scripts/local-sam-worker.py"
+      ]
+    },
+    {
+      "stage": "Repair exposed background",
+      "technology": "LaMa",
+      "model_family": "Non-Meta",
+      "execution": "Application-server local inference",
+      "output": "Reconstructed artwork behind moving subjects",
+      "implementation": [
+        "server/source-background.ts"
+      ],
+      "notes": "Invoked where supported background reconstruction is required; not a claim that every object uses learned repair."
+    },
+    {
+      "stage": "Validate and compile world",
+      "technology": "Doodlume application code",
+      "output": "Validated world geometry, objects, interactions and completion requirements",
+      "implementation": [
+        "shared/world.ts",
+        "shared/interactions.ts",
+        "shared/revisions.ts"
+      ]
+    },
+    {
+      "stage": "Play and continue authoring",
+      "technology": "Phaser, React, TypeScript",
+      "output": "Interactive 2D game, editing, undo, saved state and portable backups",
+      "implementation": [
+        "src/game",
+        "src/components",
+        "src/lib/library.ts"
+      ]
+    }
+  ],
+  "services": [
+    {
+      "name": "Fireworks AI",
+      "role": "Active model inference API"
+    },
+    {
+      "name": "Railway",
+      "role": "Primary application hosting"
+    },
+    {
+      "name": "Modal",
+      "role": "Documented verified backup application deployment",
+      "evidence": "docs/LIVE-DEPLOYMENT.md"
+    },
+    {
+      "name": "Baseten",
+      "role": "Implemented alternative inference adapter",
+      "status": "Recorded access attempt returned HTTP 403; successful inference not claimed"
+    },
+    {
+      "name": "Direct Meta Model API",
+      "role": "Implemented alternative Muse Wonder/Muse Spark and SAM 3.1 paths",
+      "status": "Not claimed as active in the filmed Fireworks pipeline"
+    }
+  ],
+  "capabilities": {
+    "inputs": [
+      "drawing",
+      "illustration",
+      "photograph",
+      "in-studio drawing"
+    ],
+    "play_styles": [
+      "adventure",
+      "exploration",
+      "discovery"
+    ],
+    "creator_controls": [
+      "review original image",
+      "correct source selections",
+      "draw a new object",
+      "edit object placement",
+      "author an ability",
+      "preview an ability",
+      "edit completion requirements",
+      "undo",
+      "save and reopen",
+      "export and import portable backups"
+    ],
+    "gameplay_systems": [
+      "2D movement and jumping",
+      "object pickup and attachment",
+      "resource transfers",
+      "interaction prerequisites",
+      "clue-based discovery",
+      "completion conditions"
+    ],
+    "storage": "Browser IndexedDB; portable export/import"
+  },
+  "demonstrations": [
+    {
+      "name": "Drawn spring changes jumping",
+      "type": "Meta-generated drawing world with a creator-authored ability",
+      "live_url": "https://doodlume-production-9df2.up.railway.app/#studio?example=rooftop-springs",
+      "world_file": "public/art/showcase/rooftop-springs.json",
+      "proof_asset": "docs/media/doodlume-spring-gameplay.gif",
+      "observable_result": "Normal jump, spring pickup, attachment, higher jump and completion in one continuous normal-speed excerpt",
+      "source_provenance": "AI-generated rough rooftop drawing; new spring drawn in the studio"
+    },
+    {
+      "name": "Photograph object interaction",
+      "type": "Meta-generated game from a real photograph",
+      "live_url": "https://doodlume-production-9df2.up.railway.app/#studio?example=patio-care",
+      "world_file": "public/art/showcase/patio-care.json",
+      "observable_result": "Pictured can transfers a game water quantity into pictured pot and completes the goal",
+      "source_provenance": "Shixart1985 photograph, CC BY 2.0",
+      "credit_file": "public/art/showcase/README.md"
+    },
+    {
+      "name": "Connected rescue mission",
+      "type": "Authored example using the same game runtime",
+      "live_url": "https://doodlume-production-9df2.up.railway.app/#studio?example=rover",
+      "world_file": "public/art/showcase/rover.json",
+      "observable_result": "Allocate crystals, power beacon and rover, fit antenna and move rover",
+      "source_provenance": "AI-generated illustration with authored rules"
+    }
+  ],
+  "judging_criteria": [
+    {
+      "criterion": "Impact",
+      "weight_percent": 30,
+      "project_evidence": [
+        "source-to-play workflow",
+        "continued authoring without writing game code",
+        "save/reopen"
+      ],
+      "evidence_document": "docs/REVIEW-EVIDENCE.md"
+    },
+    {
+      "criterion": "Use of Meta AI Tooling",
+      "weight_percent": 25,
+      "project_evidence": [
+        "Muse image-to-game semantic planning",
+        "SAM original-art movement"
+      ],
+      "evidence_document": "docs/REVIEW-EVIDENCE.md"
+    },
+    {
+      "criterion": "Technical Depth & Execution",
+      "weight_percent": 20,
+      "project_evidence": [
+        "world and interaction validation",
+        "source geometry",
+        "progress-preserving revisions",
+        "bounded provider recovery"
+      ],
+      "evidence_document": "docs/REVIEW-EVIDENCE.md"
+    },
+    {
+      "criterion": "Demo",
+      "weight_percent": 25,
+      "project_evidence": [
+        "continuous spring proof GIF",
+        "live playable examples",
+        "fresh generation and persistence recordings"
+      ],
+      "evidence_document": "docs/REVIEW-EVIDENCE.md"
+    }
+  ],
+  "verification_commands": [
+    "npm run check",
+    "npm test",
+    "npm run build",
+    "npm run check:secrets"
+  ],
+  "evidence_documents": [
+    "README.md",
+    "docs/JUDGING-GUIDE.md",
+    "docs/REVIEW-EVIDENCE.md",
+    "docs/LIVE-VALIDATION.md",
+    "docs/QUALITY-REPAIR-VERIFICATION.md",
+    "docs/LIVE-DEPLOYMENT.md",
+    "docs/SUBMISSION-PACKAGE.md",
+    "docs/SUBMISSION-CHECKLIST.md",
+    "public/art/showcase/README.md"
+  ],
+  "material_limits": [
+    "Current mechanics are 2D; no generated 3D reconstruction claim.",
+    "Unclear or obscured source subjects can require creator correction.",
+    "Provider stalls remain possible.",
+    "Photo resource transfers are game-state changes, not physical liquid or growth simulation.",
+    "Packaged examples do not issue a fresh model request on launch.",
+    "A final public replacement film has not yet been published."
+  ],
+  "rubric_source": {
+    "url": "https://cerebralvalley.ai/e/meta-ai-developer-hackathon/details",
+    "basis": "Authenticated guide captured on 2 November 2026; documentation reconciliation on 5 November 2026.",
+    "official_scores": null
+  },
+  "event_work_document": "docs/SUBMISSION-PACKAGE.md",
+  "product_direction": {
+    "status": "Planned direction, not demonstrated capabilities",
+    "goals": [
+      "Stronger automatic gameplay design from unfamiliar images",
+      "Richer source-object relationships",
+      "More expressive creator-authored abilities",
+      "More varied missions and clearer feedback"
+    ]
+  }
+}
