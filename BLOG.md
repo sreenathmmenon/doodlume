@@ -4,23 +4,25 @@
 
 *By Sreenath Menon*
 
-There is a cat on a rooftop, a ladder between buildings and a fish waiting at the other end. It is the sort of picture that already suggests a little adventure. You can imagine the cat making the jump long before you think about collision boxes, controls or game rules.
+There is a cat on a rooftop, a ladder between buildings and a fish waiting at the other end. It is the sort of picture that already suggests a little adventure. You can almost see the cat making the jump. The story is already in the picture; making it respond to a player is the next step.
 
 Doodlume starts there. Bring a drawing or photograph, describe what you want to play, and turn it into a world you can enter. Then keep creating inside it.
 
 [Try Doodlume](https://doodlume-production-9df2.up.railway.app/)
 
-## The part I care about most
+## Give the creator somewhere to take the next idea
 
 I wanted the creator's imagination to stay involved after the first game appears. You might play a scene and decide it needs a new tool. You might want a different goal, a new interaction between two objects, or another way to move through the picture.
 
 In Doodlume, those ideas have somewhere to go. You can draw a new part, give it an ability, choose what it works with and try it in the same world. You can edit objects and finishing rules, undo a change, save the result and come back to it.
 
-That is the creative loop I want the product to make inviting: picture something, make it playable, discover another possibility, then build on it.
+The moment I care about is the one after someone plays their first world and thinks, “I know what I want to add.” Doodlume gives that thought a practical next step: open the editor, make the change and play again.
+
+The picture matters throughout that process. Its characters, marks and objects give the world a recognizable identity. A creator can see what came from the source and what they have added. That makes the relationship between the picture, the game and their decisions easier to follow.
 
 ## A spring makes the idea visible
 
-The rooftop example gives this loop a simple, visible consequence.
+In the rooftop world, you can watch an idea become a usable game mechanic.
 
 First, the cat has its normal jump. In the studio, a new spring is drawn and given an ability: attach it to the cat to increase jump height. Back in play, the cat picks up the spring, fits it and jumps higher. The player can see the effect of the part they just created.
 
@@ -28,7 +30,7 @@ First, the cat has its normal jump. In the studio, a new spring is drawn and giv
 
 *This is a continuous excerpt from real product gameplay at normal speed. The rooftop source is an AI-generated rough drawing; the spring and its ability were authored in the studio.*
 
-A spring is one way to use the system. The broader idea is giving pictured or newly drawn objects a role in what happens. The engine supports movement, abilities, resource transfers, prerequisites, discoveries and completion conditions. The editor gives the creator ways to work with those systems.
+A spring is one example of giving an object a purpose. An ability can change movement; a tool can participate in an interaction; an action can depend on a resource or another completed action. The creator can also decide which discoveries or actions are needed to finish. These supported rules give objects a role in the game.
 
 For someone making a game, that turns playing into part of the design process. Try an idea, see its effect and decide what to change next.
 
@@ -38,9 +40,9 @@ A photograph already contains places, objects and relationships. Those details c
 
 In the [patio example](https://doodlume-production-9df2.up.railway.app/#studio?example=patio-care), a real photograph contains a watering can and a succulent pot. Doodlume turns those pictured objects into a goal-driven interaction. Select the can, use it on the pot and watch the game's water quantity transfer as the goal completes.
 
-This is an interaction built around the photograph. It changes game state; it does not simulate pouring liquid or growing a plant. The original image remains recognizable and inspectable throughout.
+The visible consequence is a change in the water count and completion of the goal. The original photograph stays in view. This example uses game quantities rather than simulated liquid or plant growth.
 
-Doodlume also supports exploration through an image and clue-based discovery of its details. A drawing might invite an adventure. A photograph might invite a search, exploration or an object challenge. The source and the creator's idea help determine which supported form of play makes sense.
+Doodlume supports three ways to approach an image. Adventure gives a character a route and a destination. Exploration lets a player move through the scene and interact with its objects. Discovery turns details in the image into clues and things to find. The picture and the creator's request help determine a suitable form of play.
 
 The [lunar rescue](https://doodlume-production-9df2.up.railway.app/#studio?example=rover) shows another side of the engine. Allocate crystals to power the beacon and rover, then fit the antenna to move the rover and complete the rescue. This is an authored example, included to show how several object actions can connect into a mission.
 
@@ -50,13 +52,13 @@ There are two things the system needs to understand: what is visible in the imag
 
 **Meta Muse Spark Open**, served through **Fireworks AI**, handles that interpretation. The image and creator intent go into a request. The response describes objects, their relationships, proposed actions and goals in a structured form.
 
-Doodlume checks the resulting plan before it reaches the player. Object geometry, interactions, artwork and completion requirements have to fit the application's world contract. The creator can inspect the interpretation and correct selections that need attention.
+Doodlume checks that plan before it reaches the player. It checks whether objects have usable positions and artwork, whether interactions have meaningful supported effects, and whether the required actions can fit together. The creator can inspect what was understood and correct selections that need attention. A misread object needs a useful correction path.
 
 Moving original artwork introduces another problem. A cat drawn on a page is part of a single image. To let it move independently, the system needs a usable outline of that subject.
 
-**Meta SAM 2.1 tiny** runs on the application server to produce supported object masks. The cutouts retain the source image's colors and marks, with an alpha mask separating the subject from its surroundings. This helps the moving character remain recognizably connected to the picture it came from.
+**Meta SAM 2.1 tiny** runs on the application server to find supported subject outlines. Doodlume uses those masks to separate source artwork into cutouts. The color and texture come from the original picture, while transparency allows the subject to move independently. The moving cat can still carry the pencil marks of the source drawing.
 
-When a subject moves away, its old position can leave a hole or a duplicate behind. **LaMa**, a separate non-Meta model, reconstructs exposed background where the pipeline calls for learned repair. Source-art checks and explicit fallback states remain important when an outline is unclear or a subject is obscured.
+When a subject moves away, its old position needs attention too. **LaMa**, a separate non-Meta model, reconstructs exposed background where learned repair is needed. Doodlume checks source artwork and distinguishes masks from simpler crops. Unclear or obscured subjects can still need creator correction.
 
 The playable result runs in **Phaser**. Doodlume's application code handles movement, interactions, resources and finishing conditions. **React and TypeScript** provide the studio and shared world contracts. The primary application is hosted on **Railway**; **Modal** was also used for a verified application deployment and is documented as backup hosting.
 
@@ -67,7 +69,7 @@ flowchart LR
     C --> D[Validation + creator review]
     C --> E[Meta SAM 2.1 tiny]
     A --> E
-    E --> F[Source cutouts + LaMa background repair]
+    E --> F[Source cutouts + LaMa repair where needed]
     D --> G[Playable world in Phaser]
     F --> G
     G --> H[Draw, edit and play again]
@@ -76,15 +78,15 @@ flowchart LR
 
 Fireworks supplies the active model API path. SAM and LaMa run within the hosted application environment. The repository also contains Baseten and direct Meta API adapters; their available integrations and recorded usage are described separately in the [README](README.md#models-api-providers-and-deployment-partners).
 
-## The world should be worth returning to
+## Make room for another attempt
 
 A creator needs room to experiment. Changing an object should not mean losing the entire world. Trying an ability should be reversible. A saved game should reopen with the changes the creator made.
 
 Doodlume keeps world identity through revisions and preserves progress tied to objects and achievements that remain in the revised world. It supports undo, browser-local saves and portable exports containing artwork, rules and progress.
 
-These details matter because a game idea usually takes more than one attempt. You play something, notice what would make it more interesting and want to try again. Keeping that process understandable is part of making creation enjoyable.
+These details matter at the point where an idea changes. You move an object, test a jump or add a finishing requirement, and the result may need another adjustment. Being able to undo and return to a known state makes that kind of experimentation easier.
 
-For an indie creator, this offers a direct starting point: use your own visual material, test it through play and develop it through objects and rules. The source can be a rough drawing. The idea can begin small and grow through the changes you make.
+For an indie creator, the starting material can be something personal: a rough drawing, a scene they made, or a photograph they want to explore. Doodlume gives them a way to work on its behavior through objects and rules. Recognizable artwork and meaningful control are central to the experience I want to build.
 
 ## What I want to improve next
 
@@ -92,7 +94,7 @@ The next challenge is stronger automatic game design from unfamiliar pictures. R
 
 The direction is richer relationships between source objects, more expressive creator-authored abilities and more varied missions with clear feedback. Some images still need correction, and inference can take time. Those are areas to improve as the creation system develops.
 
-The working foundation is already there: image interpretation, original-art processing, editable rules, real play and a world you can save and continue. The next work should make the creative possibilities broader while keeping the creator in control.
+The current product already connects image interpretation, source artwork, editable rules and real play in a world the creator can save and continue. I want each extension to give that creator another useful way to express an idea.
 
 I want Doodlume to make it easier to follow the thought that arrives while looking at a picture: this could be a game, and I know what I want to happen next.
 
