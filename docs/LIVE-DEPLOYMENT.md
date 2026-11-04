@@ -78,3 +78,19 @@ Railway's GitHub app currently rejects access to private repository `sreenathmme
 The first unconfigured upload crashed because required hosting configuration had not yet been supplied. The configured deployment built successfully, passed its readiness probe, and serves the homepage and APIs. Hosted phone pairing/upload, owner delivery, sender isolation, revocation and unrelated-origin/private-source rejection passed. Fresh rough robot drawing generation completed on Railway in 50.688 seconds with actual Meta inference, local SAM and background reconstruction. The returned world was imported normally with empty progress, played by keyboard through lever activation, gate opening, jumping and star completion, saved and fully reloaded with completion intact. No game state was injected. Deployment status is SUCCESS.
 
 Local evidence is ignored under `outputs/verification/railway-correct-account-2026-11-04/`. Saved worlds remain per origin: export from the Modal or local studio and import at the Railway address to retain artwork and progress.
+
+
+## Compact photo planning release — 4 November 2026
+
+Deployment `5be03fe6-0250-4ca5-9e84-a10628832665` reached **SUCCESS** on the correct Railway project/service above. `PHOTO_PLANNING=compact` was read back after deployment. The Modal backup remains unchanged. This release separates physical inventory from game design, supplies actual source/geometry facts, preserves original lossless artwork while sending smaller model-only images, and bounds planning calls/body reads within the shared request budget. See `GAME-FEEL.md` for retained failures and limitations.
+
+- [x] Typecheck, frontend build and 97 focused regression checks passed.
+- [x] Credential scan passed; provider values remain absent from tracked files/staged blobs/browser build.
+- [x] Hosted readiness, liveness and homepage returned 200; private environment/source paths returned 404; unrelated Origin returned 403.
+- [x] Fresh public bookshelf photograph, empty studio-default intent: actual hosted creation returned 200 in **33.017 seconds**, with no outline review. Its generated source-detail investigation was completed using normal controls, saved and fully reloaded with completion intact.
+- [x] Local final photo runs compiled toy vehicles, carpentry, vegetables and table scene in 20.742, 35.095, 42.383 and 62.541 seconds respectively. Requests differ as recorded; these are individual observations, not a benchmark success rate.
+- [ ] Universal unfamiliar-photo creation and consistent generation latency remain open. Occluded/misrecognized subjects may require user correction. Rich automatic roleplay and strategy are not established by source-detail investigations.
+
+The previous global photo limitations remain deliberately unchecked. A smaller or bounded failed request is never counted as a playable game.
+
+Explicit-object-play hosted regression: “Use the red mug to water the potted plant” returned 200 in **24.622 seconds**, with no outline review and the requested transfer action preserved. The generated fixed mug transfers a game water quantity to the pictured pot; it does not move the photograph, simulate liquid or grow the plant. The action was completed through normal source/target controls, saved and fully reloaded with completion intact. This verifies that the compact route does not force an explicit interaction request into an investigation.

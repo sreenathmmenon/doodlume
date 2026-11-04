@@ -31,7 +31,45 @@ export async function modelJSON(
   transport: typeof fetch = fetch,
 ): Promise<unknown> {
   signal.throwIfAborted();
-  connection.reserveRequest?.();
+  const lease = connection.executionBudget?.acquireCall(signal);
+  const callSignal = lease?.signal ?? signal;
+  try {
+    // The scheduler rejects unaffordable repairs before consuming paid quota.
+    connection.reserveRequest?.();
+    return await abortableModelResponse(
+      readModelResponse(connection, payload, callSignal, transport), callSignal,
+    );
+  } catch (error) {
+    // A disconnected client or whole-request cancellation retains its identity.
+    signal.throwIfAborted();
+    throw error;
+  } finally {
+    lease?.dispose();
+  }
+}
+
+/** Also bounds response-body decoding: some transports resolve the headers but
+ * never finish their body. Abort must stop waiting for both phases. */
+function abortableModelResponse<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort: (() => void) | undefined;
+  return new Promise<T>((resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, {once:true});
+    if (signal.aborted) onAbort();
+    // Attaching both handlers also observes a transport that rejects after abort.
+    pending.then(resolve,reject);
+  }).finally(() => {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  });
+}
+
+async function readModelResponse(
+  connection: ModelConnection,
+  payload: unknown,
+  signal: AbortSignal,
+  transport: typeof fetch,
+): Promise<unknown> {
+  signal.throwIfAborted();
   let response: Response;
   try {
   response = await transport(connection.endpoint, {

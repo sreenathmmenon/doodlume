@@ -1,3 +1,4 @@
+import type { PlanningExecutionBudget } from "./planning-budget.js";
 export type Provider = "meta" | "baseten" | "fireworks";
 
 export interface ModelConnection {
@@ -11,6 +12,8 @@ export interface ModelConnection {
   reserveRequest?: () => void;
   /** Optional orchestration budget; absence preserves ordinary provider behavior. */
   requestsRemaining?: () => number;
+  /** One request shares inference time with extraction and final validation. */
+  executionBudget?: PlanningExecutionBudget;
 }
 
 export function modelConnection(

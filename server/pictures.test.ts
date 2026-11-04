@@ -5,9 +5,19 @@ import { interpretDrawing } from "./interpret.js";
 import { modelConnection } from "./provider.js";
 import { validateWorld } from "../shared/world.js";
 import { setupFeedback } from "../shared/setup.js";
-import { imageData, cropArtwork } from "./images.js";
+import { imageData, photoAnalysisData, cropArtwork } from "./images.js";
 import { removeBoundaryPaper } from "../shared/paper-art.js";
 import { groundDrawingBoxes } from "./ink-grounding.js";
+
+test('photo model transport keeps source dimensions and leaves lossless artwork unchanged',async()=>{
+  const source=await sharp({create:{width:345,height:217,channels:3,background:'#b8c8d8'}}).png().toBuffer();
+  const original=Buffer.from(source),transport=await photoAnalysisData(source);
+  assert.match(transport,/^data:image\/jpeg;base64,/);
+  const size=await sharp(Buffer.from(transport.split(',')[1],'base64')).metadata();
+  assert.deepEqual([size.width,size.height],[345,217]);
+  assert.deepEqual(source,original);
+  assert.match(imageData(source),/^data:image\/png;base64,/);
+});
 
 test("picture interpretation preserves pale photographic pixels without SAM and manual review rejects invalid selections and blocked spawns", async () => {
   const source = await sharp({

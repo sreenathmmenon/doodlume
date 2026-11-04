@@ -4,7 +4,7 @@ import { groundWholeActor } from './actor-grounding.js';
 import { validateConfirmedSourceOutline } from './source-outline.js';
 import { cropArtwork } from './images.js';
 import { extractArtwork, segmentationConfigured, type SegmentationConnection } from './segmentation.js';
-import type { WorldEntity, InputKind } from '../shared/world.js';
+import type { ArtworkBox, WorldEntity, InputKind } from '../shared/world.js';
 
 export class MovableArtworkReviewError extends InterpretationError {
   readonly objectIds:string[];
@@ -14,6 +14,23 @@ export class MovableArtworkReviewError extends InterpretationError {
     this.objectIds=typeof objects === 'string' ? [objects] : [...new Set(objects)];
     this.objectId=this.objectIds[0];
   }
+}
+
+/** Shared exact key for cached source-space facts, never semantic names. */
+function recoveryKey(hash:string,box:ArtworkBox,config:NonNullable<SegmentationConnection['local']>):string {
+  return JSON.stringify([hash,box.x,box.y,box.width,box.height,config.python,config.checkpoint,config.worker,'compact-self-empty-surfaces-v1']);
+}
+
+/** Report only facts actually produced in this request. A stationary or omitted
+ * source has not necessarily been extracted, and is never called verified. */
+export function sourceRecoveryEvidence(source:Buffer,objects:readonly {id:string;bounds:{left:number;top:number;right:number;bottom:number}}[],segmentation:SegmentationConnection) {
+  const hash=createHash('sha256').update(source).digest('hex');
+  return objects.map(object=>{
+    const b=object.bounds,box={x:b.left,y:b.top,width:b.right-b.left,height:b.bottom-b.top};
+    const known=segmentation.enabled && segmentation.provider === 'local-sam2' && segmentation.local?.configured ? segmentation.sourceRecoveryCache?.get(recoveryKey(hash,box,segmentation.local)) : undefined;
+    return {id:object.id,status:!known?'untested':known.artwork?'mask-available':'requires-outline',
+      ...(known?.artwork?{recoveredBounds:{left:known.x,top:known.y,right:known.x+known.width,bottom:known.y+known.height}}:{})};
+  });
 }
 
 /** Recover a bounded whole source prop before removing its old silhouette.
@@ -36,8 +53,7 @@ export async function prepareMovingSourceArt(source:Buffer, entities:WorldEntity
     }
     if (entity.kind === 'decoration' && segmentation.enabled && segmentation.provider === 'local-sam2' && segmentation.local?.configured) {
       const cache=segmentation.sourceRecoveryCache;
-      const key=sourceHash ? JSON.stringify([sourceHash,original.x,original.y,original.width,original.height,
-        segmentation.local.python,segmentation.local.checkpoint,segmentation.local.worker,'compact-self-empty-surfaces-v1']) : undefined;
+      const key=sourceHash ? recoveryKey(sourceHash,original,segmentation.local) : undefined;
       signal.throwIfAborted();
       const cached=key ? cache?.get(key) : undefined;
       const recovered=cached ? {...structuredClone(cached),id:entity.id,label:entity.label ?? 'Source object'} :

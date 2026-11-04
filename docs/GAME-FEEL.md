@@ -265,3 +265,29 @@ The two-stage planner remains opt-in. `SOURCE_PLANNING=photos` limits that exper
 Validation for these changes: 93 focused regression checks passed sequentially, type checking and production build passed. The tests cover source fidelity, complete review generation, cache isolation, bounded model correction, legacy drawing cleanup, saved refinement and hosted boundaries. Local evidence is ignored under `outputs/verification/latency-2026-11-04/` and `outputs/verification/live-deploy-2026-11-04/`.
 
 Final hosted check after deployment: a fresh table-photo request with the explicit intent to supply water from the fixed mug to the plant compiled in **35.353 seconds**. The actual model plan kept both source objects stationary, assigned a finite 100-unit game supply and empty 100-unit receiver, and required filling the receiver. Normal browser play selected the mug, performed the real transfer, completed, saved and fully reloaded the completed state. This is a real hosted one-step roleplay result with explicit creator intent; it is neither physical watering nor evidence that neutral prompts automatically create rich multi-step games. This input/intent differs from the timed-out neutral vegetable request, so those timings are not a controlled end-to-end speed comparison.
+
+
+## Photo planning repair — 4 November 2026
+
+Photo creation now has a separate compact inventory/design path, enabled by `PHOTO_PLANNING=compact`. Recognition first lists physical objects without game roles or imaginary work areas. Design receives that frozen inventory plus source-frame fit facts; its response cannot add objects, change source boxes or relabel a patch of background as a receiver. The established runtime still validates semantics, whole-object recovery, visibility, source-relative movement and earned completion. Explicit traversal requests retain the existing gameplay route. The object-play and investigation branches remain separate, and a failed object-play correction cannot switch into a hunt.
+
+Model transport uses same-dimension quality-92 JPEG, while source artwork, SAM extraction, masks and recognition review retain the normalized lossless PNG. Measured photo request bodies fell from roughly 5 MB to 0.5–0.7 MB on the vegetable/table examples. Static instructions/schema precede dynamic inventory and correction data, supporting provider prefix caching without changing provider, model or reasoning settings.
+
+One request shares its 120-second wall-clock budget across planning and local work. A model call can use at most 60 seconds and must leave 30 seconds for compilation; unaffordable late repairs are refused before paid quota is consumed. Response-body stalls are bounded as well as connection/header stalls. This is a scheduling safeguard, not evidence that timeouts have disappeared. A typed correction preserves valid inventory; unavailable outlines retain the actionable original review when a replacement cannot be validated. Untested objects are never reported as successfully extracted.
+
+Verification artifacts are ignored under `outputs/verification/compact-photos-2026-11-04/`. Sixteen exploratory actual-inference runs were retained: five compiled, ten failed and one required outline review. Earlier one-pass and 45-second-call experiments failed repeatedly; they are not successful generation evidence. The final inventory-first, 60-second-call configuration produced four consecutive compiled runs:
+
+| Input | Creator request | Calls | Total local creation |
+| --- | --- | --- | --- |
+| Vegetable photograph | Same neutral meaningful-activity request as the previously timing-out run | 2 | 42.383 s |
+| Carpentry photograph | Empty request, matching the studio default | 2 | 35.095 s |
+| Table photograph | Same neutral meaningful-activity request | 3 | 62.541 s |
+| Toy-vehicle photograph | Empty request | 2 | 20.742 s |
+
+These four results were source-detail investigations. They establish successful creation on these inputs, not deep roleplay or rich strategy. The source-first prompt-prefix change was checked separately and must also be exercised on the hosted release. The earlier one-pass toy-vehicle arrangement was actually completed through normal object controls, saved and reloaded; the final vegetable investigation was completed through normal keyboard-play selectors, saved and reloaded. No generated response or progress state was edited to manufacture a pass. Three new public photo sources and licenses are recorded in the ignored `unfamiliar-photos-2026-11-04/source-provenance.json`.
+
+Remaining gates: repeatability on unfamiliar inputs, extraction of partly occluded subjects, source recognition accuracy, consistently meaningful activity beyond investigations, and reliable provider response time. No universal automatic-photo or timeout claim is marked solved by this increment.
+
+Hosted follow-up: the new bookshelf photo with empty studio-default intent returned 200 in 33.017 seconds on the released static-prefix version. Its untouched source-detail investigation was completed, saved and reloaded through the normal UI. This adds successful hosted evidence for that input; it does not change the remaining gates above.
+
+Explicit-object-play hosted regression: “Use the red mug to water the potted plant” returned 200 in **24.622 seconds**, with no outline review and the requested transfer action preserved. The generated fixed mug transfers a game water quantity to the pictured pot; it does not move the photograph, simulate liquid or grow the plant. The action was completed through normal source/target controls, saved and fully reloaded with completion intact. This verifies that the compact route does not force an explicit interaction request into an investigation.

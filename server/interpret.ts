@@ -1,10 +1,13 @@
+import { createPlanningBudget, PlanningBudgetExhaustedError } from "./planning-budget.js";
+import { runPhotoPlanning } from "./photo-planning.js";
+import { photoSourceFacts } from "./photo-source-facts.js";
 import { sourceOutlineReplanningFeedback, retainsSourceInventory } from "./source-review-replanning.js";
 import { validatePlannedInteractionSources } from "./interaction-planning.js";
 import sharp from "sharp";
 import { placementFeedbackForPlan } from "./source-placement-options.js";
 import { refinePlatformSelections } from "./platform-grounding.js";
 import { groundDrawingBoxes } from "./ink-grounding.js";
-import { normalizeDrawing, imageData, cropArtwork } from "./images.js";
+import { normalizeDrawing, imageData, photoAnalysisData, cropArtwork } from "./images.js";
 import { extractArtwork, type SegmentationConnection } from "./segmentation.js";
 import { modelJSON, InterpretationError, ModelPlanError, MalformedModelJSONError, MODEL_PLAN_DIAGNOSTIC_LIMIT } from "./model.js";
 export { InterpretationError } from "./model.js";
@@ -146,10 +149,22 @@ export async function interpretDrawing(
       "Describe the game in 500 characters or fewer.",
       400,
     );
+  if(inputKind === "picture" && process.env.PHOTO_PLANNING === "compact")
+    connection={...connection,executionBudget:connection.executionBudget ?? createPlanningBudget()};
   // Source extraction facts live only for this interpretation and its bounded repairs.
   segmentation={...segmentation,sourceRecoveryCache:new Map()};
   const normalized = await normalizeDrawing(image);
   const sourceImage = imageData(normalized);
+  if(inputKind === "picture" && process.env.PHOTO_PLANNING === "compact") {
+    const analysisImage = await photoAnalysisData(normalized);
+    const result = await runPhotoPlanning({sourceImage,analysisImage,intent,connection,signal,transport,
+      correctionFacts:candidate => photoSourceFacts(normalized,candidate,segmentation),
+      compile:(candidate,budgetedConnection,compactDiscover) => compileInterpretation(candidate, {
+        normalized,sourceImage,intent,connection:budgetedConnection,signal,
+        segmentation:{...segmentation,reserveRequest:budgetedConnection.reserveRequest},transport,inputKind,compactDiscover,
+      })});
+    if(result !== undefined) return result;
+  }
   if (process.env.SOURCE_PLANNING === "staged" ||
       (process.env.SOURCE_PLANNING === "photos" && inputKind === "picture")) {
     const {runStagedPlanning} = await import("./staged-planning.js");
@@ -224,7 +239,7 @@ Choose a useful subset of independently visible objects for the game, not an exh
         malformed = undefined;
       } catch (failure) {
         signal.throwIfAborted();
-        if (reservationRefused) throw error;
+        if (reservationRefused || failure instanceof PlanningBudgetExhaustedError) throw error;
         if (!(failure instanceof MalformedModelJSONError)) throw failure;
         malformed = failure;
       }

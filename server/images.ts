@@ -36,6 +36,12 @@ export async function normalizeDrawing(image: unknown): Promise<Buffer> {
 }
 export const imageData = (buffer: Buffer) =>
   `data:image/png;base64,${buffer.toString("base64")}`;
+/** Smaller model-only transport at the exact normalized source dimensions.
+ * Source artwork, masks and review continue to use the original lossless PNG. */
+export async function photoAnalysisData(buffer: Buffer): Promise<string> {
+  const jpeg = await sharp(buffer).jpeg({quality:92,chromaSubsampling:'4:4:4'}).toBuffer();
+  return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
+}
 export function pixelBox(
   box: { x: number; y: number; width: number; height: number },
   iw: number,
