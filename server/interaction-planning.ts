@@ -1,3 +1,4 @@
+import { validateGeneratedRetryablePlan } from "./retryable-planning.js";
 import { ModelPlanError, MODEL_PLAN_DIAGNOSTIC_LIMIT } from "./model.js";
 import type { WorldDefinition, WorldEntity } from "../shared/world.js";
 import { validateInteractions, validateInteractionChoiceOutcomes, type InteractionPlan, type InteractionAction, type InteractionEffect } from "../shared/interactions.js";
@@ -34,6 +35,7 @@ export const interactionsSchema = { anyOf: [
   { type: "null" },
   { type: "object", additionalProperties: false, properties: {
     version: { const: 1 },
+    completionPolicy: {type:"string",enum:["protected","retryable"]},
     choiceGroups: { type: "array", maxItems: 8, items: {
       type: "object", additionalProperties: false,
       properties: { id: identifier, label: { type: "string", minLength: 1, maxLength: 80 }, actionIds: { type: "array", minItems: 2, maxItems: 4, uniqueItems: true, items: identifier } },
@@ -42,7 +44,7 @@ export const interactionsSchema = { anyOf: [
     objects: { type: "array", minItems: 2, maxItems: 24, items: {
       type: "object", additionalProperties: false,
       properties: {
-        entityId: identifier, carryable: { type: "boolean" }, layer: {type:"string",enum:["surface","object"]},
+        entityId: identifier, carryable: { type: "boolean", description: "Must be true for EVERY object referenced as an action toolId, including supplies used for transfer. False is for fixed receivers or separately moved scenery, never a selected tool." }, layer: {type:"string",enum:["surface","object"]},
         resource: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
           properties: { type: { ...identifier, maxLength: 40 }, capacity: { type: "number", exclusiveMinimum: 0, maximum: 10000 }, initial: { type: "number", minimum: 0, maximum: 10000 } },
           required: ["type", "capacity", "initial"] }] },
@@ -60,6 +62,7 @@ The interactions object has version:1, objects and actions. Each object referenc
 place means carrying and setting down the selected source object at a real visible destination. Use kind:"place", carryable:true for its tool object and exactly one effect {kind:"moveObject",entityId:toolId,destinationId:targetId,durationMs:900}. The target must be a different detected source object. This releases the held object there; it is not permanently attached and can be picked up again. Successive placements of the same object need an explicit requires sequence, and each destination must differ; alternative placements may instead belong to the same exclusive choice group. Use place for arranging actual pictured objects such as a chair by a table or a book at a shelf; do not call moving the chair itself a use action or mark a selectable object as noncarryable. The optional moveObject.destinationAlignment is "center" (default), "left", "right", "above" or "below". Center overlays the target's center; the other alignments place the complete object outside that target edge with an 8-pixel gap, centered on the other axis. Use left/right for "beside" and below for "below/under" in the image plane; choose the side with visible space. Labels and instructions must match the actual alignment: do not promise beside or below while returning center. Below does not tuck an object behind or underneath another layer. Keep original size: ensure the complete moved object fits inside the image and the actual scene, without overlap with unrelated objects. Out-of-bounds placements are rejected, never resized or clamped. It does not rotate, resize, reconstruct perspective, animate walking, or change the room's physical geometry.
 attach/use actions need a real supported effect: openGate removes an actual recognized gate obstruction in platform/roam mode; jumpBoost improves the moving player's jump in platform mode; moveSpeedBoost improves movement in roam/platform mode. For use/attach, moveObject moves a different independently extracted stationary decoration relative to a real visible destination, using the same optional destinationAlignment: {kind:"moveObject",entityId,destinationId,durationMs:900}. Both IDs must be detected source objects; list this separately triggered moved object in objects with carryable:false. A use/attach action cannot move its own carried tool; choose place when the tool itself is being relocated. This is a straight bounded animation, not navigation, walking, physics or vehicle simulation. Use only when that motion makes sense; do not move through scenery or imply wheels/limbs animate. It works in discover too. They cannot simulate cooking or change arbitrary artwork. Do not describe a capability those operations cannot deliver. No openGate, jumpBoost or moveSpeedBoost in discover: source-native pointer roleplay supports transfers, place, and use/attach actions with moveObject. Transfer itself visibly changes a quantity and can fulfill an objective without an additional effect. Effects are optional only for transfer. Never use openGate as a cosmetic substitute for unrelated repairs.
 When the source and intent support genuinely different physical outcomes, interactions.choiceGroups may contain {id,label,actionIds}, with 2–4 alternative action IDs per group and at most 8 groups. Each action may belong to only one group. Completing one member makes its siblings unavailable; Undo can restore the choice. Members must cause different source-object positions, attachments, opened paths or capabilities, not merely change wording or use an equivalent supply. Use only real compatible pictured targets; do not add a branch, arbitrary destination or extra chore merely to use this feature. An earned choice belongs in gameplay.requiredChoiceGroupIds: completing ANY member satisfies that requirement. Do not require the individual members in requiredInteractionIds; do not make members depend on one another. When the requested mission includes branch-specific follow-up work, put those final payoff actions in a separate terminal choice group, each requiring its matching earlier branch, and require that terminal group. Do not finish on the early choice alone when the promised arrangement or useful follow-up is still unfinished; both complete branches must remain valid ways to finish. Omit choiceGroups and requiredChoiceGroupIds when no meaningful alternative exists.
+Optional completionPolicy is "protected" (default) or "retryable". Protected play prevents allocations that make the mission impossible. Use retryable only for a genuine finite-resource allocation puzzle with movement:discover: actual pictured supplies can serve different plausible pictured receivers, and allocation order or amount matters. A reachable decision must offer two currently legal transfers from the same supply to different receivers; one leaves a completing route and another needs Undo. The player sees direct quantities and consequences, can try the allocation, and can recover through Undo. Every mission still needs a solution from its original supplies, and every offered exclusive choice member must still belong to some successful route. Never invent a drain, waste bin, arbitrary receiver, fake scarce resource, or deliberately impossible branch just to qualify; keep protected when the input/intent only supports arranging, discovery, traversal, or interchangeable successful actions. Do not use retryable for platform or roam plans.
 For source-native roleplay, choose movement:discover, mode:creative, avatarId:null, objective:explore, clues:[] and obstacleIds:[]. Mark tools and targets as decoration (a genuinely opening barrier remains gate); preserve their source identity and positions. No invented finish marker is needed: requiredInteractionIds lists action IDs whose real successful execution completes the mission. For resource-routing puzzles offer every meaningful compatible source/receiver action, leave requiredInteractionIds empty unless a particular action is essential, and set gameplay.requiredResourceIds to receivers that must be filled to capacity. This allows different successful allocations. Never require all mutually exclusive alternative actions. Legacy goalRules arrays stay empty unless the user also explicitly asks for collection/activation. Use short player-facing object labels (Mug, Plant, Crystal), not long recognition descriptions. Keep action labels concise. Keep one concise mission title and an actionable first instruction, e.g. select the visible tool then its target. Object meaning may be creatively reassigned when explicitly requested by the user; this is a play rule, not visual evidence that the object has that real capability. If necessary objects are absent or the request needs unsupported mechanics, ask one focused clarification instead of silently replacing it with a hunt. Never invent detections or dispatch on file names.`;
 
 export function readPlannedInteractions(value: unknown): PlannedInteractions | undefined {
@@ -69,6 +72,7 @@ export function readPlannedInteractions(value: unknown): PlannedInteractions | u
   const id = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,60}$/.test(v) && !["__proto__", "prototype", "constructor"].includes(v);
   if (!input || typeof input !== "object" || input.version !== 1 || !Array.isArray(input.objects) || input.objects.length < 2 || input.objects.length > 24 ||
       !Array.isArray(input.actions) || !input.actions.length || input.actions.length > 16) fail();
+  if(input.completionPolicy!==undefined&&!["protected","retryable"].includes(input.completionPolicy))fail();
   const objects = input.objects.map(object => {
     if (!object || !id(object.entityId) || (object.carryable !== undefined && typeof object.carryable !== "boolean") || (object.layer !== undefined && !["surface","object"].includes(object.layer))) fail();
     const resource = object.resource;
@@ -99,7 +103,63 @@ export function readPlannedInteractions(value: unknown): PlannedInteractions | u
       groups.add(group.id); for (const actionId of group.actionIds) members.add(actionId);
     }
   }
-  return { version: 1, objects, actions, ...(choiceGroups !== undefined ? {choiceGroups: choiceGroups.map(group => ({id:group.id,label:group.label.trim(),actionIds:[...group.actionIds]}))} : {}) };
+  return { version: 1, objects, actions, ...(input.completionPolicy?{completionPolicy:input.completionPolicy}:{}), ...(choiceGroups !== undefined ? {choiceGroups: choiceGroups.map(group => ({id:group.id,label:group.label.trim(),actionIds:[...group.actionIds]}))} : {}) };
+}
+
+/** Independent transport diagnostics only. These never rewrite a proposed plan
+ * or grant a result; the full compiler and runtime validators remain required. */
+export function plannedInteractionDiagnostics(plan: PlannedInteractions, requiredResourceIds: string[] = []): string[] {
+  const diagnostics:string[]=[], objects=new Map(plan.objects.map(object=>[object.entityId,object]));
+  for(const toolId of new Set(plan.actions.map(action=>action.toolId)))if(!objects.get(toolId)?.carryable)
+    diagnostics.push(`Interaction tool ${toolId} must be a carried source: set carryable:true for that actual tool.`);
+  const transfers=plan.actions.filter(action=>action.kind==="transfer");
+  for(const action of transfers){
+    const source=objects.get(action.toolId)?.resource,target=objects.get(action.targetId)?.resource;
+    if(!source||!target||source.type!==target.type)diagnostics.push(`Action ${action.id} needs source and receiver resources of the same type.`);
+    else if(action.amount>target.capacity)diagnostics.push(`Action ${action.id} amount ${action.amount} exceeds receiver ${action.targetId} capacity ${target.capacity}.`);
+  }
+  if(requiredResourceIds.length>24||requiredResourceIds.some(id=>typeof id!=="string"))return diagnostics;
+  const goals=[...new Set(requiredResourceIds)].map(id=>objects.get(id));
+  if(goals.some(object=>!object?.resource))diagnostics.push("gameplay.requiredResourceIds must reference declared resource objects.");
+  // A necessary upper bound for direct supply→receiver networks. If supplies
+  // themselves can be refilled or goals transfer onward, defer to the full
+  // state search rather than claiming an unsound arithmetic impossibility.
+  const validGoals=goals.filter(object=>object?.resource);
+  // Creator-reviewed plans allow more actions than the model transport. Bound
+  // diagnostic work independently; exhaustion must defer to full validation.
+  let subsetWork=0;
+  for(const type of new Set(validGoals.map(object=>object!.resource!.type))){
+    const targets=validGoals.filter(object=>object!.resource!.type===type);
+    const targetIds=new Set(targets.map(object=>object!.entityId));
+    const relevant=transfers.filter(action=>targetIds.has(action.targetId));
+    const sourceIds=new Set(relevant.map(action=>action.toolId));
+    if(transfers.some(action=>sourceIds.has(action.targetId)||targetIds.has(action.toolId)))continue;
+    let maximum=0,bounded=false;
+    const supplies:string[]=[];
+    for(const sourceId of sourceIds){
+      const resource=objects.get(sourceId)?.resource;
+      if(!resource||resource.type!==type)continue;
+      let sums=new Set([0]);
+      for(const action of relevant.filter(action=>action.toolId===sourceId)){
+        const next=new Set(sums);
+        for(const sum of sums){
+          if(++subsetWork>65_536){bounded=true;break;}
+          if(sum+action.amount<=resource.initial+1e-9*Math.max(1,resource.initial))next.add(sum+action.amount);
+          if(next.size>32_768){bounded=true;break;}
+        }
+        if(bounded)break;
+        sums=next;
+      }
+      if(bounded)break;
+      let usable=0;for(const sum of sums)usable=Math.max(usable,sum);maximum+=usable;
+      supplies.push(`${sourceId}: at most ${usable} of ${resource.initial}`);
+    }
+    if(bounded)continue;
+    const needed=targets.reduce((sum,object)=>sum+object!.resource!.capacity-object!.resource!.initial,0);
+    if(maximum+1e-9*Math.max(1,needed)<needed)
+      diagnostics.push(`Resource tasks cannot all finish: required receivers need ${needed} more ${type}, but the one-time transfer amounts can deliver at most ${maximum} (${supplies.join("; ")}). Adjust amounts/routes or supplies coherently; equal total stock and demand does not guarantee a usable allocation.`);
+  }
+  return diagnostics;
 }
 
 /** Attach only after layout compilation so missing or substituted source IDs
@@ -144,6 +204,8 @@ export function applyPlannedInteractions(world: WorldDefinition, interactions: P
         diagnostics.add(`${prefix}${label(moved.id)} cannot fit ${destinationPhrase((effect as DestinationEffect).destinationAlignment)} ${label(destination.id)} without leaving the image. Choose a more central visible destination or correct its source selection. The object has not been resized or moved elsewhere.`);
     }
   }
+  for(const diagnostic of plannedInteractionDiagnostics(interactions,world.goalRules?.requiredResourceIds??[]))
+    if(!diagnostic.startsWith("Interaction tool "))diagnostics.add(diagnostic);
   if (diagnostics.size) {
     const lines: string[] = [];
     let length = 0;
@@ -171,7 +233,10 @@ export function applyPlannedInteractions(world: WorldDefinition, interactions: P
     validateInteractions(candidate, {allowUnpreparedArtwork});
     // Generated alternatives must all be real options. Artwork-only rebuilds
     // retain the creator's explicitly selected branch and requirements.
-    if (options.validateGeneratedChoices !== false) validateInteractionChoiceOutcomes(candidate);
+    if (options.validateGeneratedChoices !== false) {
+      validateInteractionChoiceOutcomes(candidate);
+      validateGeneratedRetryablePlan(candidate);
+    }
   }
   catch (error) { throw new ModelPlanError(error instanceof Error ? error.message : "The object interactions could not be validated."); }
   return candidate;

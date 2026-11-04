@@ -25,6 +25,19 @@ function fixture() {
   });
 }
 
+test("retryable losing allocations show actual shortfall only when a hint is requested",()=>{
+  const world=fixture();world.interactions!.completionPolicy="retryable";
+  const held=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"pitcher"}).state;
+  const result=reduceInteraction(world,held,{type:"perform",actionId:"waste-water"});
+  assert.equal(result.ok,true,result.reason);
+  const before=JSON.stringify(result.state),hint=nextInteractionHint(world,result.state);
+  assert.equal(hint?.recovery,true);
+  assert.equal(hint?.entityId,"plant");
+  assert.match(hint!.text,/Fern still needs 2 more/);
+  assert.match(hint!.text,/Revisit your last choice or restart/);
+  assert.equal(JSON.stringify(result.state),before);
+});
+
 test("hints follow a refill chain, reject wasteful choices, and never perform the move",()=>{
   const world=fixture(); let state=emptyPlayState();
   const snapshot=JSON.stringify(state);

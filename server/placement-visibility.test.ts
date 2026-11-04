@@ -79,3 +79,18 @@ test("an explicitly declared surface may intentionally sit fully behind a foregr
   world.interactions!.objects[0].layer="surface";
   validateInteractions(world);await validateGeneratedPlacementVisibility(world);
 });
+
+test("retryable visibility admission still checks moves reached after a losing allocation",async()=>{
+  const world=await fixture();
+  world.interactions!.completionPolicy="retryable";
+  world.interactions!.objects[0].resource={type:"water",initial:2,capacity:2};
+  world.interactions!.objects[1].resource={type:"water",initial:0,capacity:2};
+  world.interactions!.objects[2].resource={type:"water",initial:0,capacity:2};
+  world.interactions!.actions[1].requires=["place-piece","allocate"];
+  world.interactions!.actions.push(
+    {id:"allocate",kind:"transfer",label:"Allocate water",toolId:"piece",targetId:"mat",amount:1},
+    {id:"finish",kind:"transfer",label:"Fill receiver",toolId:"piece",targetId:"anchor",amount:2});
+  world.goalRules={requiredCollectedIds:[],requiredActivatedIds:[],requiredResourceIds:["anchor"]};
+  validateInteractions(world);
+  await assert.rejects(validateGeneratedPlacementVisibility(world),/place-mat would hide 100% of Piece/);
+});

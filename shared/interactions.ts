@@ -46,6 +46,8 @@ export interface InteractionPlan {
   actions: InteractionAction[];
   /** Performing one member excludes the others for this play state. */
   choiceGroups?: InteractionChoiceGroup[];
+  /** Protected plans reject losing moves; retryable puzzles permit legal mistakes. */
+  completionPolicy?: "protected" | "retryable";
 }
 export interface InteractionState {
   heldEntityId: string | null;
@@ -89,7 +91,8 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     if ((world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length || world.goalRules?.requiredChoiceGroupIds?.length)) fail("A task refers to actions that are not in this world.");
     return;
   }
-  if (!record(p) || !keysOnly(p, ["version", "objects", "actions", "choiceGroups"]) || p.version !== 1 ||
+  if (!record(p) || !keysOnly(p, ["version", "objects", "actions", "choiceGroups", "completionPolicy"]) || p.version !== 1 ||
+      (p.completionPolicy !== undefined && p.completionPolicy !== "protected" && p.completionPolicy !== "retryable") ||
       !Array.isArray(p.objects) || !p.objects.length || p.objects.length > 64 ||
       !Array.isArray(p.actions) || p.actions.length > 64)
     fail("This world needs a supported interaction plan.");
@@ -432,6 +435,12 @@ export function validateInteractionFeasibility(world: WorldDefinition, state?: P
     : "The required tasks cannot be completed with these supplies and attachments. Adjust the amounts or required actions.");
 }
 
+/** Requested guidance only: a bounded proof from valid current receipts, not a
+ * per-frame check. Retryable plans can legitimately return impossible here. */
+export function interactionCompletionStatus(world: WorldDefinition, state: PlayState): "possible" | "impossible" | "bounded" {
+  return completionFeasibility(world, interactionState(world, state));
+}
+
 /** Admission check for generated plans, after structural validation. Every
  * offered member must occur on some completing run. Manual authoring can still
  * deliberately require one particular member, so ordinary validation omits this.
@@ -456,6 +465,8 @@ export function validateInteractionChoiceOutcomes(world: WorldDefinition): void 
   }
 }
 
+/** Immediate legality only. Use playerAvailableInteractions for player controls
+ * and safeAvailableInteractions for completion-preserving guidance. */
 export function availableInteractions(world: WorldDefinition, state: PlayState, targetId?: string): InteractionAction[] {
   const s = interactionState(world, state);
   return (world.interactions?.actions ?? []).filter(a => (!targetId || a.targetId === targetId) && !blockedReason(world, s, a, true));
@@ -463,7 +474,7 @@ export function availableInteractions(world: WorldDefinition, state: PlayState, 
 
 const safeChoiceCache = new WeakMap<WorldDefinition, { fingerprint: string; actions: InteractionAction[] }>();
 
-/** Player-facing availability includes completion safety. The decision fingerprint
+/** Completion-safe availability, including in retryable puzzles. The decision fingerprint
  * excludes position/frame state; repeated renders reuse the same search results.
  * Plan/rule contents are included so even an in-place authoring change cannot
  * reuse stale eligibility. Target filtering does not repeat feasibility work. */
@@ -493,6 +504,13 @@ export function safeAvailableInteractions(world: WorldDefinition, state: PlaySta
   return cached.actions.filter(action => !targetId || action.targetId === targetId);
 }
 
+/** Respect the authored mistake policy without weakening immediate legality. */
+export function playerAvailableInteractions(world: WorldDefinition, state: PlayState, targetId?: string): InteractionAction[] {
+  return world.interactions?.completionPolicy === "retryable"
+    ? availableInteractions(world, state, targetId)
+    : safeAvailableInteractions(world, state, targetId);
+}
+
 /** Reachability/proximity is checked by the runtime, not guessed from a saved point here. */
 export function reduceInteraction(world: WorldDefinition, state: PlayState, command: InteractionCommand): InteractionResult {
   const s = interactionState(world, state);
@@ -516,10 +534,12 @@ export function reduceInteraction(world: WorldDefinition, state: PlayState, comm
   const reason = blockedReason(world, s, action, true);
   if (reason) return reject(reason);
   apply(world, s, action);
-  const feasibility = completionFeasibility(world, s);
-  if (feasibility !== "possible") return reject(feasibility === "bounded"
-    ? "This choice needs a simpler task plan before it can be verified."
-    : "Keep these supplies or parts for the unfinished tasks. This choice would block completion.");
+  if (world.interactions.completionPolicy !== "retryable") {
+    const feasibility = completionFeasibility(world, s);
+    if (feasibility !== "possible") return reject(feasibility === "bounded"
+      ? "This choice needs a simpler task plan before it can be verified."
+      : "Keep these supplies or parts for the unfinished tasks. This choice would block completion.");
+  }
   return { ok: true, state: { ...state, interactions: s }, event: {
     kind: action.kind, actionId: action.id, toolId: action.toolId, targetId: action.targetId,
     ...(action.kind === "transfer" ? { amount: action.amount } : {}),

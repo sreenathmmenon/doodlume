@@ -18,6 +18,7 @@ import {
 } from "../game/WorldScene";
 import {
   emptyPlayState,
+  getRetryCheckpoint,
   type PlayState,
   type WorldDefinition,
   movementMode,
@@ -522,7 +523,19 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const incompatibleReason = selectedDiscovery ? incompatibleTargetReason(props.world, discoveryProgress, selectedDiscovery) : undefined;
     const nextHint = useMemo(() => hintOpen ? nextInteractionHint(props.world, discoveryProgress) : undefined,
       [hintOpen, props.world, progressKey]);
+    const retryCheckpointKey = JSON.stringify(discoveryProgress.retryCheckpoint);
+    const retryPoint = useMemo(() => getRetryCheckpoint(props.world, discoveryProgress), [props.world, progressKey, retryCheckpointKey]);
     const finished = discoveryProgress.completed && !discoveryProgress.exploring;
+    function revisitChoice() {
+      const scope = JSON.stringify([props.world.id, props.world.revision, props.run]);
+      if (!retryPoint || !ready || failed || !props.playing || !scene.current?.canUndoObjectAction() || undoHistory.current.scope !== scope) return;
+      scene.current.setPlaying(false);
+      undoHistory.current.states = [];
+      undoRestore.current = {scope, state: structuredClone(retryPoint)};
+      setUndoCount(0); setReady(false); setLocalRun(run => run + 1);
+      callbacks.current.onMoment("Back before that choice. Try another allocation.");
+      host.current?.focus({preventScroll:true});
+    }
     function undoLastAction() {
       const scope = JSON.stringify([props.world.id, props.world.revision, props.run]);
       if (!ready || failed || !props.playing || !scene.current?.canUndoObjectAction() || undoHistory.current.scope !== scope) return;
@@ -549,6 +562,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
           </div>}
           {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}
           {undoCount > 0 && <button type="button" className="discovery-hint" aria-label="Undo last action" disabled={!props.playing || finished || pendingObjectMotion} onClick={undoLastAction}><Undo2 size={14} aria-hidden="true" /> Undo</button>}
+          {!undoCount && retryPoint && !finished && <button type="button" className="discovery-hint" disabled={!props.playing || pendingObjectMotion} onClick={revisitChoice}><Undo2 size={14} aria-hidden="true" /> Revisit choice</button>}
       <details className="object-keyboard-play">
         <summary>Object controls</summary>
         <div>
@@ -573,7 +587,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         </div>
         {hintOpen && !finished && <div className="object-next-hint" role="status">
           <span>{nextHint?.text ?? "Inspect an object to see what it needs."}</span>
-          {nextHint && <button type="button" disabled={!props.playing} onClick={() => { scene.current?.revealObjectHint(nextHint.entityId); host.current?.focus({ preventScroll: true }); }}>Show me</button>}
+          {nextHint?.recovery && retryPoint && undoCount > 0 ? <button type="button" disabled={!props.playing || pendingObjectMotion} onClick={revisitChoice}>Revisit choice</button> : nextHint && !nextHint.recovery && <button type="button" disabled={!props.playing} onClick={() => { scene.current?.revealObjectHint(nextHint.entityId); host.current?.focus({ preventScroll: true }); }}>Show me</button>}
         </div>}
       </div>
     );

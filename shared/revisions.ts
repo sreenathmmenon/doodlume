@@ -1,4 +1,4 @@
-import { interactionEffects, validateInteractionFeasibility, type InteractionPlan } from "./interactions.js";
+import { interactionCompletionStatus, interactionEffects, validateInteractionFeasibility, type InteractionPlan } from "./interactions.js";
 import { setupFeedback } from "./setup.js";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit } from "./source-scenery.js";
 import {
@@ -92,6 +92,8 @@ export function applyWorldPatch(
     throw new Error(
       "This preview belongs to an older world. Open the editor again to make a fresh change.",
     );
+  if (world.interactions?.completionPolicy === "retryable" && interactionCompletionStatus(world, state) !== "possible")
+    throw new Error("Recover your last solvable position or restart before editing this puzzle. Your draft is kept.");
   if (
     !patch.id ||
     !["manual", "meta"].includes(patch.origin) ||
@@ -206,6 +208,8 @@ export function undoWorldPatch(
     world.revision !== checkpoint.appliedRevision
   )
     throw new Error("This undo belongs to an earlier version of your world.");
+  if (world.interactions?.completionPolicy === "retryable" && interactionCompletionStatus(world, state) !== "possible")
+    throw new Error("Recover your last solvable position or restart before undoing this world edit.");
   const previous = validateWorld({
     ...structuredClone(checkpoint.before),
     revision: world.revision + 1,

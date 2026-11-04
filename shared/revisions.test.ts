@@ -6,7 +6,8 @@ import {
   undoWorldPatch,
   type WorldPatch,
 } from "./revisions.js";
-import { goalProgress, type PlayState } from "./world.js";
+import { emptyPlayState, getRetryCheckpoint, goalProgress, pinRetryCheckpoint, validateWorld, type PlayState } from "./world.js";
+import { reduceInteraction } from "./interactions.js";
 
 const progress: PlayState = {
   player: { x: 200, y: 640 },
@@ -36,6 +37,36 @@ function setup() {
   };
   return { world, patch };
 }
+
+test("retryable dead ends require recovery before edits; successful revisions clear old recovery checkpoints",()=>{
+  const source=freshExample(EXAMPLES[0].id);
+  const world=validateWorld({...source,id:"retry-revision",interactions:{version:1,completionPolicy:"retryable",objects:[
+    {entityId:"supply",carryable:true,resource:{type:"charge",capacity:2,initial:2}},
+    {entityId:"receiver",resource:{type:"charge",capacity:2,initial:0}},
+    {entityId:"other",resource:{type:"charge",capacity:2,initial:0}},
+  ],actions:[
+    {id:"fill",kind:"transfer",label:"Fill",toolId:"supply",targetId:"receiver",amount:2},
+    {id:"spend",kind:"transfer",label:"Other allocation",toolId:"supply",targetId:"other",amount:1},
+  ]},entities:[...source.entities,...["supply","receiver","other"].map((id,index)=>({id,kind:"decoration",x:100+index*100,y:100,width:40,height:40}))],
+    goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],requiredResourceIds:["receiver"]}});
+  const before=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"supply"}).state;
+  const attempted=reduceInteraction(world,before,{type:"perform",actionId:"spend"});
+  assert.equal(attempted.ok,true,attempted.reason);
+  const failed=pinRetryCheckpoint(world,before,attempted.state), unchanged=structuredClone(failed);
+  const patch:WorldPatch={id:"grow",worldId:world.id,baseRevision:world.revision,origin:"manual",additions:[],bounds:{width:world.width+200,height:world.height}};
+  assert.throws(()=>applyWorldPatch(world,failed,patch),/Recover your last solvable position or restart/);
+  assert.deepEqual(failed,unchanged);
+  const recovered=getRetryCheckpoint(world,failed)!;
+  const withPriorCheckpoint={...recovered,retryCheckpoint:failed.retryCheckpoint};
+  const changed=applyWorldPatch(world,withPriorCheckpoint,patch);
+  assert.equal(changed.state.retryCheckpoint,undefined,"Do not carry recovery state into a new revision.");
+  const later=reduceInteraction(changed.world,changed.state,{type:"perform",actionId:"spend"});
+  assert.equal(later.ok,true,later.reason);
+  const laterFailed=pinRetryCheckpoint(changed.world,changed.state,later.state);
+  assert.throws(()=>undoWorldPatch(changed.world,laterFailed,changed.checkpoint),/Recover your last solvable position or restart/);
+  const restored=undoWorldPatch(changed.world,getRetryCheckpoint(changed.world,laterFailed)!,changed.checkpoint);
+  assert.equal(restored.state.retryCheckpoint,undefined);
+});
 
 test("a world amendment preserves all old objects, position, motion and earned progress without mutating the input", () => {
   const { world, patch } = setup();

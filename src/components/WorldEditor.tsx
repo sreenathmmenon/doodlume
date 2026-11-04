@@ -1600,6 +1600,11 @@ function WorldEditorSession({
             )}
           </section>
           {interactions && (interactions.actions.length >= 2 || choiceDraft || Boolean(interactions.choiceGroups?.length)) && <section className="editor-properties" aria-label="Player choices">
+            {interactions.objects.some(object => object.resource) && <details className="object-purpose"><summary>Play style</summary>
+              <label>Resource choices<select aria-label="Resource play style" value={interactions.completionPolicy ?? "protected"} onChange={event => {
+                setInteractions(plan => plan ? {...plan, completionPolicy: event.target.value === "retryable" ? "retryable" : undefined} : plan); setError("");
+              }}><option value="protected">Guided · keep a winning route</option><option value="retryable">Experiment · try and rethink</option></select></label>
+            </details>}
             <ChoiceGroupEditor world={{...world, ...bounds, goalRules: patch.goalRules ?? world.goalRules, entities: [...currentEntities, ...additions]}} plan={interactions}
               requiredIds={requiredChoiceGroupIds} draft={choiceDraft} onDraftChange={setChoiceDraft}
               onChange={(plan, ids, converted = []) => {setInteractions(plan); setRequiredChoiceGroupIds(ids); setRequiredInteractionIds(current => current.filter(id => !converted.includes(id))); setError("");}} />

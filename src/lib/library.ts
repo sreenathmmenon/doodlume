@@ -154,6 +154,9 @@ export function mergeLibraryRecords(
           before: { ...structuredClone(h.before), id },
         })),
       };
+      // A deliberate import-copy changes identity, not the plan or revision.
+      // The source checkpoint was validated by savedWorld above.
+      if (item.state.retryCheckpoint) item.state.retryCheckpoint.worldId = id;
     }
     byId.set(item.world.id, item);
     changed.add(item.world.id);

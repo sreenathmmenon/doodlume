@@ -1,4 +1,4 @@
-import { interactionChoiceBlockedReason, interactionEffects, interactionState, reduceInteraction, safeAvailableInteractions, type InteractionAction } from "./interactions.js";
+import { interactionChoiceBlockedReason, interactionEffects, interactionState, reduceInteraction, playerAvailableInteractions, type InteractionAction } from "./interactions.js";
 import type { PlayState, WorldDefinition } from "./world.js";
 
 export interface ActionPreview {
@@ -28,7 +28,7 @@ export function previewInteraction(world: WorldDefinition, state: PlayState, act
     const resource = world.interactions?.objects.find(object => object.entityId === action.targetId)?.resource;
     const before = progress.quantities[action.targetId] ?? 0;
     const after = result.ok ? result.state.interactions!.quantities[action.targetId] : before + action.amount;
-    consequence = `${label(world, action.targetId)}: ${number.format(before)} → ${number.format(after)}${resource ? ` / ${number.format(resource.capacity)}` : ""} · Uses ${number.format(action.amount)}`;
+    consequence = `One use · ${label(world, action.targetId)}: ${number.format(before)} → ${number.format(after)}${resource ? ` / ${number.format(resource.capacity)}` : ""} · Uses ${number.format(action.amount)}`;
   } else if (action.kind === "place") {
     consequence = `${label(world, action.toolId)} moves to ${label(world, action.targetId)}.`;
   } else {
@@ -69,7 +69,12 @@ export function incompatibleTargetReason(world: WorldDefinition, state: PlayStat
   const progress = interactionState(world, state), held = progress.heldEntityId;
   const object = world.interactions?.objects.find(object => object.entityId === targetId);
   if (!held || !object || held === targetId || (object.carryable && !progress.attachments[targetId])) return;
-  if (world.interactions?.actions.some(action => action.toolId === held && action.targetId === targetId)) return;
+  const pair = world.interactions?.actions.filter(action => action.toolId === held && action.targetId === targetId) ?? [];
+  if (pair.length) {
+    if (pair.every(action => progress.completed.includes(action.id)))
+      return `${pair.length === 1 ? "This action has" : "These actions have"} already been used. Choose another target.`;
+    return;
+  }
   return `${label(world, held)} has no action with ${label(world, targetId)}.`;
 }
 
@@ -85,8 +90,8 @@ export function interactionOutcomeMessage(world: WorldDefinition, before: PlaySt
   const toolIds = [...new Set(candidates.map(candidate => candidate.toolId))];
   const enabled = new Set<string>(), previouslyEnabled = new Set<string>();
   for (const toolId of toolIds) {
-    for (const available of safeAvailableInteractions(world, {...before, interactions: {...beforeProgress, heldEntityId: toolId}})) previouslyEnabled.add(available.id);
-    for (const available of safeAvailableInteractions(world, {...after, interactions: {...afterProgress, heldEntityId: toolId}})) enabled.add(available.id);
+    for (const available of playerAvailableInteractions(world, {...before, interactions: {...beforeProgress, heldEntityId: toolId}})) previouslyEnabled.add(available.id);
+    for (const available of playerAvailableInteractions(world, {...after, interactions: {...afterProgress, heldEntityId: toolId}})) enabled.add(available.id);
   }
   const unlocked = candidates.filter(candidate => enabled.has(candidate.id) && !previouslyEnabled.has(candidate.id));
   if (unlocked.length === 1) return `Unlocked: ${unlocked[0].label}`;

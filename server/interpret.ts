@@ -77,7 +77,7 @@ const objectProperties = {
     }, required: ["left", "top", "right", "bottom"],
   },
   targetId: { type: ["string", "null"] },
-  label: { type: "string" },
+  label: { type: "string", description: "Concise player-facing object name, ideally 2–4 words and under 32 characters. Include only the color or location needed to distinguish similar objects; omit recognition prose, stroke counts and bounding-box descriptions." },
 };
 const schema = {
   type: "object",

@@ -1,4 +1,4 @@
-import { interactionState, validateInteractions, type InteractionPlan, type InteractionState } from "./interactions.js";
+import { interactionCompletionStatus, interactionState, validateInteractions, type InteractionPlan, type InteractionState } from "./interactions.js";
 import {
   validatePngArtwork,
   artworkRasterSize,
@@ -93,6 +93,8 @@ export interface PlayState {
   completed: boolean;
   exploring?: boolean;
   interactions?: InteractionState;
+  /** One solvable pre-action snapshot; never a recursive action history. */
+  retryCheckpoint?: { worldId: string; revision: number; state: Omit<PlayState, "retryCheckpoint"> };
 }
 
 export const emptyPlayState = (): PlayState => ({
@@ -101,6 +103,51 @@ export const emptyPlayState = (): PlayState => ({
   activated: [],
   completed: false,
 });
+
+/** Untrusted save data may not restore a different revision or invent progress. */
+export function getRetryCheckpoint(world: WorldDefinition, state: PlayState): PlayState | undefined {
+  const checkpoint = state.retryCheckpoint;
+  if (world.interactions?.completionPolicy !== "retryable" || !checkpoint || typeof checkpoint !== "object" ||
+      Object.keys(checkpoint).some(key => !["worldId", "revision", "state"].includes(key)) ||
+      checkpoint.worldId !== world.id || checkpoint.revision !== world.revision) return;
+  const saved = checkpoint.state;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved) || Object.hasOwn(saved, "retryCheckpoint") ||
+      Object.keys(saved).some(key => !["player", "velocity", "facingLeft", "collected", "activated", "completed", "exploring", "interactions"].includes(key))) return;
+  const point = (value: unknown, max: number) => Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).every(key => key === "x" || key === "y") &&
+    ["x", "y"].every(key => Number.isFinite((value as Record<string, number>)[key]) && Math.abs((value as Record<string, number>)[key]) <= max));
+  const ids = (value: unknown, kind: EntityKind) => Array.isArray(value) && value.length <= world.entities.length &&
+    new Set(value).size === value.length && value.every(id => typeof id === "string" && world.entities.some(entity => entity.id === id && entity.kind === kind));
+  if (typeof saved.completed !== "boolean" || (saved.exploring !== undefined && typeof saved.exploring !== "boolean") ||
+      (saved.facingLeft !== undefined && typeof saved.facingLeft !== "boolean") ||
+      (saved.player !== null && !point(saved.player, 20000)) || (saved.velocity !== undefined && !point(saved.velocity, 5000)) ||
+      !ids(saved.collected, "coin") || !ids(saved.activated, "lever")) return;
+  try {
+    const normalized = interactionState(world, saved);
+    if (saved.interactions !== undefined) {
+      const raw = saved.interactions;
+      const sameMap = (a: unknown, b: Record<string, unknown>) => Boolean(a && typeof a === "object" && !Array.isArray(a) &&
+        Object.keys(a).length === Object.keys(b).length && Object.entries(b).every(([key, value]) => Object.hasOwn(a, key) && (a as Record<string, unknown>)[key] === value));
+      if (!raw || typeof raw !== "object" || Object.keys(raw).some(key => !["heldEntityId", "quantities", "completed", "attachments", "completedSignatures"].includes(key)) || !Array.isArray(raw.completed) ||
+          raw.completed.length !== normalized.completed.length || raw.completed.some((id, index) => id !== normalized.completed[index]) ||
+          raw.heldEntityId !== normalized.heldEntityId || !sameMap(raw.quantities, normalized.quantities) ||
+          !sameMap(raw.attachments, normalized.attachments) || !sameMap(raw.completedSignatures ?? {}, normalized.completedSignatures ?? {})) return;
+    }
+    const restored = structuredClone(saved);
+    if (interactionCompletionStatus(world, restored) !== "possible") return;
+    if (restored.completed && !goalProgress(world, restored).ready) return;
+    return restored;
+  } catch { return; }
+}
+
+/** Pin the most recent solvable position before an accepted object action. */
+export function pinRetryCheckpoint(world: WorldDefinition, before: PlayState, after: PlayState): PlayState {
+  const { retryCheckpoint: _previous, ...next } = after;
+  if (world.interactions?.completionPolicy !== "retryable") return next;
+  const { retryCheckpoint: _older, ...beforeWithoutHistory } = before;
+  const recovery = interactionCompletionStatus(world, before) === "possible"
+    ? structuredClone(beforeWithoutHistory) : getRetryCheckpoint(world, before);
+  return recovery ? {...next, retryCheckpoint: {worldId: world.id, revision: world.revision, state: recovery}} : next;
+}
 
 export function validateWorld(value: unknown, options: { allowIncomplete?: boolean } = {}): WorldDefinition {
   if (!value || typeof value !== "object")
@@ -421,8 +468,11 @@ export function retainPlayState(
   const leverIds = new Set(
     world.entities.filter((e) => e.kind === "lever").map((e) => e.id),
   );
+  const {retryCheckpoint: _checkpoint, ...base} = state;
+  const recovery = getRetryCheckpoint(world, state);
   const retained: PlayState = {
-    ...state,
+    ...base,
+    ...(recovery ? {retryCheckpoint: {worldId: world.id, revision: world.revision, state: recovery}} : {}),
     collected: [
       ...new Set(state.collected.filter((id) => collectibleIds.has(id))),
     ],

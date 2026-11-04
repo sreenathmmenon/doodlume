@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyPlayState, goalProgress, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "./world.js";
-import { availableInteractions, safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction, validateInteractionChoiceOutcomes, type InteractionCommand } from "./interactions.js";
+import { availableInteractions, safeAvailableInteractions, playerAvailableInteractions, interactionCompletionStatus, interactionEffects, interactionState, reduceInteraction, validateInteractionChoiceOutcomes, type InteractionCommand } from "./interactions.js";
 import { applyWorldPatch, undoWorldPatch } from "./revisions.js";
 import { validSavedWorlds } from "../src/lib/library.js";
-import { inspectInteractionTarget, previewInteraction } from "./interaction-preview.js";
+import { inspectInteractionTarget, previewInteraction, incompatibleTargetReason } from "./interaction-preview.js";
 
 function world(): WorldDefinition {
   return validateWorld({
@@ -45,6 +45,7 @@ test("inspection predicts a transfer without spending supplies and explains unsa
   const previews = inspectInteractionTarget(w, start, "receiver");
   assert.equal(previews.find(p => p.id === "fill")?.available, true);
   assert.match(previews.find(p => p.id === "fill")!.consequence, /0 → 6 \/ 10/);
+  assert.match(previews.find(p => p.id === "fill")!.consequence, /One use/);
   assert.equal(previews.find(p => p.id === "extra")?.available, false);
   assert.match(previews.find(p => p.id === "extra")!.reason!, /block completion/);
   assert.deepEqual(start, original);
@@ -52,6 +53,31 @@ test("inspection predicts a transfer without spending supplies and explains unsa
   assert.equal(after.interactions!.quantities.receiver, 6);
   assert.equal(inspectInteractionTarget(w, after, "receiver").some(p => p.id === "fill"), false, "Completed one-time actions must not block picking up their now-ready receiver.");
   assert.equal(previewInteraction(w, after, w.interactions!.actions[0]).available, false);
+});
+
+test("a used transfer explains its one-use limit without implying every action on the pair is spent", () => {
+  const w=world();
+  w.goalRules!.requiredInteractionIds=[];
+  w.interactions!.actions=[{id:"small",kind:"transfer",label:"Pour two",toolId:"supply",targetId:"receiver",amount:2}];
+  validateWorld(w);
+  const before=step(w,emptyPlayState(),{type:"pickup",entityId:"supply"});
+  const after=step(w,before,{type:"perform",actionId:"small"});
+  assert.equal(after.interactions!.quantities.supply,8);
+  assert.equal(after.interactions!.quantities.receiver,2);
+  assert.deepEqual(inspectInteractionTarget(w,after,"receiver"),[]);
+  assert.equal(incompatibleTargetReason(w,after,"receiver"),"This action has already been used. Choose another target.");
+  w.interactions!.actions.push({id:"another",kind:"transfer",label:"Another two",toolId:"supply",targetId:"receiver",amount:2});
+  validateWorld(w);
+  assert.equal(incompatibleTargetReason(w,after,"receiver"),undefined,"Multiple distinct actions can share one tool-target pair.");
+  const both=step(w,after,{type:"perform",actionId:"another"});
+  assert.equal(incompatibleTargetReason(w,both,"receiver"),"These actions have already been used. Choose another target.");
+  w.interactions!.choiceGroups=[{id:"delivery",label:"Delivery",actionIds:["small","another"]}];
+  w.interactions!.actions[1].label="A longer alternative delivery name that must preserve the one-use explanation";
+  w.entities.find(entity=>entity.id==="receiver")!.label="An unusually long receiver name for preview clipping";
+  validateWorld(w);
+  assert.match(previewInteraction(w,before,w.interactions!.actions[0]).consequence.slice(0,160),/One use/);
+  w.interactions!.objects.find(object=>object.entityId==="receiver")!.carryable=true;
+  assert.equal(incompatibleTargetReason(w,both,"receiver"),undefined,"A free carryable receiver must remain available for pickup.");
 });
 
 test("inspection follows edited prerequisites and never silently equips the matching tool", () => {
@@ -81,6 +107,87 @@ test("transfer conserves resources, enforces possession/capacity, and rejects at
   assert.match(trapped.reason!, /block completion/);
   assert.deepEqual(start, emptyPlayState());
   assert.equal(availableInteractions(w, s).length, 0);
+});
+
+function allocationWorld(): WorldDefinition {
+  const w = world();
+  w.interactions!.objects.find(object => object.entityId === "part")!.resource = {type:"charge",capacity:10,initial:0};
+  w.interactions!.actions.push({id:"wrong-allocation",kind:"transfer",label:"Charge the part",toolId:"supply",targetId:"part",amount:6});
+  return validateWorld(w);
+}
+
+test("retryable allocation permits a legal losing move only by explicit opt-in while hints remain safe", () => {
+  for (const policy of [undefined, "protected", "retryable"] as const) {
+    const w = allocationWorld();
+    w.interactions!.completionPolicy = policy;
+    validateWorld(w);
+    const before = step(w, emptyPlayState(), {type:"pickup",entityId:"supply"});
+    const snapshot = structuredClone(before);
+    assert.equal(interactionCompletionStatus(w,before),"possible");
+    assert.ok(availableInteractions(w,before).some(action=>action.id==="wrong-allocation"));
+    assert.equal(safeAvailableInteractions(w,before).some(action=>action.id==="wrong-allocation"),false);
+    assert.equal(playerAvailableInteractions(w,before,"part").some(action=>action.id==="wrong-allocation"),policy==="retryable");
+    const result = reduceInteraction(w,before,{type:"perform",actionId:"wrong-allocation"});
+    assert.equal(result.ok,policy==="retryable");
+    assert.deepEqual(before,snapshot,"Neither a successful mistake nor rejection mutates the undo snapshot.");
+    if (policy !== "retryable") { assert.equal(result.state,before); continue; }
+    assert.deepEqual(interactionState(w,result.state).quantities,{supply:4,receiver:0,part:6});
+    assert.equal(interactionCompletionStatus(w,result.state),"impossible");
+    assert.equal(goalProgress(w,result.state).ready,false);
+    assert.deepEqual(safeAvailableInteractions(w,result.state),[]);
+    for (const actionId of ["fill","wrong-allocation","fit"]) {
+      const rejected=reduceInteraction(w,result.state,{type:"perform",actionId});
+      assert.equal(rejected.ok,false,"Short supplies, repeated actions and unmet prerequisites still reject.");
+      assert.equal(rejected.state,result.state);
+    }
+    assert.equal(reduceInteraction(w,emptyPlayState(),{type:"perform",actionId:"wrong-allocation"}).ok,false,"Retryable never equips the tool implicitly.");
+  }
+});
+
+test("retryable mistakes replay from receipts, survive save, and recover through snapshot undo or restart", () => {
+  const w=allocationWorld(); w.interactions!.completionPolicy="retryable";
+  const before=step(w,emptyPlayState(),{type:"pickup",entityId:"supply"});
+  const after=step(w,before,{type:"perform",actionId:"wrong-allocation"});
+  const forged=structuredClone(after);
+  forged.interactions!.quantities={supply:10000,receiver:10,part:0};
+  const restored=validSavedWorlds(JSON.parse(JSON.stringify([{world:w,state:forged,savedAt:new Date().toISOString()}])))[0];
+  assert.ok(restored,"An initially solvable retryable world can save a losing run.");
+  assert.equal(restored.world.interactions!.completionPolicy,"retryable");
+  assert.deepEqual(restored.state.interactions!.quantities,{supply:4,receiver:0,part:6});
+  assert.equal(interactionCompletionStatus(w,restored.state),"impossible");
+  const protectedWorld=structuredClone(w); protectedWorld.interactions!.completionPolicy="protected";
+  assert.deepEqual(interactionState(protectedWorld,restored.state),interactionState(w,restored.state),"Changing mistake policy does not rewrite earned resource transfers.");
+  const undo=JSON.parse(JSON.stringify(before));
+  assert.equal(interactionCompletionStatus(w,undo),"possible");
+  assert.ok(playerAvailableInteractions(w,undo).some(action=>action.id==="fill"));
+  assert.equal(interactionCompletionStatus(w,emptyPlayState()),"possible");
+  assert.deepEqual(interactionState(w,emptyPlayState()).quantities,{supply:10,receiver:0,part:0});
+  let success=step(w,undo,{type:"perform",actionId:"fill"});
+  // Extra still cannot overdraw the supply or overflow the receiver.
+  assert.equal(reduceInteraction(w,success,{type:"perform",actionId:"extra"}).ok,false);
+  success=step(w,step(w,success,{type:"drop"}),{type:"pickup",entityId:"part"});
+  success=step(w,success,{type:"perform",actionId:"fit"});
+  assert.equal(goalProgress(w,success).ready,true);
+});
+
+test("retryable policy keeps initial feasibility and generated choice admission strict", () => {
+  const full=allocationWorld(); full.interactions!.completionPolicy="retryable";
+  full.interactions!.objects.find(object=>object.entityId==="part")!.resource!.initial=9;
+  validateWorld(full);
+  const held=step(full,emptyPlayState(),{type:"pickup",entityId:"supply"});
+  const overflow=reduceInteraction(full,held,{type:"perform",actionId:"wrong-allocation"});
+  assert.equal(overflow.ok,false,"A full target still rejects even when the supply has enough.");
+  assert.equal(overflow.state,held);
+  const invalid=allocationWorld();
+  (invalid.interactions as unknown as {completionPolicy:string}).completionPolicy="anything";
+  assert.throws(()=>validateWorld(invalid),/supported interaction plan/);
+  const impossible=allocationWorld(); impossible.interactions!.completionPolicy="retryable";
+  impossible.interactions!.objects[0].resource!.initial=0;
+  assert.throws(()=>validateWorld(impossible),/required tasks cannot be completed/);
+  const fixed=choiceWorld(); fixed.interactions!.completionPolicy="retryable";
+  fixed.goalRules!.requiredInteractionIds=["gate-route"];
+  validateWorld(fixed);
+  assert.throws(()=>validateInteractionChoiceOutcomes(fixed),/no completing run/);
 });
 
 test("attachment unlocks actual gate only after prerequisites and preserves progress on JSON save", () => {

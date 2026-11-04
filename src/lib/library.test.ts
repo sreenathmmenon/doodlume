@@ -1,16 +1,97 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EXAMPLES, freshExample } from "./examples.js";
-import { emptyPlayState, continueExploration } from "../../shared/world.js";
+import { emptyPlayState, continueExploration, getRetryCheckpoint, pinRetryCheckpoint, retainPlayState, validateWorld } from "../../shared/world.js";
+import { interactionCompletionStatus, reduceInteraction } from "../../shared/interactions.js";
 import { applyWorldPatch } from "../../shared/revisions.js";
 import {
   mergeLibraryRecords,
   parseBackup,
   serializeBackup,
+  validSavedWorlds,
   type SavedWorld,
 } from "./library.js";
 const pixel =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+
+function retryableSave() {
+  const world=validateWorld({id:"retry-save",name:"Allocation",description:"Test",theme:"grove",source:"manual",sourceImage:pixel,revision:1,width:1440,height:820,
+    gameplay:{movement:"discover",objectiveTitle:"Fill receiver",instructions:"Choose a receiver."},
+    entities:["supply","receiver","other"].map((id,index)=>({id,kind:"decoration",x:100+index*200,y:100,width:60,height:60})),
+    interactions:{version:1,completionPolicy:"retryable",objects:[
+      {entityId:"supply",carryable:true,resource:{type:"water",capacity:2,initial:2}},
+      {entityId:"receiver",resource:{type:"water",capacity:2,initial:0}},
+      {entityId:"other",resource:{type:"water",capacity:2,initial:0}},
+    ],actions:[
+      {id:"fill",kind:"transfer",label:"Fill receiver",toolId:"supply",targetId:"receiver",amount:2},
+      {id:"other-one",kind:"transfer",label:"Supply other",toolId:"supply",targetId:"other",amount:1},
+      {id:"other-two",kind:"transfer",label:"More for other",toolId:"supply",targetId:"other",amount:1},
+    ]},goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],requiredResourceIds:["receiver"]}});
+  const before=reduceInteraction(world,{...emptyPlayState(),player:{x:250,y:220},velocity:{x:12,y:-3},facingLeft:true},{type:"pickup",entityId:"supply"}).state;
+  const attempt=reduceInteraction(world,before,{type:"perform",actionId:"other-one"});
+  assert.equal(attempt.ok,true,attempt.reason);
+  return {world,before,state:pinRetryCheckpoint(world,before,attempt.state),savedAt:"2026-11-04T10:00:00Z",history:[]};
+}
+
+test("retryable allocation pins one exact solvable state across later mistakes, backup, reload and copy",()=>{
+  const sample=retryableSave();
+  assert.equal(interactionCompletionStatus(sample.world,sample.state),"impossible");
+  assert.deepEqual(getRetryCheckpoint(sample.world,sample.state),sample.before);
+  const second=reduceInteraction(sample.world,sample.state,{type:"perform",actionId:"other-two"});
+  assert.equal(second.ok,true,second.reason);
+  sample.state=pinRetryCheckpoint(sample.world,sample.state,second.state);
+  assert.deepEqual(getRetryCheckpoint(sample.world,sample.state),sample.before,"Do not overwrite the recovery point after another losing allocation.");
+  assert.equal(Object.hasOwn(sample.state.retryCheckpoint!.state,"retryCheckpoint"),false);
+  const reopened=parseBackup(serializeBackup([sample]))[0];
+  assert.equal(interactionCompletionStatus(reopened.world,reopened.state),"impossible");
+  assert.deepEqual(getRetryCheckpoint(reopened.world,reopened.state),sample.before);
+  const restored=getRetryCheckpoint(reopened.world,reopened.state)!;
+  restored.player!.x=999;
+  assert.equal(sample.state.retryCheckpoint!.state.player!.x,250,"Recovery returns an independent copy.");
+  const copies=mergeLibraryRecords([], [sample], [sample], "copies").entries;
+  const copied=copies.find(entry=>entry.world.id!==sample.world.id)!;
+  assert.deepEqual(getRetryCheckpoint(copied.world,copied.state),sample.before);
+  assert.equal(getRetryCheckpoint(sample.world,emptyPlayState()),undefined,"Restart has no checkpoint.");
+});
+
+test("the recovery checkpoint advances after a successful intermediate allocation",()=>{
+  const sample=retryableSave(), world=sample.world;
+  world.interactions!.actions.push(
+    {id:"partial",kind:"transfer",label:"Start filling",toolId:"supply",targetId:"receiver",amount:1},
+    {id:"finish",kind:"transfer",label:"Finish filling",toolId:"supply",targetId:"receiver",amount:1},
+  );
+  const partial=reduceInteraction(world,sample.before,{type:"perform",actionId:"partial"});
+  assert.equal(partial.ok,true,partial.reason);
+  const safe=pinRetryCheckpoint(world,sample.before,partial.state);
+  assert.equal(interactionCompletionStatus(world,safe),"possible");
+  const mistake=reduceInteraction(world,safe,{type:"perform",actionId:"other-one"});
+  assert.equal(mistake.ok,true,mistake.reason);
+  const pinned=pinRetryCheckpoint(world,safe,mistake.state);
+  const {retryCheckpoint,...expected}=safe;
+  assert.deepEqual(getRetryCheckpoint(world,pinned),expected);
+  assert.deepEqual(getRetryCheckpoint(world,pinned)!.interactions!.completed,["partial"]);
+});
+
+test("invalid, nested, forged or stale retry checkpoints are discarded without discarding valid saved progress",()=>{
+  const sample=retryableSave();
+  for(const mutate of [
+    (s:any)=>s.retryCheckpoint.worldId="elsewhere",
+    (s:any)=>s.retryCheckpoint.revision++,
+    (s:any)=>s.retryCheckpoint.state.retryCheckpoint={},
+    (s:any)=>s.retryCheckpoint.state.player={x:Infinity,y:0},
+    (s:any)=>s.retryCheckpoint.state.interactions.quantities.supply=999,
+    (s:any)=>s.retryCheckpoint.state.interactions.extraHistory={state:{}},
+    (s:any)=>{const {retryCheckpoint,...failed}=s;s.retryCheckpoint.state=failed;},
+  ]) {
+    const invalid=structuredClone(sample);mutate(invalid.state);
+    const [saved]=validSavedWorlds([invalid]);
+    assert.ok(saved,"A broken checkpoint need not erase the actual run.");
+    assert.equal(saved.state.retryCheckpoint,undefined);
+  }
+  assert.equal(retainPlayState({...sample.world,revision:2},sample.state).retryCheckpoint,undefined);
+  const protectedWorld=structuredClone(sample.world);protectedWorld.interactions!.completionPolicy="protected";
+  assert.equal(retainPlayState(protectedWorld,sample.state).retryCheckpoint,undefined);
+});
 
 test("a growing library keeps every world; imports preserve existing versions and copies keep valid history", () => {
   const items: SavedWorld[] = Array.from({ length: 12 }, (_, index) => ({

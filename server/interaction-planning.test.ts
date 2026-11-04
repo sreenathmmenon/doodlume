@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import { prepareSourceInteractionReview, readGameplayPlan, gameplaySchema } from "./creative-adaptation.js";
-import { readPlannedInteractions, interactionsSchema, interactionInstructions } from "./interaction-planning.js";
+import { readPlannedInteractions, interactionsSchema, interactionInstructions, plannedInteractionDiagnostics, applyPlannedInteractions } from "./interaction-planning.js";
 import { interpretDrawing, RecognitionReviewError } from "./interpret.js";
 import { modelConnection } from "./provider.js";
 import { imageData } from "./images.js";
 import { interactionEffects, reduceInteraction } from "../shared/interactions.js";
-import { emptyPlayState, goalProgress } from "../shared/world.js";
+import { emptyPlayState, goalProgress, type WorldDefinition } from "../shared/world.js";
 
 const connection = modelConnection({ MODEL_PROVIDER: "meta", MODEL_API_KEY: "synthetic-test-only" });
 async function compile(options: { prefix?: string; amount?: number; initial?: number; required?: string[]; targetId?: string; carryable?: boolean; move?:boolean; resourceGoal?:boolean; requiresResource?:"source"|"target"; placement?:"place"|"use"; alignment?:"center"|"left"|"right"|"above"|"below"; edgePlacement?:boolean; rewrite?: (value: unknown, call: number) => unknown; onRequest?: (body: unknown) => void; reserve?: () => void; transport?: typeof fetch; signal?: AbortSignal } = {}) {
@@ -402,4 +402,95 @@ test("surface layer schema is optional, parsed explicitly and survives compilati
   assert.equal(rebuilt.interactions?.objects[0].layer,"surface");
   assert.match(interactionInstructions,/source-grounded/);
   assert.match(interactionInstructions,/layer:"surface"/);
+});
+
+test("retryable policy is optional and survives real compilation and creator review",async()=>{
+  assert.equal(interactionsSchema.anyOf[1].required?.includes("completionPolicy"),false);
+  const actions=[{id:"fill",kind:"transfer",label:"Fill",toolId:"source",targetId:"target",amount:1}];
+  const plan={version:1,objects:[{entityId:"source",carryable:true},{entityId:"target"}],actions};
+  assert.equal(readPlannedInteractions(plan)?.completionPolicy,undefined);
+  assert.equal(readPlannedInteractions({...plan,completionPolicy:"retryable"})?.completionPolicy,"retryable");
+  assert.throws(()=>readPlannedInteractions({...plan,completionPolicy:"anything"}),/incomplete/);
+  const world=await compile({move:true,resourceGoal:true,rewrite:value=>{
+    const proposal=structuredClone(value) as any;
+    const interactions=proposal.gameplay.interactions;
+    interactions.completionPolicy="retryable";
+    interactions.objects.push({entityId:"dock",carryable:false,resource:{type:"water",initial:0,capacity:2}});
+    interactions.actions[0].effects=[];
+    interactions.actions.push({id:"other-allocation",kind:"transfer",label:"Fill the other receiver",toolId:"fixture-source",targetId:"dock",amount:2});
+    return proposal;
+  }});
+  assert.equal(world.interactions?.completionPolicy,"retryable");
+  const held=reduceInteraction(world,emptyPlayState(),{type:"pickup",entityId:"fixture-source"}).state;
+  const losing=reduceInteraction(world,held,{type:"perform",actionId:"other-allocation"});
+  assert.equal(losing.ok,true);assert.equal(goalProgress(world,losing.state).ready,false);
+  const rebuilt=await prepareSourceInteractionReview(world,{enabled:false,apiKey:""},new AbortController().signal);
+  assert.equal(rebuilt.interactions?.completionPolicy,"retryable");
+  assert.match(interactionInstructions,/Never invent a drain, waste bin/);
+});
+
+test("generated retryable labels cannot bypass consequential-fork admission",async()=>{
+  let calls=0;
+  await assert.rejects(compile({resourceGoal:true,onRequest:()=>{calls++;},rewrite:value=>{
+    const proposal=structuredClone(value) as any;
+    proposal.gameplay.interactions.completionPolicy="retryable";
+    return proposal;
+  }}),/real allocation decision/);
+  assert.equal(calls,2,"One correction remains bounded; an unsupported retryable claim is not silently accepted");
+});
+
+test("one correction sees text bounds, tool roles and impossible transfer totals together",async()=>{
+  const requests:any[]=[];
+  const world=await compile({resourceGoal:true,onRequest:request=>requests.push(request),rewrite:(value,call)=>{
+    if(call>1)return value;
+    const proposal=structuredClone(value) as any;
+    proposal.gameplay.instructions="x".repeat(189);
+    const interactions=proposal.gameplay.interactions;
+    interactions.objects[0].carryable=false;
+    interactions.objects[0].resource={type:"water",initial:5,capacity:5};
+    interactions.objects[1].resource.capacity=5;
+    interactions.actions[0].amount=3;
+    return proposal;
+  }});
+  assert.equal(requests.length,2);
+  const instructions=requests[1].messages[0].content as string;
+  const diagnostic=JSON.parse(instructions.slice(instructions.lastIndexOf("\n")+1));
+  assert.match(diagnostic.validationError,/gameplay.instructions.*180.*189/);
+  assert.match(diagnostic.validationError,/fixture-source.*carryable:true/);
+  assert.match(diagnostic.validationError,/need 5 more water.*at most 3/);
+  assert.equal(diagnostic.rejectedPlan.gameplay.instructions.length,189);
+  assert.equal(diagnostic.rejectedPlan.gameplay.interactions.objects[0].carryable,false);
+  assert.equal(diagnostic.rejectedPlan.gameplay.interactions.actions[0].amount,3);
+  assert.ok(diagnostic.validationError.length<=1500);
+  assert.equal(world.interactions?.actions[0].kind,"transfer");
+  assert.equal(gameplaySchema.properties.instructions.maxLength,180);
+});
+
+test("gameplay decoder names independent field errors without throwing on malformed arrays",()=>{
+  assert.throws(()=>readGameplayPlan({mode:"creative",movement:"discover",reason:"Reason",avatarId:null,objective:"explore",
+    objectiveTitle:"T".repeat(101),objectiveLabel:"Task",destinationLabel:"Finish",instructions:"I".repeat(249),
+    clues:{unexpected:true},obstacleIds:[],path:[{x:0,y:0,label:"First"},{x:500,y:500,label:"Middle"},{x:1000,y:1000,label:"Last"}]}),error=>{
+    assert.match((error as Error).message,/objectiveTitle.*100.*101/);
+    assert.match((error as Error).message,/instructions.*180.*249/);
+    assert.match((error as Error).message,/clues must be an array/);
+    return true;
+  });
+});
+
+
+test("diagnostic subset budget defers to full validation for a valid creator plan with more than 16 actions",()=>{
+  const amounts=Array.from({length:17},(_,index)=>2**(-index));
+  const capacity=amounts.reduce((sum,amount)=>sum+amount,0);
+  const world:WorldDefinition={id:"creator-allocations",name:"Creator allocations",description:"Synthetic bounded analysis fixture",theme:"grove",source:"manual",sourceImage:"",width:800,height:600,revision:1,
+    gameplay:{movement:"discover",objectiveTitle:"Fill the receiver",instructions:"Use the supply"},
+    entities:[{id:"supply",kind:"decoration",x:0,y:0,width:40,height:40},{id:"receiver",kind:"decoration",x:100,y:0,width:40,height:40}],
+    interactions:{version:1,objects:[{entityId:"supply",carryable:true,resource:{type:"water",capacity,initial:capacity}},{entityId:"receiver",resource:{type:"water",capacity,initial:0}}],
+      actions:amounts.map((amount,index)=>({id:`fill-${index}`,kind:"transfer",label:"Fill",toolId:"supply",targetId:"receiver",amount}))},
+    goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],requiredResourceIds:["receiver"]}};
+  assert.deepEqual(plannedInteractionDiagnostics(world.interactions!,["receiver"]),[]);
+  const rebuilt=applyPlannedInteractions(world,world.interactions,[],false,{validateGeneratedChoices:false});
+  assert.equal(rebuilt.interactions!.actions.length,17);
+  const impossible=structuredClone(world);
+  impossible.interactions!.objects[0].resource!.initial=0;
+  assert.throws(()=>applyPlannedInteractions(impossible,impossible.interactions,[],false,{validateGeneratedChoices:false}),/cannot all finish|cannot be completed/);
 });

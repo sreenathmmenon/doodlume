@@ -1,10 +1,12 @@
 import Phaser from "phaser";
 import { objectName } from "../lib/object-name";
 import type { InteractionAction } from "../../shared/interactions";
-import { safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
+import { playerAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
 import { inspectInteractionTarget, incompatibleTargetReason, interactionOutcomeMessage, type ActionPreview } from "../../shared/interaction-preview";
 import type { PlayState, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
+
+const resourceNumber = new Intl.NumberFormat("en", {maximumSignificantDigits: 6});
 
 interface InteractionHost {
   state(): PlayState;
@@ -22,6 +24,7 @@ interface InteractionHost {
  * proximity, source-art placement and immediate feedback. No scene dispatch. */
 export class ObjectInteractions {
   private art = new Map<string, Phaser.GameObjects.Image>();
+  private resourceLabels = new Map<string, Phaser.GameObjects.Text>();
   private marks: Phaser.GameObjects.Graphics;
   private focus: Phaser.GameObjects.Graphics;
   private prompt: Phaser.GameObjects.Text;
@@ -114,6 +117,11 @@ export class ObjectInteractions {
       image.setData("home", { x: image.x, y: image.y, width: image.displayWidth, height: image.displayHeight });
       this.art.set(entity.id, image);
     }
+    for (const object of world.interactions?.objects ?? []) if (object.resource) {
+      this.resourceLabels.set(object.entityId, scene.add.text(0, 0, "", {
+        fontFamily: "Manrope, sans-serif", fontSize: "14px", fontStyle: "bold", color: "#253340",
+      }).setOrigin(0.5, 0).setDepth(25));
+    }
     scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       this.tap = { x: pointer.x, y: pointer.y, id: pointer.id };
     });
@@ -166,7 +174,7 @@ export class ObjectInteractions {
   }
   private objectAt(point: { x: number; y: number }) {
     const state = interactionState(this.world, this.host.state());
-    const actions = safeAvailableInteractions(this.world, this.host.state());
+    const actions = playerAvailableInteractions(this.world, this.host.state());
     let candidates = (this.world.interactions?.objects ?? [])
       .map(o => this.entity(o.entityId)).filter((e): e is WorldEntity => Boolean(e))
       // A fitted part must not block selecting the machine beneath it. Parts
@@ -204,7 +212,7 @@ export class ObjectInteractions {
   private choice(
     entity: WorldEntity,
     state = interactionState(this.world, this.host.state()),
-    actions = safeAvailableInteractions(this.world, this.host.state()),
+    actions = playerAvailableInteractions(this.world, this.host.state()),
   ) {
     const action = actions.find(action => action.targetId === entity.id);
     if (action) return { entity, action, label: action.label };
@@ -219,7 +227,7 @@ export class ObjectInteractions {
   context() {
     const state = interactionState(this.world, this.host.state());
     if (this.hasPendingMotion() || (this.host.state().completed && !this.host.state().exploring)) return { heldEntityId: state.heldEntityId, label: "", nearby: undefined };
-    const actions = safeAvailableInteractions(this.world, this.host.state());
+    const actions = playerAvailableInteractions(this.world, this.host.state());
     const nearby = (this.world.interactions?.objects ?? [])
       .map(o => this.entity(o.entityId)).filter((e): e is WorldEntity => Boolean(e))
       .filter(e => this.distance(e) <= 100)
@@ -231,7 +239,7 @@ export class ObjectInteractions {
 
   availableActions() {
     if (this.hasPendingMotion()) return [];
-    return safeAvailableInteractions(this.world, this.host.state()).map(({ id, label, targetId }) => ({ id, label, targetId }));
+    return playerAvailableInteractions(this.world, this.host.state()).map(({ id, label, targetId }) => ({ id, label, targetId }));
   }
 
   interact(id: string, actionId?: string) {
@@ -265,7 +273,7 @@ export class ObjectInteractions {
     }
     this.cancelApproach();
     this.host.stopApproach();
-    const alternatives = safeAvailableInteractions(this.world, this.host.state()).filter(action => action.targetId === id);
+    const alternatives = playerAvailableInteractions(this.world, this.host.state()).filter(action => action.targetId === id);
     if (!actionId && alternatives.length > 1) {
       this.showChoices(entity, alternatives);
       return true;
@@ -584,16 +592,39 @@ export class ObjectInteractions {
       if (!object.resource) continue;
       const entity = this.entity(object.entityId);
       if (!entity) continue;
-      const point = this.point(entity), width = 40 * unit, height = 5 * unit;
-      const x = point.x - width / 2, y = point.y + Math.min(this.size(entity).height / 2, 52 * unit) + 10 * unit;
-      this.marks.fillStyle(0x1d3041, 0.85).fillRoundedRect(x - 2 * unit, y - 2 * unit, width + 4 * unit, height + 4 * unit, 4 * unit);
       const actual = state.quantities[entity.id] ?? 0;
+      const point = this.point(entity), text = this.resourceLabels.get(entity.id)!;
+      text.setText(`${resourceNumber.format(actual)} / ${resourceNumber.format(object.resource.capacity)}`).setScale(unit);
+      const badgeWidth = Math.max(56, text.width + 16) * unit, badgeHeight = 32 * unit;
+      const view = camera.worldView;
+      const centerX = Phaser.Math.Clamp(point.x, view.left + badgeWidth / 2 + 4 * unit, view.right - badgeWidth / 2 - 4 * unit);
+      const badgeY = state.heldEntityId === entity.id
+        ? point.y - this.size(entity).height / 2 - badgeHeight - 8 * unit
+        : point.y + Math.min(this.size(entity).height / 2, 52 * unit) + 8 * unit;
+      const y = Phaser.Math.Clamp(badgeY,
+        view.top + 4 * unit, view.bottom - badgeHeight - 4 * unit);
+      // Never turn off-screen objects into a pile of edge labels. The badges
+      // stay readable at the fitted image scale and while zooming/panning.
+      text.setVisible(view.contains(point.x, point.y));
+      if (!text.visible) continue;
+      const full = actual >= object.resource.capacity;
+      const delivered = full && this.world.interactions!.actions.some(action => action.kind === "transfer" && action.targetId === entity.id && state.completed.includes(action.id));
+      const x = centerX - badgeWidth / 2;
+      if (delivered) this.marks.lineStyle(6 * unit, 0x5bd6bb, 0.13)
+        .strokeRoundedRect(x - 2 * unit, y - 2 * unit, badgeWidth + 4 * unit, badgeHeight + 4 * unit, 10 * unit);
+      this.marks.fillStyle(delivered ? 0xf0faf6 : 0xffffff, 0.97)
+        .fillRoundedRect(x, y, badgeWidth, badgeHeight, 8 * unit);
+      this.marks.lineStyle(unit, delivered ? 0x23846e : 0xb4c3cc, 0.95)
+        .strokeRoundedRect(x, y, badgeWidth, badgeHeight, 8 * unit);
+      text.setPosition(centerX, y + 3 * unit).setColor(delivered ? "#17694f" : "#253340");
       const previous = this.displayedQuantities.get(entity.id) ?? actual;
       const displayed = this.reducedMotion || Math.abs(actual - previous) < 0.01 ? actual
         : Phaser.Math.Linear(previous, actual, 1 - Math.exp(-delta / 105));
       this.displayedQuantities.set(entity.id, displayed);
       const fraction = Math.max(0, Math.min(1, displayed / object.resource.capacity));
-      this.marks.fillStyle(0x5bd6bb, 1).fillRoundedRect(x, y, width * fraction, height, 2 * unit);
+      const meterX = x + 8 * unit, meterY = y + 25 * unit, meterWidth = badgeWidth - 16 * unit;
+      this.marks.fillStyle(0xd8e3e9, 1).fillRoundedRect(meterX, meterY, meterWidth, 3 * unit, 1.5 * unit);
+      this.marks.fillStyle(0x23846e, 1).fillRoundedRect(meterX, meterY, meterWidth * fraction, 3 * unit, 1.5 * unit);
     }
     // A check means the target's required work is done, not merely that one
     // transfer occurred. Partial receivers retain only their honest fill meter.
@@ -630,7 +661,7 @@ export class ObjectInteractions {
       this.hover = this.objectAt(point)?.id ?? "";
     }
     const context = this.context();
-    const available = safeAvailableInteractions(this.world, this.host.state());
+    const available = playerAvailableInteractions(this.world, this.host.state());
     // Held tools reveal only targets that can really accept them now.
     for (const id of new Set(available.map(action => action.targetId))) {
       const entity = this.entity(id);

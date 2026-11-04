@@ -1,10 +1,11 @@
 import type { PlayState, WorldDefinition } from "../../shared/world";
-import { interactionChoiceBlockedReason, interactionState, safeAvailableInteractions } from "../../shared/interactions";
+import { interactionChoiceBlockedReason, interactionCompletionStatus, interactionState, safeAvailableInteractions } from "../../shared/interactions";
 import { objectName } from "./object-name";
 
 export interface InteractionHint {
   entityId: string;
   text: string;
+  recovery?: boolean;
 }
 
 /** An optional hint uses the same legal actions as play. It never spends a
@@ -12,6 +13,13 @@ export interface InteractionHint {
 export function nextInteractionHint(world: WorldDefinition, state: PlayState): InteractionHint | undefined {
   if (!world.interactions || (state.completed && !state.exploring)) return;
   const progress = interactionState(world, state);
+  if (world.interactions.completionPolicy === "retryable" && interactionCompletionStatus(world, state) === "impossible") {
+    const missing = (world.goalRules?.requiredResourceIds ?? []).map(id => world.interactions!.objects.find(object => object.entityId === id))
+      .find(object => object?.resource && (progress.quantities[object.entityId] ?? 0) < object.resource.capacity);
+    const id = missing?.entityId ?? world.interactions.objects[0].entityId;
+    const shortfall = missing?.resource ? `${objectName(world, id, 40)} still needs ${new Intl.NumberFormat("en",{maximumSignificantDigits:6}).format(missing.resource.capacity - (progress.quantities[id] ?? 0))} more. ` : "";
+    return {entityId:id, recovery:true, text:`${shortfall}The remaining moves cannot finish this allocation. Revisit your last choice or restart.`};
+  }
   const actions = world.interactions.actions;
   const needed = new Set<string>();
   const resources = new Set<string>();

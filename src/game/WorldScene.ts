@@ -28,6 +28,7 @@ import { objectName } from "../lib/object-name";
 import {
   emptyPlayState,
   goalProgress,
+  pinRetryCheckpoint,
   type PlayState,
   type WorldDefinition,
   type WorldEntity,
@@ -1912,8 +1913,11 @@ export class WorldScene extends Phaser.Scene {
       change: state => {
         // The reducer has accepted this action, but the live state still holds
         // its exact starting point. Pickup/drop never append an action receipt.
-        if (state.interactions?.completed.some(id => !this.state.interactions?.completed.includes(id)))
-          this.hooks.onBeforeObjectAction?.(this.snapshot());
+        if (state.interactions?.completed.some(id => !this.state.interactions?.completed.includes(id))) {
+          const before = this.snapshot();
+          this.hooks.onBeforeObjectAction?.(before);
+          state = pinRetryCheckpoint(this.definition, before, state);
+        }
         this.state = state;
         this.applyObjectEffects();
         this.completeInteractionObjectives();

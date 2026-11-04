@@ -13,7 +13,7 @@ import { reviewGoalRules } from "../shared/recognition-review.js";
 import { sourcePlatformScene } from "./source-platform-scene.js";
 import { checkRoamRoute } from "./roam-route.js";
 import { sourceScenery, SOURCE_SCENERY_NOTE } from "./source-scenery.js";
-import { applyPlannedInteractions, interactionInstructions, interactionsSchema, readPlannedInteractions, type PlannedInteractions } from "./interaction-planning.js";
+import { applyPlannedInteractions, interactionInstructions, interactionsSchema, readPlannedInteractions, plannedInteractionDiagnostics, type PlannedInteractions } from "./interaction-planning.js";
 
 export interface SourceSelection {
   id: string;
@@ -55,8 +55,8 @@ export const gameplaySchema = {
   properties: {
     mode: { type: "string", enum: ["source-layout", "creative"] },
     movement: { type: "string", enum: ["platform", "roam", "discover"] },
-    objectiveTitle: { type: "string" },
-    instructions: { type: "string" },
+    objectiveTitle: { type: "string", minLength:1, maxLength:100 },
+    instructions: { type: "string", minLength:1, maxLength:180 },
     interactions: interactionsSchema,
     requiredResourceIds: { type: "array", maxItems: 24, items: { type: "string" } },
     requiredInteractionIds: { type: "array", maxItems: 16, items: { type: "string" } },
@@ -65,21 +65,21 @@ export const gameplaySchema = {
       type: "array", maxItems: 24,
       items: {
         type: "object", additionalProperties: false,
-        properties: { entityId: { type: "string" }, text: { type: "string" } },
+        properties: { entityId: { type: "string" }, text: { type: "string", minLength:1, maxLength:160 } },
         required: ["entityId", "text"],
       },
     },
     obstacleIds: { type: "array", maxItems: 12, items: { type: "string" } },
-    reason: { type: "string" },
+    reason: { type: "string", minLength:1, maxLength:500 },
     avatarId: { type: ["string", "null"] },
     objective: { type: "string", enum: ["collect", "explore", "activate"] },
-    objectiveLabel: { type: "string" },
-    destinationLabel: { type: "string" },
+    objectiveLabel: { type: "string", maxLength:100 },
+    destinationLabel: { type: "string", maxLength:100 },
     path: {
       type: "array", minItems: 3, maxItems: 6,
       items: {
         type: "object", additionalProperties: false,
-        properties: { x: { type: "number" }, y: { type: "number" }, label: { type: "string" } },
+        properties: { x: { type: "number" }, y: { type: "number" }, label: { type: "string", minLength:1, maxLength:80 } },
         required: ["x", "y", "label"],
       },
     },
@@ -104,14 +104,18 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new ModelPlanError("Meta did not return a usable game plan. Your image is unchanged.");
   const input = value as Partial<GameplayPlan>;
+  const diagnostics: string[] = [];
+  let interactions: PlannedInteractions | undefined;
+  try { interactions=readPlannedInteractions(input.interactions); }
+  catch(error) { if(!(error instanceof ModelPlanError))throw error; diagnostics.push(`gameplay.interactions: ${error.message}`); }
   // Backward-compatible for already recorded fixture/model plans; newly
   // requested model output requires these fields in its JSON schema.
   const plan = { ...input, movement: input.movement ?? "platform",
     objectiveTitle: input.objectiveTitle ?? input.objectiveLabel,
     instructions: input.instructions ?? `Reach ${input.destinationLabel ?? "the destination"}.`,
     clues: input.clues ?? [], obstacleIds: input.obstacleIds ?? [],
-    interactions: readPlannedInteractions(input.interactions), requiredInteractionIds: input.requiredInteractionIds ?? [], requiredResourceIds: input.requiredResourceIds ?? [], requiredChoiceGroupIds: input.requiredChoiceGroupIds ?? [] } as GameplayPlan;
-  if (plan.movement === "discover" && typeof plan.destinationLabel === "string" && !plan.destinationLabel.trim() && plan.clues.length)
+    interactions, requiredInteractionIds: input.requiredInteractionIds ?? [], requiredResourceIds: input.requiredResourceIds ?? [], requiredChoiceGroupIds: input.requiredChoiceGroupIds ?? [] } as GameplayPlan;
+  if (plan.movement === "discover" && typeof plan.destinationLabel === "string" && !plan.destinationLabel.trim() && Array.isArray(plan.clues) && plan.clues.length)
     plan.destinationLabel = plan.objectiveTitle || plan.objectiveLabel;
   // Pointer object tasks complete through their real actions/resources. Empty
   // legacy traversal labels must not invalidate an otherwise complete task.
@@ -120,30 +124,49 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
     if (typeof plan.destinationLabel === "string" && !plan.destinationLabel.trim()) plan.destinationLabel=plan.objectiveTitle;
   }
   const boundedText = (text: unknown, max: number) => typeof text === "string" && text.trim().length > 0 && text.length <= max;
-  if (! ["source-layout", "creative"].includes(plan.mode) ||
-      !boundedText(plan.reason, 500) ||
-      !(plan.avatarId === null || (typeof plan.avatarId === "string" && /^[\w-]{1,60}$/.test(plan.avatarId))) ||
-      !["collect", "explore", "activate"].includes(plan.objective) ||
-      !boundedText(plan.objectiveLabel, 100) || !boundedText(plan.destinationLabel, 100) ||
-      !["platform", "roam", "discover"].includes(plan.movement) ||
-      !boundedText(plan.objectiveTitle, 100) || !boundedText(plan.instructions, 180) ||
-      !Array.isArray(plan.clues) || plan.clues.length > 24 ||
-      new Set(plan.clues.map(clue => clue?.entityId)).size !== plan.clues.length ||
-      plan.clues.some(clue => !clue || typeof clue.entityId !== "string" || !/^[\w-]{1,60}$/.test(clue.entityId) || !boundedText(clue.text, 160)) ||
-      !Array.isArray(plan.obstacleIds) || plan.obstacleIds.length > 12 ||
-      new Set(plan.obstacleIds).size !== plan.obstacleIds.length ||
-      plan.obstacleIds.some(id => typeof id !== "string" || !/^[\w-]{1,60}$/.test(id)) ||
-      !Array.isArray(plan.requiredResourceIds) || plan.requiredResourceIds.length > 24 || new Set(plan.requiredResourceIds).size !== plan.requiredResourceIds.length ||
-      plan.requiredResourceIds.some(id=>typeof id!=="string" || !/^[\w-]{1,60}$/.test(id)) || (!plan.interactions && plan.requiredResourceIds.length>0) ||
-      !Array.isArray(plan.requiredInteractionIds) || plan.requiredInteractionIds.length > 16 ||
-      new Set(plan.requiredInteractionIds).size !== plan.requiredInteractionIds.length ||
-      plan.requiredInteractionIds.some(id => typeof id !== "string" || !/^[\w-]{1,60}$/.test(id)) ||
-      (!plan.interactions && plan.requiredInteractionIds.length > 0) ||
-      !Array.isArray(plan.requiredChoiceGroupIds) || plan.requiredChoiceGroupIds.length > 8 || new Set(plan.requiredChoiceGroupIds).size !== plan.requiredChoiceGroupIds.length ||
-      plan.requiredChoiceGroupIds.some(id => typeof id !== "string" || !plan.interactions?.choiceGroups?.some(group => group.id === id)) ||
-      !Array.isArray(plan.path) || plan.path.length < 3 || plan.path.length > 6 ||
-      plan.path.some(p => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 1000 || !boundedText(p.label, 80)))
-    throw new ModelPlanError("Meta's game plan was incomplete. Try the same image again; your current world is unchanged.");
+  const textField = (field: string, value: unknown, max: number) => {
+    if(!boundedText(value,max))diagnostics.push(`gameplay.${field} must be nonempty text of at most ${max} characters; received ${typeof value==="string"?`${value.length} characters`:typeof value}. Rewrite it within the limit.`);
+  };
+  for(const [field,max] of [["reason",500],["objectiveLabel",100],["destinationLabel",100],["objectiveTitle",100],["instructions",180]] as const)textField(field,plan[field],max);
+  const enumField=(field:string,value:unknown,allowed:string[])=>{if(typeof value!=="string"||!allowed.includes(value))diagnostics.push(`gameplay.${field} must be one of ${allowed.join(", ")}.`);};
+  enumField("mode",plan.mode,["source-layout","creative"]);
+  enumField("movement",plan.movement,["platform","roam","discover"]);
+  enumField("objective",plan.objective,["collect","explore","activate"]);
+  const id=(value:unknown):value is string=>typeof value==="string"&&/^[\w-]{1,60}$/.test(value);
+  if(plan.avatarId!==null&&!id(plan.avatarId))diagnostics.push("gameplay.avatarId must be a source ID or null.");
+  const ids=(field:string,value:unknown,max:number)=>{
+    if(!Array.isArray(value)||value.length>max||new Set(value).size!==value.length||value.some(value=>!id(value))){
+      diagnostics.push(`gameplay.${field} must contain at most ${max} distinct source/action IDs.`);return false;
+    }
+    return true;
+  };
+  ids("obstacleIds",plan.obstacleIds,12);
+  for(const [field,max] of [["requiredResourceIds",24],["requiredInteractionIds",16],["requiredChoiceGroupIds",8]] as const){
+    const values=plan[field];
+    if(ids(field,values,max)&&values!.length){
+      if(!plan.interactions)diagnostics.push(`gameplay.${field} needs a valid interactions plan.`);
+      else if(field==="requiredChoiceGroupIds"&&values!.some(value=>!plan.interactions!.choiceGroups?.some(group=>group.id===value)))diagnostics.push("gameplay.requiredChoiceGroupIds must reference declared choice groups.");
+    }
+  }
+  if(!Array.isArray(plan.clues)||plan.clues.length>24)diagnostics.push("gameplay.clues must be an array with at most 24 clues.");
+  else {
+    if(new Set(plan.clues.map(clue=>clue?.entityId)).size!==plan.clues.length)diagnostics.push("gameplay.clues must not repeat entityId.");
+    for(const [index,clue] of plan.clues.entries()){
+      if(!clue||!id(clue.entityId))diagnostics.push(`gameplay.clues[${index}].entityId must be a source ID.`);
+      textField(`clues[${index}].text`,clue?.text,160);
+    }
+  }
+  if(!Array.isArray(plan.path)||plan.path.length<3||plan.path.length>6)diagnostics.push("gameplay.path must contain 3–6 source landmarks.");
+  else for(const [index,point] of plan.path.entries()){
+    if(!point||!Number.isFinite(point.x)||!Number.isFinite(point.y)||point.x<0||point.x>1000||point.y<0||point.y>1000)diagnostics.push(`gameplay.path[${index}] needs finite x/y coordinates within 0–1000.`);
+    textField(`path[${index}].label`,point?.label,80);
+  }
+  if(diagnostics.length){
+    // Text errors must not spend the single correction while independent tool
+    // roles or provably insufficient one-time transfer amounts remain hidden.
+    if(plan.interactions)diagnostics.push(...plannedInteractionDiagnostics(plan.interactions,Array.isArray(plan.requiredResourceIds)?plan.requiredResourceIds:[]));
+    throw new ModelPlanError(`Meta's game plan was incomplete:\n${diagnostics.join("\n")}`);
+  }
   return plan;
 }
 
@@ -390,6 +413,8 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
 export async function compileCreativeAdaptation(options: AdaptationOptions): Promise<WorldDefinition> {
   const { source, inputKind, plan, signal } = options;
   signal.throwIfAborted();
+  if(options.validateGeneratedChoices!==false&&plan.interactions?.completionPolicy==="retryable"&&plan.movement!=="discover")
+    throw new ModelPlanError('Generated retryable allocation puzzles currently require movement:"discover". Keep traversal plans protected.');
   const sourceIds = new Set(options.objects.map(object => object.id));
   if (plan.avatarId && !sourceIds.has(plan.avatarId))
     throw new InterpretationError("The proposed playable subject did not match a source selection. Which pictured subject should be used?");

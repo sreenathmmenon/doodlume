@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import {
   interpretDrawing,
   InterpretationError,
-  RecognitionReviewError,
 } from "./interpret.js";
+import { interpretationErrorResponse } from "./interpretation-response.js";
 import { interpretAmendment } from "./amend.js";
 import { installCapture, CaptureError } from "./capture.js";
 import { modelConnection } from "./provider.js";
@@ -150,12 +150,8 @@ for (const action of ["interpret", "amend"] as const)
         ),
       };
     } catch (error) {
-      if (error instanceof RecognitionReviewError)
-        return reply
-          .code(422)
-          .send({ error: error.message, recovery: error.recovery });
-      if (error instanceof InterpretationError)
-        return reply.code(error.status).send({ error: error.message });
+      const response=interpretationErrorResponse(error);
+      if(response)return reply.code(response.status).send(response.body);
       if (controller.signal.aborted)
         return reply.code(504).send({
           error:
@@ -180,12 +176,14 @@ app.post<{Body:{world?:unknown}}>("/api/source-review",async(request,reply)=>{
   reply.raw.on("close",onClose);inFlight=true;
   try{return {world:await prepareSourceInteractionReview(request.body?.world,{enabled:true,apiKey:"",provider:"local-sam2",local},controller.signal)};}
   catch(error){
-    if(error instanceof RecognitionReviewError)return reply.code(422).send({error:error.message,recovery:error.recovery});
-    if(error instanceof InterpretationError)return reply.code(error.status).send({error:error.message});
+    const response=interpretationErrorResponse(error);
+    if(response)return reply.code(response.status).send(response.body);
     return reply.code(controller.signal.aborted?504:422).send({error:"The corrected source could not be prepared. Your selections and game rules are still here."});
   }finally{clearTimeout(timeout);reply.raw.off("close",onClose);inFlight=false;}
 });
 app.setErrorHandler((error, _request, reply) => {
+  const response=interpretationErrorResponse(error);
+  if(response)return reply.code(response.status).send(response.body);
   if (error instanceof CaptureError)
     return reply.code(error.status).send({ error: error.message });
   const status =
