@@ -1,6 +1,6 @@
 # Doodlume submission package
 
-Updated 5 November 2026, IST. The application is live on Railway. The replacement film has real product recordings, an animated model explanation and a revised narration plan; the final combined film and public video link remain pending. Repository visibility remains private at the owner's request until the owner changes it.
+Updated 5 November 2026, IST. [Open the live product](https://doodlume-production-9df2.up.railway.app/) · [Watch the published demo](https://youtu.be/cUQJPewqZbI) · [Public repository](https://github.com/sreenathmmenon/doodlume). The owner has made the repository public. Form submission is not confirmed by this document.
 
 [Live product](https://doodlume-production-9df2.up.railway.app/) · [Reviewer guide and weighted rubric](JUDGING-GUIDE.md) · [Release checklist](SUBMISSION-CHECKLIST.md)
 
@@ -52,7 +52,7 @@ See [provider code](../server/provider.ts), [interpretation](../server/interpret
 
 ## Film and public demonstration
 
-The current plan is a 2:58 film covering image-to-world creation, continued invention, a continuous spring before/after, real-photo interaction, a connected rescue mission, save/reopen, and a 24-second model explanation. Narration and footage names are prepared locally. The final edit must be timed against the owner's generated voice and reviewed end to end before publishing.
+The [published demo](https://youtu.be/cUQJPewqZbI) covers image-to-world creation, continued invention, a continuous spring before/after, real-photo interaction, a connected rescue mission, save/reopen and an animated model explanation. The supplied local revised export runs 2:16.8. Optional refinements concern model narration timing and pronunciation, precise photo-interaction wording and minor pacing. The live product is https://doodlume-production-9df2.up.railway.app/.
 
 Product scenes use real browser recordings. The model explanation is motion graphics with a live gameplay excerpt. The fresh rooftop generation took 109.375 seconds and the fresh patio-photo generation took 50.790 seconds in the recorded runs; shortened waiting must be labelled. These are individual observations, not advertised latency guarantees.
 
@@ -78,9 +78,8 @@ Commit dates identify recorded commits, not when every line was originally writt
 
 ## Remaining submission steps
 
-- Owner changes repository visibility when ready. No visibility change is authorized by this document.
-- Generate the owner-voice narration, finish the replacement film, and verify all audio, captions, cuts and source continuity.
-- Publish the final video and verify playback without the owner's login.
+- If replacing the published film, verify the new narration, captions, cuts and source continuity before changing the submission link.
+- Verify the published video plays without the owner's login.
 - Verify fresh signed-out product access and the required form fields: description, problem statement, track, repository, video, Meta usage, model importance, partner feedback and human contributors.
 - Confirm contribution and asset declarations.
 - Submit only on the owner's explicit instruction and retain the receipt.

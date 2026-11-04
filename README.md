@@ -6,7 +6,7 @@
 
 **Turn your drawings and photographs into playable worlds. Then invent what happens next.**
 
-[Read the story](BLOG.md) · [Open Doodlume](https://doodlume-production-9df2.up.railway.app/) · [Create a world](https://doodlume-production-9df2.up.railway.app/#studio) · [Try the spring game](https://doodlume-production-9df2.up.railway.app/#studio?example=rooftop-springs)
+[Watch the demo](https://youtu.be/cUQJPewqZbI) · [Read the story](BLOG.md) · [Open Doodlume](https://doodlume-production-9df2.up.railway.app/) · [Create a world](https://doodlume-production-9df2.up.railway.app/#studio) · [Try the spring game](https://doodlume-production-9df2.up.railway.app/#studio?example=rooftop-springs)
 
 </div>
 
@@ -121,7 +121,7 @@ Doodlume addresses **Build for Your World**: it gives people a way to turn their
 | Technical depth and execution | 20% | Validated world contracts, source-aligned artwork, interactions, undo and saved progress. |
 | Demo | 25% | Real creation, a drawn ability changing gameplay, photo interaction and save/reopen. |
 
-The [reviewer guide](docs/JUDGING-GUIDE.md) maps the rubric to code and hands-on examples. The [submission package](docs/SUBMISSION-PACKAGE.md) contains the current project description, Meta usage, partner feedback and contribution notes. The final replacement film is being edited from real product recordings; its public link will be added when ready.
+The [reviewer guide](docs/JUDGING-GUIDE.md) maps the rubric to code and hands-on examples. The [submission package](docs/SUBMISSION-PACKAGE.md) contains the current project description, Meta usage, partner feedback and contribution notes. [Watch the published product demo](https://youtu.be/cUQJPewqZbI), featuring drawing and photograph creation, a drawn ability changing gameplay, a connected rescue mission, saved progress and the model pipeline.
 
 ## Where this can go next
 

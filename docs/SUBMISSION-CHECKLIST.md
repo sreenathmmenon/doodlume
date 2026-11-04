@@ -24,7 +24,7 @@ Updated 5 November 2026, IST. This supersedes the older dinosaur-film checklist.
 - [x] Add clear local setup, implementation entry points and verification commands.
 - [x] Check local README links, gameplay-GIF decoding and credential scan for the README release.
 - [x] Preserve the original Claude commits and existing history.
-- [ ] Owner makes the repository public. Visibility remains PRIVATE; no change made by this documentation task.
+- [x] Owner made the repository public; GitHub shows Public.
 
 ## Product and recorded evidence
 
@@ -64,7 +64,7 @@ Updated 5 November 2026, IST. This supersedes the older dinosaur-film checklist.
 - [ ] Confirm actual registered track and selected problem statement on the submission form.
 - [ ] Confirm all human contributors are listed and contribution dates/pre-existing work are declared accurately.
 - [ ] Complete final asset/credit review and owner declarations.
-- [ ] Add the final public repository and video URLs after the owner releases them.
+- [x] Add the public repository, live product and published demo URLs to the README and submission package.
 - [ ] Submit only after the owner's explicit instruction; retain the confirmation receipt.
 
 ## Current evidence limits

@@ -16,10 +16,10 @@
     "impact_evidence": "Working source-to-play, ability-authoring and save/reopen demonstrations; user adoption and retention have not been measured.",
     "live_url": "https://doodlume-production-9df2.up.railway.app/",
     "repository_url": "https://github.com/sreenathmmenon/doodlume",
-    "repository_visibility": "PRIVATE",
+    "repository_visibility": "PUBLIC",
     "visibility_change_owner_managed": true,
-    "final_demo_video_url": null,
-    "final_demo_video_status": "Replacement film pending final assembly, owner-voice narration, full playback review and publication.",
+    "final_demo_video_url": "https://youtu.be/cUQJPewqZbI",
+    "final_demo_video_status": "Published product demo supplied by the owner; optional editorial refinements may follow.",
     "positioning": "An indie creation studio for turning personal pictures into playable, editable worlds.",
     "value_proposition": "Start with your own visual idea, test it by playing, then author new actions and goals in the same persistent world.",
     "product_story": "BLOG.md"
