@@ -60,6 +60,7 @@ export interface WorldControls {
 }
 interface Hooks {
   onUpdate: (state: PlayState, telemetry: WorldTelemetry) => void;
+  onBeforeObjectAction?: (state: PlayState) => void;
   onMoment: (message: string) => void;
   onReady: (scene: WorldScene) => void;
   onError?: (message: string) => void;
@@ -1909,6 +1910,10 @@ export class WorldScene extends Phaser.Scene {
     this.objectInteractions = new ObjectInteractions(this, this.definition, {
       state: () => this.state,
       change: state => {
+        // The reducer has accepted this action, but the live state still holds
+        // its exact starting point. Pickup/drop never append an action receipt.
+        if (state.interactions?.completed.some(id => !this.state.interactions?.completed.includes(id)))
+          this.hooks.onBeforeObjectAction?.(this.snapshot());
         this.state = state;
         this.applyObjectEffects();
         this.completeInteractionObjectives();
@@ -1981,6 +1986,10 @@ export class WorldScene extends Phaser.Scene {
   }
 
   revealObjectHint(entityId: string): boolean { return this.objectInteractions?.revealHint(entityId) ?? false; }
+  canUndoObjectAction(): boolean {
+    return this.sceneCreated && !this.resourcesReleased && !this.artworkFailed && this.isPlaying &&
+      (!this.state.completed || Boolean(this.state.exploring)) && !this.objectInteractions?.hasPendingMotion();
+  }
   dismissObjectChoices(): boolean { return this.objectInteractions?.dismissChoices() ?? false; }
   interactWithObject(id: string, actionId?: string) { return this.objectInteractions?.interact(id, actionId) ?? false; }
   dropHeldObject() { this.objectInteractions?.putBack(); }

@@ -218,7 +218,7 @@ export default function App({ active = true }: { active?: boolean }) {
     setCompletionVisible(false);
     if (!metrics.completed || metrics.exploring) return;
     // Let the action's visible consequence finish before presenting the next choices.
-    const timer = window.setTimeout(() => setCompletionVisible(true), world.interactions ? 850 : 0);
+    const timer = window.setTimeout(() => { setCompletionVisible(true); setNotice(""); }, world.interactions ? 850 : 0);
     return () => window.clearTimeout(timer);
   }, [metrics.completed, metrics.exploring, world.id, run]);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -1009,7 +1009,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const completionDetail = objective.ready
     ? destination
       ? `${mode === "discover" && !world.interactions ? "Final clue found" : "Destination reached"}: ${objectName(world, destination.id, 80)}`
-      : "Your world's objective is complete."
+      : world.gameplay?.objectiveTitle ? `${world.gameplay.objectiveTitle} — complete.` : ""
     : "Your achievement stays with this world after its rules change.";
   const missionText =
     metrics.completed && !metrics.exploring
@@ -1434,6 +1434,28 @@ export default function App({ active = true }: { active?: boolean }) {
               className={`game-stage ${mode === "discover" ? "discovery-stage" : mode === "roam" ? "roam-stage" : ""}`}
               ref={stage}
             >
+              {metrics.completed && !metrics.exploring && completionVisible ? (
+                  <div className="completion-overlay">
+                    <div className="completion-copy" role="status" aria-live="polite">
+                      <h2>{completionTitle}</h2>
+                      {completionDetail && <p>{completionDetail}</p>}
+                    </div>
+                    <div>
+                      <button
+                        className="primary-button"
+                        onClick={() => continueWorld()}
+                      >
+                        Keep exploring <Play size={16} />
+                      </button>
+                      <button
+                        className="secondary-button"
+                        onClick={() => continueWorld(true)}
+                      >
+                        Continue creating <Pencil size={16} />
+                      </button>
+                    </div>
+                  </div>
+              ) : (
               <div className="world-progress-row">
                 <div className="world-mission">
                   <strong aria-live="polite">{missionText}</strong>
@@ -1458,6 +1480,7 @@ export default function App({ active = true }: { active?: boolean }) {
                   )}
                 </div>
               </div>
+              )}
               <div className="game-surface">
                 <WorldCanvas
                   ref={canvas}
@@ -1511,32 +1534,6 @@ export default function App({ active = true }: { active?: boolean }) {
                       )}
                     </div>
                   )}
-                {metrics.completed && !metrics.exploring && completionVisible && (
-                  <div className="completion-overlay">
-                    <div className="completion-icon">
-                      <Sparkles size={25} />
-                    </div>
-                    <h2>{completionTitle}</h2>
-                    <p>{completionDetail}</p>
-                    <div>
-                      <button
-                        className="primary-button"
-                        onClick={() => continueWorld(true)}
-                      >
-                        Continue creating <Pencil size={16} />
-                      </button>
-                      <button
-                        className="secondary-button"
-                        onClick={() => continueWorld()}
-                      >
-                        Keep exploring <Play size={16} />
-                      </button>
-                      <button className="text-button" onClick={restart}>
-                        Replay from start <RotateCcw size={16} />
-                      </button>
-                    </div>
-                  </div>
-                )}
                 {busy && (
                   <div className="reading-overlay">
                     <LoaderCircle size={30} className="spin" />

@@ -488,9 +488,29 @@ body {
   color: var(--stage-muted);
 }
 .studio-v2 .completion-overlay {
-  background: linear-gradient(180deg, #08090be8, #08090be8);
-  backdrop-filter: blur(2px);
-  color: var(--stage-ink);
+  position: relative;
+  inset: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--paper);
+  box-shadow: none;
+  backdrop-filter: none;
+  color: var(--ink);
+}
+.studio-v2 .completion-overlay .completion-copy {
+  min-width: 0;
+  flex: 1;
 }
 .studio-v2 .completion-overlay .eyebrow {
   color: var(--stage-muted);
@@ -498,28 +518,30 @@ body {
   letter-spacing: 1px;
 }
 .studio-v2 .completion-overlay h2 {
-  margin: 12px 0;
-  max-width: 85%;
+  margin: 0;
+  max-width: 560px;
   overflow-wrap: anywhere;
   font:
-    650 28px/36px Manrope,
+    650 18px/24px Manrope,
     sans-serif;
   letter-spacing: -0.6px;
-  color: var(--stage-ink);
+  color: var(--ink);
 }
 .studio-v2 .completion-overlay p {
-  max-width: min(640px, 85%);
+  max-width: 560px;
   overflow-wrap: anywhere;
-  color: var(--stage-muted);
+  color: var(--muted);
+  margin-top: 6px;
   font-size: 14px;
   line-height: 20px;
 }
 .studio-v2 .completion-overlay > div:last-child {
   display: flex;
-  max-width: 640px;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
+  margin-top: 0;
 }
 .studio-v2 .completion-overlay .primary-button {
   background: var(--primary);
@@ -530,15 +552,15 @@ body {
   font-size: 14px;
 }
 .studio-v2 .completion-overlay .secondary-button {
-  background: transparent;
-  color: var(--stage-ink);
+  background: var(--field);
+  color: var(--ink);
   border-color: var(--border);
   min-height: 44px;
   border-radius: 8px;
   font-size: 14px;
 }
 .studio-v2 .completion-overlay .text-button {
-  color: var(--stage-muted);
+  color: var(--muted);
   font-size: 12px;
 }
 .studio-v2 .reading-overlay {
@@ -2605,4 +2627,8 @@ select:focus-visible {
   .studio-v2 .creation-invitation { margin-bottom: 16px; padding-bottom: 14px; }
   .studio-v2:not(.play-focused) .world-heading { min-height: 60px; padding-bottom: 10px; }
   .studio-v2 .world-name-label { font-size: 25px; line-height: 34px; }
+}
+
+@media (max-width: 900px) {
+  .studio-v2 .completion-overlay { flex-direction: column; text-align: center; gap: 12px; }
 }

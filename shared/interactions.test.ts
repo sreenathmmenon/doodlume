@@ -4,6 +4,7 @@ import { emptyPlayState, goalProgress, retainPlayState, validateWorld, type Play
 import { availableInteractions, safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction, type InteractionCommand } from "./interactions.js";
 import { applyWorldPatch, undoWorldPatch } from "./revisions.js";
 import { validSavedWorlds } from "../src/lib/library.js";
+import { inspectInteractionTarget, previewInteraction } from "./interaction-preview.js";
 
 function world(): WorldDefinition {
   return validateWorld({
@@ -37,6 +38,31 @@ function step(w: WorldDefinition, s: PlayState, command: InteractionCommand) {
 function filled(w: WorldDefinition) {
   return step(w, step(w, emptyPlayState(), {type: "pickup", entityId: "supply"}), {type: "perform", actionId: "fill"});
 }
+
+test("inspection predicts a transfer without spending supplies and explains unsafe allocation", () => {
+  const w = world(), start = step(w, emptyPlayState(), {type: "pickup", entityId: "supply"});
+  const original = structuredClone(start);
+  const previews = inspectInteractionTarget(w, start, "receiver");
+  assert.equal(previews.find(p => p.id === "fill")?.available, true);
+  assert.match(previews.find(p => p.id === "fill")!.consequence, /0 → 6 \/ 10/);
+  assert.equal(previews.find(p => p.id === "extra")?.available, false);
+  assert.match(previews.find(p => p.id === "extra")!.reason!, /block completion/);
+  assert.deepEqual(start, original);
+  const after = step(w, start, {type: "perform", actionId: "fill"});
+  assert.equal(after.interactions!.quantities.receiver, 6);
+  assert.equal(inspectInteractionTarget(w, after, "receiver").some(p => p.id === "fill"), false, "Completed one-time actions must not block picking up their now-ready receiver.");
+  assert.equal(previewInteraction(w, after, w.interactions!.actions[0]).available, false);
+});
+
+test("inspection follows edited prerequisites and never silently equips the matching tool", () => {
+  const w = world(), start = emptyPlayState(), action = w.interactions!.actions.find(a => a.id === "fit")!;
+  assert.equal(inspectInteractionTarget(w, start, "receiver").length, 0);
+  const held = step(w, start, {type: "pickup", entityId: "part"});
+  assert.equal(previewInteraction(w, held, action).reason, "First: Charge");
+  w.interactions!.actions.find(a => a.id === "fill")!.label = "Recharge the receiver";
+  assert.equal(previewInteraction(w, held, action).reason, "First: Recharge the receiver");
+  assert.equal(start.interactions, undefined);
+});
 
 test("transfer conserves resources, enforces possession/capacity, and rejects atomically", () => {
   const w = world(), start = emptyPlayState();
@@ -344,4 +370,17 @@ test("placing a carried object changes its location, releases it, and preserves 
     (invalid:WorldDefinition)=>{invalid.entities.find(entity=>entity.id==="part")!.art=undefined;},
     (invalid:WorldDefinition)=>{invalid.interactions!.actions[0].targetId="part";},
   ]) { const invalid=structuredClone(w); mutate(invalid); assert.throws(()=>validateWorld(invalid)); }
+});
+
+
+test("inspection reports actual capability when a weaker upgrade leaves the stronger one active", () => {
+  const w = world();
+  w.interactions!.actions = [2, 1.5].map((multiplier, index) => ({id:`boost-${index}`,kind:"use" as const,label:"Speed",toolId:"part",targetId:"receiver",effects:[{kind:"moveSpeedBoost" as const,multiplier}]}));
+  w.goalRules!.requiredInteractionIds = [];
+  validateWorld(w);
+  let s = step(w, emptyPlayState(), {type:"pickup",entityId:"part"});
+  assert.equal(previewInteraction(w,s,w.interactions!.actions[0]).consequence,"Movement speed ×1 → ×2.");
+  s = step(w,s,{type:"perform",actionId:"boost-0"});
+  assert.equal(previewInteraction(w,s,w.interactions!.actions[1]).consequence,"Movement speed stays ×2.");
+  assert.equal(interactionEffects(w,step(w,s,{type:"perform",actionId:"boost-1"})).moveSpeedMultiplier,2);
 });

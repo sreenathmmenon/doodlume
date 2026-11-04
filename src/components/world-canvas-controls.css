@@ -241,6 +241,7 @@
 .object-keyboard-play select { width: 100%; padding: 10px; margin-bottom: 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 .object-keyboard-play button { min-height: 36px; margin-right: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font: inherit; }
 .object-keyboard-play button:disabled { opacity: .45; cursor: default; }
+.object-action-preview { margin: 0 0 12px; padding: 10px 0; border-top: 1px solid var(--border); color: var(--ink); font: 500 14px/20px var(--font-ui); overflow-wrap: anywhere; }
 
 /* Gameplay help stays outside the artwork. It appears only when requested;
    possession stays visible so a player never has to remember a hidden tool. */

@@ -56,3 +56,50 @@ Generation now asks for a role, meaningful change, decision/dependency and visib
 The tabletop photographic case remains unresolved: one plan requested placement outside the image, and the final attempt required correction of the keys' whole-object outline. It is not counted as a successful automatic photo-to-game conversion. Early room and tabletop failures are retained in the local evidence. The two successful small missions prove the mechanics, not depth, replay appeal, universal image support or a quality rating.
 
 Local evidence is under `outputs/verification/gameplay-2026-11-04/` and `output/playwright/`; generated assets, raw model outputs and browser profiles remain ignored. The playable two-world import is `outputs/verification/gameplay-2026-11-04/playable-backup.json`.
+
+
+## November 4 — action inspection, experimentation and correction
+
+A four-round simulated council recorded 40 attributed contributions before implementation verification. It did not certify the product or establish human delight. Original contributions remain in the ignored local council report; later fixes do not rewrite earlier reviews.
+
+### Implemented and verified
+
+- Selected-action previews use the actual reducer. Transfers show real before/after quantities; placement describes the actual move; prerequisites explain blockers before approach. Multiple-action targets show choices and explanations before moving the player. Completed one-time actions no longer obstruct picking up their now-ready receiver. Upgrade previews reflect the effective capability, including an already stronger upgrade.
+- Undo last action retains up to 16 exact pre-action snapshots during the current world/run. Rebuilding the scene restores resources, attachments, opened gates, object positions and completion state. Pickup/drop are not undo checkpoints. History clears on a new world/revision/restart and is not persisted as gameplay-action history across reloads. Saved game progress and creator-edit history keep their existing persistence contracts.
+- The completion panel preserves artwork, prioritizes Keep exploring, and offers Continue creating. Restart remains in the existing stage controls; the duplicate completion Replay button was removed. Mission-specific completion text replaces generic filler.
+- Decoded schema/interaction-compiler failures may request one model correction using the original normalized source and exact intent. The rejected JSON/error is bounded untrusted diagnostic data. Budget refusal retains the original error; provider errors, aborts, source-review errors and human clarification never trigger that retry. Malformed/truncated JSON is outside this correction scope.
+
+### Observed sessions
+
+- Room placement: blocked prerequisite and incompatible target were explained without execution. All three placements completed. The original drawing and final positions remain visible.
+- Reef: transferred food, undid it, allocated the same supply to another fish and completed the mission. Keep exploring then Undo restored 2/3 with earlier receipts intact. Pause and movement prevent undo until a stable state.
+- Crayon Space Voyage: actual Fireworks-hosted Meta output on an unchanged AI-generated rough crayon drawing. Two of six stars fuel the original rocket, then the rocket can move to the central green planet. All 15 supply pairs and 30 orders passed reducer verification. Browser play blocked premature launch, completed fueling/placement, saved and reloaded completion. These are equivalent supply choices, not evidence of deep strategy.
+- Synthetic real-engine fixtures verified physical gate closure, attachment reversal, moved-object restoration, 16-entry history bound and world/revision/restart isolation. A far target with two blocked actions opened its choice menu without moving the player; keyboard selection explained the blocker without adding a receipt. Fixtures are not model-generation evidence.
+- The initial space attempt failed. The second succeeded after disclosed creator-intent refinement. This is not a perfect automatic-conversion rate. Initial concern that the rocket included a neighboring star was disproven by alpha inspection: all 23,800 pixels in that region are transparent. Unnecessary experimental segmentation changes were discarded. Background reconstruction still has sparse residual marks.
+
+A local CPU benchmark found no sustained preview/reducer bottleneck on room, reef, rover and a synthetic 64-action graph. It is not a browser frame-rate or network-generation benchmark. The focused gameplay/planning selection passed 54 tests before the later diagnostic-aggregation regression; typecheck, production build and credential scan passed. Final desktop screenshots and follow-up verification live under `output/playwright/`.
+
+Still open: robust automatic conversion of unfamiliar photographs, richer non-equivalent choices and longer mission arcs, actual player feedback across ages, and physical assistive-technology checks. This increment does not establish every category at 9/10 or any competitive multiple.
+
+
+The subsequent hybrid repair verification replayed the unchanged first failed space response, then made exactly one live Meta correction request with the same original image and intent. Meta corrected the edge destination but retained an invalid self-moving noncarryable tool. Compilation rejected it, with no further retry or substitute. This is evidence of bounded failure and partial response to feedback, not successful automatic repair or a new end-to-end generation. The compiler now reports independent carryability, self-movement and destination-fit problems together (bounded at 1,500 characters), instead of exposing only the first. Offline replay of the untouched failed response produced all three diagnostics; the improved diagnostic version has not had a further paid correction attempt. Two original live generations plus one hybrid correction are recorded separately.
+
+Final completion layout replaces the mission strip with an 83-pixel-high horizontal completion section above the artwork at both inspected desktop sizes (1280×720 and 1440×900). The artwork is no longer overlapped, the repeated mission counter is hidden during completion, and the final-action toast clears when completion appears. Both primary actions have 44-pixel height, no overlap and no document horizontal overflow. These measurements do not establish universal layout or subjective visual excellence.
+
+
+### Follow-up assessment and measurements
+
+Two independent simulated reviewers reassessed the implementation; their complete, attributed assessments are in `outputs/gameplay-council-2026-11-04/final-technical-assessment.md` and `final-experience-assessment.md`. These are judgments, not external endorsements, competition predictions or user-study scores. Visual recheck increased the inspected desktop score after the overlapping completion panel was removed. Scores are not averaged to hide the weak categories.
+
+| Reviewed category | Assessment | Scope / unresolved requirement |
+| --- | --- | --- |
+| Visual craft | 8.5/10 | Inspected desktop screens; distinctive subjective appeal still needs actual players. |
+| Source fidelity | 8/10 | Inspected drawings; residual background marks and broader photo coverage remain. |
+| Creative control / undo | 8/10 | Supported mechanics, exact session undo; no redo or persisted gameplay-action history. |
+| Controls / feedback | 7.5/10 | Actual scripted play; first-time comprehension and assistive technology unverified. |
+| Reliability | 6/10 | Deterministic play works; unfamiliar-image generation still fails or requires review. |
+| Performance | 7/10 provisional | Local CPU evidence; broader devices and generation distributions unverified. |
+| Game design / depth | 5.5/10 | Current short missions lack non-equivalent decisions and sustained progression. |
+| Delight / replay evidence | 4/10 | Evidence strength only; no human dislike or attachment inferred. Human appeal unknown. |
+
+On the actual generated space world, a local browser measurement observed 131 ms from Undo click to the ready scene plus two animation callbacks. A following 180-callback sample had median 16.7 ms, p95 16.8 ms and maximum 16.8 ms. These are local callback/ready-state timings, not hardware display latency or a universal frame-rate guarantee. The final relevant contract/regression selection passed 56/56; final typecheck, build and credential scan are release checks. The all-category 9–10 target remains unmet, particularly meaningful gameplay depth and reliable unfamiliar-source generation.

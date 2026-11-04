@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { objectName } from "../lib/object-name";
 import type { InteractionAction } from "../../shared/interactions";
 import { safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
+import { inspectInteractionTarget, incompatibleTargetReason, type ActionPreview } from "../../shared/interaction-preview";
 import type { PlayState, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 
@@ -46,6 +47,8 @@ export class ObjectInteractions {
   private hintMark: Phaser.GameObjects.Graphics;
   private hintLabel: Phaser.GameObjects.Text;
   private tap?: { x: number; y: number; id: number };
+  private inspectedKey = "";
+  private inspectedActions: ActionPreview[] = [];
 
   constructor(
     private scene: Phaser.Scene,
@@ -133,6 +136,15 @@ export class ObjectInteractions {
   }
 
   private entity(id: string) { return this.world.entities.find(e => e.id === id); }
+  private inspect(id: string) {
+    const state = this.host.state();
+    const key = JSON.stringify([id, state.interactions]);
+    if (key !== this.inspectedKey) {
+      this.inspectedKey = key;
+      this.inspectedActions = inspectInteractionTarget(this.world, state, id);
+    }
+    return this.inspectedActions;
+  }
   private point(entity: WorldEntity) {
     if (entity.kind === "player" && this.host.player()) return this.host.player()!;
     const art = this.art.get(entity.id);
@@ -172,7 +184,7 @@ export class ObjectInteractions {
     if (action) return { entity, action, label: action.label };
     const object = this.world.interactions?.objects.find(o => o.entityId === entity.id);
     const toolHasActionHere = state.heldEntityId && this.world.interactions?.actions.some(candidate =>
-      candidate.toolId === state.heldEntityId && candidate.targetId === entity.id);
+      candidate.toolId === state.heldEntityId && candidate.targetId === entity.id && !state.completed.includes(candidate.id));
     if (object?.carryable && state.heldEntityId !== entity.id && !state.attachments[entity.id] && !toolHasActionHere)
       return { entity, action: undefined, label: `Take ${objectName(this.world, entity.id, 28)}` };
     return undefined;
@@ -200,6 +212,23 @@ export class ObjectInteractions {
     if (!this.host.playing() || this.hasPendingMotion()) return false;
     const entity = this.entity(id);
     if (!entity || !this.world.interactions?.objects.some(o => o.entityId === id)) return false;
+    const incompatible = incompatibleTargetReason(this.world, this.host.state(), id);
+    if (incompatible) { this.cancelApproach(); this.notice(incompatible, true); return true; }
+    const previews = this.inspect(id);
+    const selectedPreview = actionId ? previews.find(action => action.id === actionId) : previews.length === 1 ? previews[0] : undefined;
+    if (selectedPreview && !selectedPreview.available) {
+      this.cancelApproach();
+      this.notice(selectedPreview.reason || "This action is unavailable.", true);
+      return true;
+    }
+    if (!actionId && previews.length > 1) {
+      this.cancelApproach();
+      this.host.stopApproach();
+      const actions = this.world.interactions.actions.filter(action => previews.some(preview => preview.id === action.id));
+      this.showChoices(entity, actions);
+      return true;
+    }
+    if (actionId) this.closeChoices();
     if (this.distance(entity) > 100) {
       if (this.world.gameplay?.movement === "roam") {
         this.pending = id;
@@ -348,9 +377,16 @@ export class ObjectInteractions {
       container.add(text);
       y += text.height + 3;
     };
-    for (const action of actions.slice(page * 4, page * 4 + 4)) addButton(action.label, () => this.interact(entity.id, action.id));
+    const previews = this.inspect(entity.id);
+    const pageSize = camera.worldView.height / unit < 480 ? 1 : 2;
+    for (const action of actions.slice(page * pageSize, page * pageSize + pageSize)) {
+      const preview = previews.find(candidate => candidate.id === action.id);
+      const fullDetail = preview?.available ? preview.consequence : preview?.reason;
+      const detail = fullDetail && fullDetail.length > 160 ? `${fullDetail.slice(0,157)}…` : fullDetail;
+      addButton(`${action.label}${detail ? `\n${detail}` : ""}`, () => this.interact(entity.id, action.id));
+    }
     if (page > 0) addButton("‹ Previous", () => this.showChoices(entity, actions, page - 1));
-    if ((page + 1) * 4 < actions.length) addButton("More ›", () => this.showChoices(entity, actions, page + 1));
+    if ((page + 1) * pageSize < actions.length) addButton("More ›", () => this.showChoices(entity, actions, page + 1));
     addButton("Cancel", () => this.closeChoices());
     this.highlightChoice();
     const hint = this.scene.add.text(18, y + 3, "↑ ↓ Choose   ·   E / Enter Select", {
@@ -558,7 +594,7 @@ export class ObjectInteractions {
     if (!this.host.playing()) { this.prompt.setVisible(false); this.closeChoices(); return; }
     if (this.actionMenu) {
       const target = this.entity(this.menuTarget);
-      if (!target || this.distance(target) > 100) this.closeChoices();
+      if (!target) this.closeChoices();
       else { this.prompt.setVisible(false); return; }
     }
     if (this.hasPendingMotion()) { this.prompt.setVisible(false); return; }
@@ -582,6 +618,22 @@ export class ObjectInteractions {
     // The requested hint owns this brief attention moment. A second E prompt
     // in the same space would obscure both the object name and the action.
     if (this.hintLabel.visible) { this.prompt.setVisible(false); return; }
+    const inspected = this.hover ? this.entity(this.hover) : undefined;
+    if (inspected && this.host.playing() && !this.hasPendingMotion()) {
+      const previews = this.inspect(inspected.id);
+      const incompatible = incompatibleTargetReason(this.world, this.host.state(), inspected.id);
+      if (previews.length > 0 || incompatible) {
+        const preview = previews[0], point = this.point(inspected);
+        const cue = this.world.gameplay?.movement === "discover" ? "Click" : this.distance(inspected) <= 100 ? "E" : "Approach";
+        const multiple = previews.length > 1 ? `Click · Choose action\n${previews.filter(action => action.available).length} of ${previews.length} available` : undefined;
+        this.prompt.setText(incompatible || multiple || (preview.available ? `${cue} · ${preview.label}\n${preview.consequence}` : preview.reason || "Unavailable"))
+          .setScale(unit).setVisible(true);
+        this.prompt.setPosition(Phaser.Math.Clamp(point.x, camera.worldView.left + 150 * unit, camera.worldView.right - 150 * unit),
+          Phaser.Math.Clamp(point.y - this.size(inspected).height / 2 - 12 * unit,
+            camera.worldView.top + (this.prompt.height + 12) * unit, camera.worldView.bottom - 12 * unit));
+        return;
+      }
+    }
     if (context.nearby) {
       const point = this.point(context.nearby.entity);
       this.prompt.setText(`E  ${context.label}`).setScale(unit);

@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import Phaser from "phaser";
+import { Undo2 } from "lucide-react";
 import {
   WorldScene,
   type WorldControls,
@@ -23,8 +24,9 @@ import {
 } from "../../shared/world";
 import "./world-canvas-controls.css";
 import { objectName } from "../lib/object-name";
-import { interactionState, safeAvailableInteractions } from "../../shared/interactions";
+import { interactionState } from "../../shared/interactions";
 import { nextInteractionHint } from "../lib/interaction-guide";
+import { inspectInteractionTarget, incompatibleTargetReason } from "../../shared/interaction-preview";
 import {
   diagnosticsEnabled,
   recordGameCreated,
@@ -68,12 +70,18 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     const [failed, setFailed] = useState(false);
     const [openingSlow, setOpeningSlow] = useState(false);
     const canvasInstructions = useId();
+    const objectPreviewId = useId();
     const [discoveryProgress, setDiscoveryProgress] = useState(
       props.initial ?? emptyPlayState(),
     );
     const [selectedDiscovery, setSelectedDiscovery] = useState("");
     const [selectedObjectAction, setSelectedObjectAction] = useState("");
     const [hintOpen, setHintOpen] = useState(false);
+    const [undoCount, setUndoCount] = useState(0);
+    const [pendingObjectMotion, setPendingObjectMotion] = useState(false);
+    const [localRun, setLocalRun] = useState(0);
+    const undoHistory = useRef<{ scope: string; states: PlayState[] }>({ scope: "", states: [] });
+    const undoRestore = useRef<{ scope: string; state: PlayState } | undefined>(undefined);
     const mode = movementMode(props.world);
     const scene = useRef<WorldScene | undefined>(undefined);
     const startupFailed = useRef(false);
@@ -129,14 +137,22 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       let openingFeedback: ReturnType<typeof setTimeout> | undefined;
       startupFailed.current = false;
       rendered.current = false;
+      const scope = JSON.stringify([props.world.id, props.world.revision, props.run]);
+      if (undoHistory.current.scope !== scope) {
+        undoHistory.current = { scope, states: [] };
+        setUndoCount(0);
+      }
+      const restored = undoRestore.current?.scope === scope ? undoRestore.current.state : undefined;
+      undoRestore.current = undefined;
+      setPendingObjectMotion(false);
       // Retry retains the failed run. A new world or an explicit Replay supplies
       // a different initial state and must never inherit a recovery snapshot.
-      const initial =
+      const initial = restored ?? (
         recovery.current?.worldId === props.world.id &&
         recovery.current.revision === props.world.revision &&
         recovery.current.initial === props.initial
           ? recovery.current.state
-          : props.initial;
+          : props.initial);
       recovery.current = undefined;
       let lastState = structuredClone(initial ?? emptyPlayState());
       setDiscoveryProgress(lastState);
@@ -198,9 +214,16 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
       setOpeningSlow(false);
       const startedAt = performance.now();
       const current = new WorldScene(props.world, initial, {
+        onBeforeObjectAction: state => {
+          if (!active || startupFailed.current || undoHistory.current.scope !== scope) return;
+          undoHistory.current.states.push(state);
+          if (undoHistory.current.states.length > 16) undoHistory.current.states.shift();
+          setUndoCount(undoHistory.current.states.length);
+        },
         onUpdate: (s, m) => {
           if (active && !startupFailed.current) {
             lastState = s;
+            setPendingObjectMotion(Boolean(m.pendingObjectMotion));
             if (movementMode(callbacks.current.world) === "discover" || callbacks.current.world.interactions)
               setDiscoveryProgress(s);
             callbacks.current.onUpdate(s, m);
@@ -368,7 +391,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
         disposeGame();
         scene.current = undefined;
       };
-    }, [props.world.id, props.run]);
+    }, [props.world.id, props.world.revision, props.run, localRun]);
     useEffect(() => {
       if (!startupFailed.current && rendered.current)
         scene.current?.setPlaying(props.playing);
@@ -485,8 +508,6 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
             </details>
           </div>
         );
-    const objectActions = selectedDiscovery ? safeAvailableInteractions(props.world, discoveryProgress, selectedDiscovery) : [];
-    const chosenObjectAction = objectActions.length === 1 ? objectActions[0] : objectActions.find(action => action.id === selectedObjectAction);
     const interactionProgress = interactionState(props.world, discoveryProgress);
     const heldObject = props.world.entities.find(entity => entity.id === interactionProgress.heldEntityId);
     const heldResource = props.world.interactions?.objects.find(object => object.entityId === heldObject?.id)?.resource;
@@ -495,9 +516,28 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
     // Frame reports update position frequently. Re-plan an open hint only when
     // actual progress changes; revealing it is deliberately opt-in.
     const progressKey = JSON.stringify([discoveryProgress.interactions, discoveryProgress.collected, discoveryProgress.activated, discoveryProgress.completed, discoveryProgress.exploring]);
+    const targetPreviews = useMemo(() => selectedDiscovery ? inspectInteractionTarget(props.world, discoveryProgress, selectedDiscovery) : [],
+      [props.world, progressKey, selectedDiscovery]);
+    const selectedPreview = targetPreviews.length === 1 ? targetPreviews[0] : targetPreviews.find(preview => preview.id === selectedObjectAction);
+    const incompatibleReason = selectedDiscovery ? incompatibleTargetReason(props.world, discoveryProgress, selectedDiscovery) : undefined;
     const nextHint = useMemo(() => hintOpen ? nextInteractionHint(props.world, discoveryProgress) : undefined,
       [hintOpen, props.world, progressKey]);
     const finished = discoveryProgress.completed && !discoveryProgress.exploring;
+    function undoLastAction() {
+      const scope = JSON.stringify([props.world.id, props.world.revision, props.run]);
+      if (!ready || failed || !props.playing || !scene.current?.canUndoObjectAction() || undoHistory.current.scope !== scope) return;
+      const state = undoHistory.current.states.pop();
+      if (!state) return;
+      // Rebuild from the complete state so gates, moving artwork, attachments,
+      // completion readiness and effects all agree with the restored receipts.
+      scene.current.setPlaying(false);
+      undoRestore.current = { scope, state };
+      setUndoCount(undoHistory.current.states.length);
+      setReady(false);
+      setLocalRun(run => run + 1);
+      callbacks.current.onMoment("Last action undone.");
+      host.current?.focus({ preventScroll: true });
+    }
     const objectControls = props.world.interactions && ready && !failed && (
       <div className="object-play-tools">
         <div className="object-play-strip">
@@ -508,22 +548,25 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(
             <button type="button" disabled={!props.playing || finished} onClick={() => { scene.current?.dropHeldObject(); host.current?.focus({ preventScroll: true }); }} aria-label={`Put back ${objectName(props.world, heldObject.id, 42)}`} title="Put back (Q)">Put back</button>
           </div>}
           {!finished && <button type="button" className="object-hint-toggle" disabled={!props.playing} aria-expanded={hintOpen} onClick={() => setHintOpen(open => !open)}>{hintOpen ? "Hide hint" : "Need a hint?"}</button>}
+          {undoCount > 0 && <button type="button" className="discovery-hint" aria-label="Undo last action" disabled={!props.playing || finished || pendingObjectMotion} onClick={undoLastAction}><Undo2 size={14} aria-hidden="true" /> Undo</button>}
       <details className="object-keyboard-play">
         <summary>Object controls</summary>
         <div>
           <label>Choose an object
-            <select aria-label="Choose interactive object" value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); if (event.target.value) scene.current?.revealObjectHint(event.target.value); }}>
+            <select aria-label="Choose interactive object" aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} value={selectedDiscovery} onChange={event => { setSelectedDiscovery(event.target.value); setSelectedObjectAction(""); if (event.target.value) scene.current?.revealObjectHint(event.target.value); }}>
               <option value="">Choose an object…</option>
               {props.world.interactions.objects.map(object => <option key={object.entityId} value={object.entityId}>{objectName(props.world, object.entityId, 70)}</option>)}
             </select>
           </label>
-          {objectActions.length > 1 && <label>Choose an action
-            <select aria-label="Choose object action" value={chosenObjectAction?.id ?? ""} onChange={event => setSelectedObjectAction(event.target.value)}>
+          {targetPreviews.length > 1 && <label>Choose an action
+            <select aria-label="Choose object action" aria-describedby={selectedPreview ? objectPreviewId : undefined} value={selectedPreview?.id ?? ""} onChange={event => setSelectedObjectAction(event.target.value)}>
               <option value="">Choose an action…</option>
-              {objectActions.map(action => <option key={action.id} value={action.id}>{action.label}</option>)}
+              {targetPreviews.map(action => <option key={action.id} value={action.id}>{action.label}{action.available ? "" : " · unavailable"}</option>)}
             </select>
           </label>}
-          <button disabled={!props.playing || !selectedDiscovery || (objectActions.length > 1 && !chosenObjectAction) || finished} onClick={() => scene.current?.interactWithObject(selectedDiscovery, chosenObjectAction?.id)}>{chosenObjectAction?.label ?? (canTakeSelected ? `Take ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
+          {selectedPreview && <p className="object-action-preview" id={objectPreviewId}>{selectedPreview.available ? selectedPreview.consequence : selectedPreview.reason}</p>}
+          {!selectedPreview && incompatibleReason && <p className="object-action-preview" id={objectPreviewId}>{incompatibleReason}</p>}
+          <button aria-describedby={selectedPreview || incompatibleReason ? objectPreviewId : undefined} disabled={!props.playing || !selectedDiscovery || Boolean(incompatibleReason) || (targetPreviews.length > 1 && !selectedPreview) || (selectedPreview && !selectedPreview.available) || finished} onClick={() => scene.current?.interactWithObject(selectedDiscovery, selectedPreview?.id)}>{selectedPreview?.label ?? (canTakeSelected ? `Take ${objectName(props.world, selectedDiscovery, 30)}` : "Inspect object")}</button>
           <button disabled={!props.playing || !discoveryProgress.interactions?.heldEntityId} onClick={() => scene.current?.dropHeldObject()}>Put back</button>
         </div>
       </details>

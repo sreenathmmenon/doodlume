@@ -7,6 +7,15 @@ export class InterpretationError extends Error {
     super(message);
   }
 }
+/** A decoded model plan failed a deterministic schema or behavior check.
+ * Provider, artwork review and human-clarification failures never use this type. */
+export const MODEL_PLAN_DIAGNOSTIC_LIMIT = 1_500;
+export class ModelPlanError extends InterpretationError {
+  constructor(message: string, status = 422) {
+    super(message.slice(0, MODEL_PLAN_DIAGNOSTIC_LIMIT), status);
+  }
+}
+
 export async function modelJSON(
   connection: ModelConnection,
   payload: unknown,

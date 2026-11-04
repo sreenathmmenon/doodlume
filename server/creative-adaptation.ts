@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { cropArtwork, imageData, normalizeDrawing } from "./images.js";
 import { extractArtwork, segmentationConfigured, type SegmentationConnection } from "./segmentation.js";
-import { InterpretationError } from "./model.js";
+import { InterpretationError, ModelPlanError } from "./model.js";
 import { validateWorld, type GoalRules, type InputKind, type WorldDefinition, type WorldEntity, type WorldGameplay } from "../shared/world.js";
 import { setupFeedback } from "../shared/setup.js";
 import { RecognitionReviewError } from "./recognition-error.js";
@@ -99,7 +99,7 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
   // source-faithful review contract; provider failure never fabricates a plan.
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new InterpretationError("Meta did not return a usable game plan. Your image is unchanged.");
+    throw new ModelPlanError("Meta did not return a usable game plan. Your image is unchanged.");
   const input = value as Partial<GameplayPlan>;
   // Backward-compatible for already recorded fixture/model plans; newly
   // requested model output requires these fields in its JSON schema.
@@ -138,7 +138,7 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
       (!plan.interactions && plan.requiredInteractionIds.length > 0) ||
       !Array.isArray(plan.path) || plan.path.length < 3 || plan.path.length > 6 ||
       plan.path.some(p => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 1000 || !boundedText(p.label, 80)))
-    throw new InterpretationError("Meta's game plan was incomplete. Try the same image again; your current world is unchanged.");
+    throw new ModelPlanError("Meta's game plan was incomplete. Try the same image again; your current world is unchanged.");
   return plan;
 }
 
