@@ -1,39 +1,53 @@
 # Doodlume live deployment
 
-Deployment preserves the current application, the original uploaded artwork, Meta Muse Spark Open through Fireworks, Meta SAM 2.1 cutouts, and the existing LaMa background reconstruction. LaMa is a separate non-Meta model. The first target is one Railway service running the complete Node/Python container; no static-only substitute and no desktop tunnel.
+Primary URL: https://10xng--doodlume.us-east.modal.run
 
-## Release checklist
+The complete Node/Python application runs on Modal using the existing credits. It retains original uploaded artwork, Meta Muse Spark Open through Fireworks, Meta SAM 2.1 cutouts, and LaMa background reconstruction. LaMa is a separate non-Meta model. This is a hosted application, with no dependency on a desktop tunnel.
 
-- [x] Hosted port and binding, exact HTTPS origin/Host boundary, internal health probes.
-- [x] Server-only provider credentials; allowlisted Docker and deployment contexts exclude local credentials, outputs, recordings and Git history.
-- [x] Container recipe installs pinned CPU model runtime and verifies downloaded model checksums. Build-time model loading is required before the image can succeed.
-- [x] Hosted phone pairing uses the same HTTPS address, keeps separate owner/sender tokens, and does not open a private LAN listener.
-- [x] Existing IndexedDB saving, backup import/export and local-only operation retained.
-- [ ] Linux container built successfully on the deployment host.
-- [ ] Runtime Fireworks secret configured securely through stdin; never in source, build arguments, image layers, browser bundle or logs.
-- [ ] Single replica, generation allowance, health check and public HTTPS domain configured.
-- [ ] Live fresh drawing and photo generation; inspect source art, actions, completion and latency.
-- [ ] Live desktop play, save/reload, backup import/export and phone capture verified.
-- [ ] Release URL and exact deployed revision recorded; rollback revision retained.
+## Release checklist — 4 November 2026
 
-## Hosting configuration
+- [x] Linux container built on Modal; pinned CPU runtime, downloaded model checksum verification and build-time model loading passed.
+- [x] Public HTTPS, production origin restrictions, health endpoints, single container.
+- [x] Fireworks credential supplied only as a Modal runtime secret. Docker/deployment allowlists exclude local secrets, outputs, recordings and Git history.
+- [x] Homepage and studio load; actual example gameplay completed, saved and reloaded.
+- [x] Exported a completed example through the UI, imported it at the Modal origin, and confirmed completion after a full reload.
+- [x] Fresh rough robot drawing generated on Modal in 66.769 seconds. Its untouched generated world was imported through normal backup UI with empty progress; keyboard movement, lever activation, jumping and destination completion were exercised successfully; save and full reload retained completion.
+- [x] Fresh photograph processing exercised: returned recognition review after 116.754 seconds, without the previous host's memory crash. This was not automatic game completion.
+- [x] Hosted phone pairing/upload/owner delivery and sender isolation exercised through actual HTTPS endpoints; private source and unrelated-origin requests rejected.
+- [x] Final deployed UI phone-link closure verified: pairing 200, revocation 204, subsequent sender access 404.
+- [ ] General unfamiliar-photo automatic creation and consistently compelling gameplay across inputs remain product work, not satisfied by deployment.
+- [ ] Physical phone camera capture remains untested; the server exchange and QR interface have been tested.
 
-`PUBLIC_ORIGIN` is one HTTPS origin, or the Railway-provided `RAILWAY_PUBLIC_DOMAIN` supplies it. `PORT` takes precedence over the existing local `API_PORT`. Without a public origin, development still binds to 127.0.0.1; production refuses to start. The deployment listener binds 0.0.0.0 behind the hosting service's TLS endpoint. No wildcard CORS is enabled.
+## Hosting and resource boundaries
 
-`/healthz` reports process liveness. `/readyz` checks the built frontend, inference credential, local cutout runtime files and LaMa weights. These two read-only endpoints accept internal platform probes; all other routes retain exact Host/Origin checks. Readiness does not claim provider credit availability or completed gameplay. Those require the live exercise below.
+Modal app `doodlume-studio`, function `web`, profile/workspace `10xng`. Deploy definition: `scripts/deploy-modal.py`. Four CPU cores, 4 GiB reserved RAM, 8 GiB maximum, one container, up to 32 concurrent HTTP inputs. The application still permits only one generation at a time. The container scales down after ten idle minutes; a measured initial readiness request took 6.9 seconds. That is one observation, not a latency guarantee.
 
-Set `MODEL_PROVIDER=fireworks`, `FIREWORKS_API_KEY` through the host secret interface, and an explicit `MAX_MODEL_REQUESTS`. The current safeguard is per process and includes reserved inference calls; it resets on restart. It is not a durable billing ledger, per-user quota, authentication mechanism or unlimited public generation service. Keep one replica until request scheduling and phone-pairing state have a shared durable store. The staged generation experiment remains disabled.
+Supply `FIREWORKS_API_KEY` in the deployer's process environment using the existing private credential loader. The script creates a runtime Secret, not an image build argument. Modal authentication uses the user's private profile file. Do not paste credential values into command arguments, source, logs or documentation.
 
-The container runs as the unprivileged node user. Its CPU models are installed during the private build, never fetched while handling a user's upload. Do not publish the container image or redistribute pretrained weights as commercially cleared; see the existing source-background provenance document. Image processing has bounded input sizes and timeouts. CPU hosting performance must be measured, not inferred from Mac results.
+`PUBLIC_ORIGIN` comes from Modal's actual `web.get_web_url()` so generated phone links use the correct regional HTTPS origin. `PORT=8080` takes precedence over local `API_PORT`. Development remains bound to localhost; the production listener binds 0.0.0.0 behind platform TLS. No wildcard CORS is enabled. The Node service drops to the unprivileged `node` user even if Modal starts its Python entrypoint as root.
 
-## Saved worlds and deployment changes
+`/healthz` checks process liveness. `/readyz` checks the frontend, inference credential and local model files. Neither establishes provider credit availability, sufficient RAM or successful gameplay. The fresh input exercises above are separate evidence.
 
-Worlds and progress are saved in the browser's IndexedDB, not in the service filesystem. A service restart preserves that browser data. A different origin, browser or device has a separate library: export a backup from localhost and import it at the live URL. There is currently no account-based cloud sync. Phone pairing is temporary process memory, expires after ten minutes, and needs a new link after a service restart.
+The 20-model-request allowance is per process, includes reserved calls, and resets when the container restarts. It is not a durable spending cap, authentication mechanism, per-user quota or unlimited public generation service. Keep one container until phone sessions and scheduling have shared storage. The staged planning experiment is disabled by default. Models load from the private image; weights are not downloaded per request. Do not publish the image or represent pretrained weights as cleared for commercial redistribution.
 
-## Verification and rollback
+## Browser saves
 
-After the build and readiness check succeed, open the actual HTTPS URL and verify: homepage/assets; one backup import and actual completion; save/reload; real image interpretation and source correction; a phone sender/owner exchange; rejection of unrelated Origin/Host requests; no secrets in delivered scripts. Log actual durations and defects. A successful health response alone is not a launch pass.
+Worlds and progress live in browser IndexedDB. A service restart does not delete them. Different origins, browsers and devices have separate libraries: export a backup from the old address and import at the primary URL. There is no account-based cloud sync. Phone links expire after ten minutes and need recreation after a container restart.
 
-Record project, environment, service and deployment IDs without credentials. Roll back to the preceding successful deployment if a live acceptance check regresses. The browser library remains independent of service rollback; do not delete or migrate it for deployment.
+## Deployment findings and fixes
 
-Official hosting references: [Docker builds](https://docs.railway.com/builds/dockerfiles), [deployment health checks](https://docs.railway.com/deployments/healthchecks). Configuration is applied to the service directly; new deprecated railway.json/toml configuration is deliberately not introduced.
+The temporary Railway trial service provided only 1 GiB memory. Two real photograph requests returned 502; the container's cgroup recorded an OOM kill in the SAM worker. Moving the complete pipeline to Modal preserved image quality rather than weakening extraction checks. Railway's temporary deployment was stopped after Modal was available; its project/history remain recoverable.
+
+Modal's proxy rejected an empty-body DELETE for phone-link revocation with 415. An explicit JSON content type and `{}` body returns 204 and makes subsequent sender requests return 404. The frontend now sends that form; the final live UI recheck passed.
+
+Railway recovery identifiers: project `06826daf-31fc-45ff-b28d-372f1b8e70f4`, environment `e3604d55-1302-41c0-b76c-de4ea252cf46`, service `cf8b7a98-efc2-4ee4-bdd7-c4381eb4f8b7`. Its address is not the primary launch URL and its 1 GiB trial configuration is unsuitable for this pipeline.
+
+Application source baseline was `4e8350f`; this release adds Modal deployment and explicit phone-link revocation requests. Redeploy a known-good Git revision using the same Modal app definition to roll back. Do not delete browser libraries during rollback.
+
+## Evidence
+
+Local verification artifacts are ignored under `outputs/verification/live-deploy-2026-11-04/`. They include HTTP boundaries, phone exchange, actual fresh-input responses and durations, build logs and credential scan. Screenshots are under `output/playwright/`. No API keys are recorded in reports.
+
+Before hosting: a 245-check run had two image-worker timeouts under concurrent local load; both affected files subsequently passed separately (54 checks). Three focused hosting/diagnostic checks passed after the logging change. Local type checking and cloud production builds passed. These are bounded verification results, not a universal production-quality rating.
+
+Official references: [Modal web endpoints](https://modal.com/docs/guide/webhooks), [CPU and memory](https://modal.com/docs/guide/resources), [runtime secrets](https://modal.com/docs/guide/secrets).

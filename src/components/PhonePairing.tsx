@@ -32,7 +32,8 @@ export function PhonePairing({
   const revoke = (p: PairingDetails) =>
     void fetch(`/api/pairings/${p.id}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${p.ownerToken}` },
+      headers: { Authorization: `Bearer ${p.ownerToken}`, "Content-Type": "application/json" },
+      body: "{}",
       keepalive: true,
     }).catch(() => {});
   useEffect(
