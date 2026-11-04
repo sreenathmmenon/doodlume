@@ -489,7 +489,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   if (placement.errors.length) return reject(placement.errors.join(" "));
   const backdrop = entities[0];
   let repairNote="";
-  backdrop.art = await sourceScenery(source, entities, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";},signal);
+  backdrop.art = await sourceScenery(source, entities, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";},signal,inputKind);
   backdrop.artNote = SOURCE_SCENERY_NOTE+repairNote;
   signal.throwIfAborted();
   return world;

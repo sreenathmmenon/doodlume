@@ -91,8 +91,20 @@ for line in sys.stdin:
             rgb = last_rgb[top:bottom,left:right]
             rgba = np.dstack([rgb, alpha])
             buffer = io.BytesIO()
-            Image.fromarray(rgba, "RGBA").save(buffer, format="PNG")
+            # These PNGs travel over the private pipe and are decoded/validated by
+            # the parent. Fast lossless compression preserves every RGBA pixel
+            # while avoiding seconds spent recompressing photographic contexts.
+            Image.fromarray(rgba, "RGBA").save(buffer, format="PNG", compress_level=1)
             records.append({"id":o["id"],"png":base64.b64encode(buffer.getvalue()).decode("ascii"),"score":round(score,4),"visible":visible,"pixels":int(alpha.size)})
+        # Preserve the existing response bounds for poorly compressible inputs.
+        # If fast encoding approaches the pipe budget, recompress the same pixels
+        # at the former default level instead of dropping a mask or its detail.
+        if any(len(record["png"]) > 12_000_000 for record in records) or sum(len(record["png"]) for record in records) > 30_000_000:
+            for record in records:
+                image = Image.open(io.BytesIO(base64.b64decode(record["png"])))
+                buffer = io.BytesIO()
+                image.save(buffer, format="PNG", compress_level=6)
+                record["png"] = base64.b64encode(buffer.getvalue()).decode("ascii")
         emit({"id":request_id,"records":records,"ms":round((time.monotonic()-start)*1000),"model":"Meta SAM 2.1 tiny","device":device})
     except Exception:
         # No image payloads, filesystem paths, raw library error or secrets.

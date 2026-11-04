@@ -9,12 +9,16 @@ import { modelConnection } from "./provider.js";
 import { imageData } from "./images.js";
 import { applyWorldPatch } from "../shared/revisions.js";
 import { emptyPlayState } from "../shared/world.js";
-import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localSegmentationArtwork, closeLocalSegmentationWorkers } from "./local-segmentation.js";
 import { groundWholeActor } from "./actor-grounding.js";
+import { compileCreativeAdaptation, readGameplayPlan } from "./creative-adaptation.js";
+import { RecognitionReviewError } from "./recognition-error.js";
+import { prepareMovingSourceArt, MovableArtworkReviewError } from "./moving-source-art.js";
+import type { SourceRecoveryCache } from "./segmentation.js";
 
 // Published Meta wire-format example, used as synthetic protocol data only.
 // It is not an inference result from this app or a drawing-recognition benchmark.
@@ -78,6 +82,142 @@ test("an agreed tight fragment cannot discard a long appendage outside a clipped
     const recovered=await groundWholeActor(source,actor,{python:executable,checkpoint:'synthetic-protocol-only',worker:'synthetic-protocol-only',configured:true},signal,[],undefined,true);
     assert.equal(recovered.artwork,undefined,"Conflicting whole-subject evidence must retain review instead of deleting the tail.");
     assert.deepEqual(recovered,actor,"The original source selection must remain recoverable.");
+  }finally{closeLocalSegmentationWorkers();await rm(directory,{recursive:true,force:true});}
+});
+
+test("batched cutouts compare every source RGB pixel at each crop offset", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "doodlume-batch-rgb-test-"));
+  const executable = join(directory, "worker.cjs");
+  // Synthetic protocol data isolates validation from model recognition. The
+  // second reply alters a transparent edge pixel in the last, offset crop.
+  const pixels = Buffer.from(Array.from({ length: 17 * 13 * 3 }, (_, at) => (at * 37) % 256));
+  const source = await sharp(pixels, { raw: { width: 17, height: 13, channels: 3 } }).png().toBuffer();
+  const boxes = [
+    { id: "top-left", left: 0, top: 0, right: 6, bottom: 5 },
+    { id: "middle", left: 4, top: 3, right: 12, bottom: 10 },
+    { id: "bottom-right", left: 12, top: 9, right: 17, bottom: 13 },
+  ];
+  await writeFile(executable, `#!/usr/bin/env node
+const imported=require(${JSON.stringify(fileURLToPath(import.meta.resolve('sharp')))}),sharp=imported.default??imported;
+let count=0;
+process.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+require('node:readline').createInterface({input:process.stdin}).on('line',async line=>{
+ const request=JSON.parse(line),records=[];count++;
+ for(const [index,box] of request.objects.entries()){
+  const width=box.right-box.left,height=box.bottom-box.top;
+  const data=await sharp(Buffer.from(request.image,'base64')).extract({left:box.left,top:box.top,width,height}).ensureAlpha().raw().toBuffer();
+  data[(width*height-1)*4+3]=0;
+  if(count===2&&index===2)data[(width*height-1)*4]^=1;
+  const png=(await sharp(data,{raw:{width,height,channels:4}}).png().toBuffer()).toString('base64');
+  records.push({id:box.id,png,score:.9,visible:width*height-1,pixels:width*height});
+ }
+ process.stdout.write(JSON.stringify({id:request.id,records,ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+});`);
+  await chmod(executable, 0o700);
+  const config = { python: executable, checkpoint: "synthetic-protocol-only", worker: "synthetic-protocol-only", configured: true };
+  try {
+    const result = await localSegmentationArtwork(source, boxes, config, signal);
+    assert.deepEqual([...result.keys()], boxes.map(box => box.id));
+    await assert.rejects(() => localSegmentationArtwork(source, boxes, config, signal), /changed original source pixels/);
+  } finally { closeLocalSegmentationWorkers(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("one artwork review reports every unverified moving source and preserves the editable image", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "doodlume-all-outline-reviews-"));
+  const executable = join(directory, "empty-worker.cjs");
+  // Synthetic local protocol returns no accepted masks for either moving prop.
+  // The real compiler must inspect both and expose one complete editable review.
+  await writeFile(executable, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const request=JSON.parse(line);process.stdout.write(JSON.stringify({id:request.id,records:[],ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+});`);
+  await chmod(executable, 0o700);
+  const source = await sharp({create:{width:100,height:80,channels:3,background:"#527391"}}).png().toBuffer();
+  const objects = [
+    {id:"first",kind:"decoration" as const,label:"First supply",x:100,y:100,width:100,height:100},
+    {id:"second",kind:"decoration" as const,label:"Second supply",x:300,y:100,width:100,height:100},
+    {id:"recipient",kind:"decoration" as const,label:"Recipient",x:600,y:600,width:300,height:300},
+  ];
+  const plan = readGameplayPlan({mode:"creative",movement:"discover",reason:"Arrange the two separate supplies.",avatarId:null,
+    objective:"explore",objectiveLabel:"Arrange supplies",destinationLabel:"Supplies arranged",objectiveTitle:"Arrange supplies",
+    instructions:"Place both supplies on the recipient.",clues:[],obstacleIds:[],
+    path:[{x:100,y:100,label:"First supply"},{x:300,y:100,label:"Second supply"},{x:750,y:750,label:"Recipient"}],
+    requiredInteractionIds:["place-first","place-second"],requiredResourceIds:[],
+    interactions:{version:1,objects:[{entityId:"first",carryable:true},{entityId:"second",carryable:true},{entityId:"recipient",carryable:false}],
+      actions:["first","second"].map(entityId=>({id:`place-${entityId}`,label:`Place ${entityId}`,kind:"place",toolId:entityId,targetId:"recipient",requires:[],
+        effects:[{kind:"moveObject",entityId,destinationId:"recipient",durationMs:900}]}))}})!;
+  let remoteCalls=0;
+  try {
+    await assert.rejects(compileCreativeAdaptation({source,inputKind:"picture",name:"Synthetic multi-outline review",description:"Regression fixture",theme:"grove",objects,plan,
+      segmentation:{enabled:true,apiKey:"",provider:"local-sam2",local:{python:executable,checkpoint:"synthetic-protocol-only",worker:"synthetic-protocol-only",configured:true}},
+      signal,transport:async()=>{remoteCalls++;throw Error("No remote requests permitted");}}), error=>{
+        assert.ok(error instanceof RecognitionReviewError, error instanceof Error ? error.stack : String(error));
+        assert.deepEqual(error.recovery.issues.map(issue=>issue.objectId),["first","second"]);
+        assert.deepEqual(error.recovery.issues.map(issue=>issue.id),["source-outline","source-outline-2"]);
+        assert.equal(error.recovery.draft.sourceImage,imageData(source));
+        assert.deepEqual(error.recovery.draft.goalRules?.requiredInteractionIds,["place-first","place-second"]);
+        for(const object of objects)assert.deepEqual(error.recovery.draft.entities.find(entity=>entity.id===object.id)!.artSource,{x:object.x,y:object.y,width:object.width,height:object.height});
+        return true;
+      });
+    assert.equal(remoteCalls,0);
+  } finally { closeLocalSegmentationWorkers(); await rm(directory,{recursive:true,force:true}); }
+});
+
+test("request recovery cache reuses source extraction without compounding geometry or caching cancellation", async () => {
+  const directory=await mkdtemp(join(tmpdir(),"doodlume-request-recovery-cache-"));
+  const executable=join(directory,"worker.cjs"),requests=join(directory,"requests");
+  // Synthetic SAM protocol extracts the actual colored source pixels. Recording
+  // requests demonstrates reuse independently of returned geometry assertions.
+  await writeFile(executable,`#!/usr/bin/env node
+const fs=require('node:fs'),sm=require(${JSON.stringify(fileURLToPath(import.meta.resolve('sharp')))}),sharp=sm.default??sm;
+process.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+require('node:readline').createInterface({input:process.stdin}).on('line',async line=>{
+ const r=JSON.parse(line);fs.appendFileSync(${JSON.stringify(requests)},'request\\n');const records=[];
+ for(const o of r.objects){const width=o.right-o.left,height=o.bottom-o.top;
+  const rgba=await sharp(Buffer.from(r.image,'base64')).extract({left:o.left,top:o.top,width,height}).ensureAlpha().raw().toBuffer();let visible=0;
+  for(let i=0;i<width*height;i++){rgba[i*4+3]=rgba[i*4]<100?255:0;if(rgba[i*4+3])visible++;}
+  if(visible){const png=(await sharp(rgba,{raw:{width,height,channels:4}}).png().toBuffer()).toString('base64');records.push({id:o.id,png,score:.9,visible,pixels:width*height});}
+ }process.stdout.write(JSON.stringify({id:r.id,records,ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');
+});`);
+  await chmod(executable,0o700);
+  const source=await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="31" y="41" width="18" height="18" fill="#45678a"/></svg>')).png().toBuffer();
+  const cache:SourceRecoveryCache=new Map();
+  const connection={enabled:true,apiKey:"",provider:"local-sam2" as const,local:{python:executable,checkpoint:"synthetic-checkpoint",worker:"synthetic-worker",configured:true},sourceRecoveryCache:cache};
+  const make=(id:string,x=100,width=100)=>({id,kind:"decoration" as const,label:id,x,y:x,width,height:width,artSource:{x:300,y:400,width:200,height:200}});
+  const count=async()=>{try{return (await readFile(requests,"utf8")).trim().split("\n").length;}catch{return 0;}};
+  const transport:typeof fetch=async()=>{throw Error("No remote calls permitted");};
+  try{
+    const first=make("first");await prepareMovingSourceArt(source,[first],connection,signal,transport,"picture");
+    assert.deepEqual(first.artSource,{x:310,y:410,width:180,height:180});
+    assert.deepEqual({x:first.x,y:first.y,width:first.width,height:first.height},{x:105,y:105,width:90,height:90});
+    const initialRequests=await count();assert.ok(initialRequests>0);assert.equal(cache.size,1);
+    const second=make("renamed",200,200);await prepareMovingSourceArt(source,[second],connection,signal,transport,"picture");
+    assert.equal(await count(),initialRequests,"IDs, labels and game placement do not trigger extraction again.");
+    assert.deepEqual({x:second.x,y:second.y,width:second.width,height:second.height},{x:210,y:210,width:180,height:180});
+    const third=make("smaller",300,50);await prepareMovingSourceArt(source,[third],connection,signal,transport,"picture");
+    assert.deepEqual({x:third.x,y:third.y,width:third.width,height:third.height},{x:302.5,y:302.5,width:45,height:45},"Cache hits scale original recovered source bounds exactly once.");
+    second.artSource.x=0;
+    assert.equal([...cache.values()][0].x,310,"Game edits cannot mutate the cached source selection.");
+    const changed=make("bounds-change");changed.artSource.width=201;
+    await prepareMovingSourceArt(source,[changed],connection,signal,transport,"picture");
+    assert.ok(await count()>initialRequests,"A changed original source box requires fresh extraction.");
+    const blank=await sharp({create:{width:100,height:100,channels:3,background:"white"}}).png().toBuffer();
+    await assert.rejects(prepareMovingSourceArt(blank,[make("no-mask")],connection,signal,transport,"picture"),MovableArtworkReviewError);
+    const beforeNoMaskHit=await count();
+    await assert.rejects(prepareMovingSourceArt(blank,[make("same-no-mask")],connection,signal,transport,"picture"),MovableArtworkReviewError);
+    assert.equal(await count(),beforeNoMaskHit,"A genuine no-artwork result is reused for the same source, not another image.");
+    const controller=new AbortController();controller.abort();const beforeAbort=cache.size;
+    await assert.rejects(prepareMovingSourceArt(source,[make("cancelled")],connection,controller.signal,transport,"picture"));
+    assert.equal(cache.size,beforeAbort);assert.equal(await count(),beforeNoMaskHit,"Cancellation precedes both cached and uncached work.");
+    const broken=join(directory,"broken-worker.cjs");
+    await writeFile(broken,`#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');require('node:readline').createInterface({input:process.stdin}).on('line',line=>process.stdout.write(JSON.stringify({id:JSON.parse(line).id,error:'failed'})+'\\n'));`);
+    await chmod(broken,0o700);const beforeWorkerError=cache.size;
+    await assert.rejects(prepareMovingSourceArt(source,[make("failed-worker")],{...connection,local:{...connection.local,python:broken}},signal,transport,"picture"));
+    assert.equal(cache.size,beforeWorkerError,"Worker failures cannot become cached no-artwork evidence.");
+    while(cache.size<24)cache.set(`synthetic-capacity-${cache.size}`,{id:"capacity",label:"capacity",kind:"decoration",x:0,y:0,width:1,height:1});
+    const extra=make("beyond-cache");extra.artSource.width=202;
+    await prepareMovingSourceArt(source,[extra],connection,signal,transport,"picture");assert.equal(cache.size,24,"The request cache never expands beyond 24 entries.");
   }finally{closeLocalSegmentationWorkers();await rm(directory,{recursive:true,force:true});}
 });
 

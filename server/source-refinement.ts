@@ -37,7 +37,7 @@ export function installSourceRefinement(app: FastifyInstance) {
       let repairNote = "";
       const art = await sourceScenery(source, candidate.entities, candidate.interactions, undefined, details => {
         repairNote = details.method === "lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";
-      }, controller.signal);
+      }, controller.signal, candidate.inputKind);
       controller.signal.throwIfAborted();
       const patch: WorldPatch = {id:randomUUID(),worldId:world.id,baseRevision:world.revision,origin:'manual',additions:[],
         sourceRefinements,sourceScenery:{id:backdrops[0].id,art,artNote:SOURCE_SCENERY_NOTE+repairNote}};

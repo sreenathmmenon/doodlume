@@ -220,6 +220,9 @@ export async function localSegmentationArtwork(source: Buffer, boxes: LocalMaskB
     signal.throwIfAborted();
     if (reply.records.length > boxes.length) throw new Error("Local cutout records exceed the requested count.");
     const result = new Map<string, string>();
+    // Decode the bounded source once, rather than decoding the full photograph
+    // again for each mask. Every returned RGB pixel is still compared in place.
+    let original: Buffer | undefined;
     for (const record of reply.records) {
       signal.throwIfAborted();
       const box = boxes.find(candidate => candidate.id === record.id);
@@ -235,12 +238,15 @@ export async function localSegmentationArtwork(source: Buffer, boxes: LocalMaskB
       if (metadata.format !== "png" || metadata.width !== width || metadata.height !== height || metadata.channels !== 4 || !metadata.hasAlpha)
         throw new Error("Local cutout dimensions do not match their source.");
       const actual = await sharp(png).raw().toBuffer();
-      const original = await sharp(source).extract({ left: box.left, top: box.top, width, height }).removeAlpha().toColourspace("srgb").raw().toBuffer();
+      original ??= await sharp(source).removeAlpha().toColourspace("srgb").raw().toBuffer();
       let visible = 0;
-      for (let at = 0; at < record.pixels; at++) {
-        if (actual[at * 4] !== original[at * 3] || actual[at * 4 + 1] !== original[at * 3 + 1] || actual[at * 4 + 2] !== original[at * 3 + 2])
-          throw new Error("Local cutout changed original source pixels.");
-        if (actual[at * 4 + 3] > 20) visible++;
+      for (let y = 0; y < height; y++) {
+        let at = y * width * 4, sourceAt = ((box.top + y) * size.width + box.left) * 3;
+        for (let x = 0; x < width; x++, at += 4, sourceAt += 3) {
+          if (actual[at] !== original[sourceAt] || actual[at + 1] !== original[sourceAt + 1] || actual[at + 2] !== original[sourceAt + 2])
+            throw new Error("Local cutout changed original source pixels.");
+          if (actual[at + 3] > 20) visible++;
+        }
       }
     if (visible !== record.visible) throw new Error("Local cutout visibility metadata did not match its pixels.");
     // Expanded actor contexts deliberately include neighboring marks. Their

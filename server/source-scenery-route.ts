@@ -70,7 +70,7 @@ export function installSourceScenery(app: FastifyInstance) {
           sourceLayers.push({ id: entity.id, art: recovered.art, artSource: recovered.artSource, artMethod: recovered.artMethod, artNote: recovered.artNote, sourceLayer: entity.sourceLayer });
         }
       }
-      const art=await sourceScenery(source,candidate.entities,candidate.interactions,undefined,undefined,controller.signal);
+      const art=await sourceScenery(source,candidate.entities,candidate.interactions,undefined,undefined,controller.signal,candidate.inputKind);
       return {sourceScenery:{id:backdrop.id,art}, ...(sourceLayers.length ? {sourceLayers} : {})};
     }catch(error){
       const response=interpretationErrorResponse(error);

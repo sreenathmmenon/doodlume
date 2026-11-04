@@ -105,3 +105,39 @@ test('mixed masks retain automatic repair expansion and only the creator explici
     await rm(directory,{recursive:true,force:true});
   }
 });
+
+test('photo repair preserves transparent cutout holes and stationary neighbors outside exact moving coverage',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'doodlume-photo-repair-coverage-'));
+  const executable=join(directory,'repair-worker.cjs');
+  // Deliberately expansive synthetic learned output proves the compositor owns
+  // write permission independently of the repair worker's inference mask.
+  await writeFile(executable,`#!/usr/bin/env node\nconst sm=require(${JSON.stringify(fileURLToPath(import.meta.resolve('sharp')))}),sharp=sm.default??sm;let input='';process.stdin.on('data',d=>input+=d);process.stdin.on('end',async()=>{const r=JSON.parse(input),m=await sharp(Buffer.from(r.source,'base64')).metadata();process.stdout.write(await sharp({create:{width:m.width,height:m.height,channels:4,background:'#f0141e'}}).png().toBuffer());});`);
+  await chmod(executable,0o700);
+  const names=['LOCAL_SAM_PYTHON','LOCAL_SAM_CHECKPOINT','LOCAL_LAMA_CHECKPOINT','LOCAL_BACKGROUND_REPAIR'] as const;
+  const saved=Object.fromEntries(names.map(name=>[name,process.env[name]]));
+  process.env.LOCAL_SAM_PYTHON=executable;process.env.LOCAL_SAM_CHECKPOINT=executable;process.env.LOCAL_LAMA_CHECKPOINT=executable;process.env.LOCAL_BACKGROUND_REPAIR='lama';
+  try{
+    const source=await sharp({create:{width:80,height:60,channels:4,background:'#505a64'}}).png().toBuffer();
+    const rgba=await sharp(source).extract({left:20,top:20,width:20,height:20}).ensureAlpha().raw().toBuffer();
+    for(let y=0;y<20;y++)for(let x=0;x<20;x++)rgba[(y*20+x)*4+3]=x>=3&&x<17&&y>=3&&y<17&&!(x>=8&&x<12&&y>=8&&y<12)?255:0;
+    const art=imageData(await sharp(rgba,{raw:{width:20,height:20,channels:4}}).png().toBuffer());
+    const entity:WorldEntity={id:'moving',kind:'decoration',x:20,y:20,width:20,height:20,art,
+      artSource:{x:250,y:1000/3,width:250,height:1000/3},sourceLayer:{x:20,y:20,width:20,height:20},artMethod:'sam'};
+    let reportedRadius=0;
+    const result=await sourceScenery(source,[entity],undefined,undefined,details=>{reportedRadius=details.dilationPixels;},undefined,'picture');
+    assert.equal(reportedRadius,8,'Broad model context remains available even though photo writeback is exact.');
+    const backdrop=await sharp(Buffer.from(result.split(',')[1],'base64')).ensureAlpha().raw().toBuffer();
+    let covered=0;
+    for(let y=0;y<60;y++)for(let x=0;x<80;x++){
+      const xx=x-20,yy=y-20,inside=xx>=0&&yy>=0&&xx<20&&yy<20&&rgba[(yy*20+xx)*4+3]>0;
+      assert.deepEqual([...backdrop.subarray((y*80+x)*4,(y*80+x)*4+4)],inside?[240,20,30,255]:[80,90,100,255]);
+      if(inside)covered++;
+    }
+    assert.equal(covered,180,'The internal hole and transparent perimeter remain original scene pixels.');
+    const recomposed=await sharp(Buffer.from(result.split(',')[1],'base64')).composite([{input:Buffer.from(art.split(',')[1],'base64'),left:20,top:20}]).raw().toBuffer();
+    assert.deepEqual(recomposed,await sharp(source).ensureAlpha().raw().toBuffer(),'Before movement the foreground exactly restores the original photograph.');
+  }finally{
+    for(const name of names){if(saved[name]===undefined)delete process.env[name];else process.env[name]=saved[name];}
+    await rm(directory,{recursive:true,force:true});
+  }
+});

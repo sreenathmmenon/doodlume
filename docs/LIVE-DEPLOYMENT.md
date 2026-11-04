@@ -51,3 +51,9 @@ Local verification artifacts are ignored under `outputs/verification/live-deploy
 Before hosting: a 245-check run had two image-worker timeouts under concurrent local load; both affected files subsequently passed separately (54 checks). Three focused hosting/diagnostic checks passed after the logging change. Local type checking and cloud production builds passed. These are bounded verification results, not a universal production-quality rating.
 
 Official references: [Modal web endpoints](https://modal.com/docs/guide/webhooks), [CPU and memory](https://modal.com/docs/guide/resources), [runtime secrets](https://modal.com/docs/guide/secrets).
+
+## Photo pipeline follow-up
+
+The next release corrects picture background writeback, gathers all failed moving outlines in one review, adds a bounded source-preserving design correction, and reuses extraction facts within one request. The exact-source raster test improved from 103,955 altered initial pixels to zero. The repaired generated photo activity was played through all four actions, saved and reloaded. Extraction replay improved from 10.057 seconds to 106 milliseconds; this does not remove hosted model latency. The staged planner remains opt-in; the service continues Fireworks/default planning. Fresh neutral-photo requests can still require review or reach the 120-second model deadline. See GAME-FEEL.md for the successful, failed and replayed runs without treating them as equivalent evidence.
+
+Hosted follow-up verified on the released pipeline: fresh table photo with explicit fixed-mug/plant watering intent compiled in 35.353 seconds, played to completion, saved and reloaded. Readiness returned 200. The prior failed neutral-photo runs remain recorded; automatic unfamiliar-photo creation and stable model response time remain open quality gates.

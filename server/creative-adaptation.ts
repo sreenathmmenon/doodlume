@@ -401,12 +401,12 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
       const draft=applyPlannedInteractions({id:randomUUID(),name:options.name.slice(0,80),description:options.description.slice(0,500),theme:options.theme,
         width:1440,height:820,source:"meta",sourceImage:imageData(source),inputKind,revision:1,entities:draftEntities,goalRules:rules,
         gameplay:{movement:plan.movement,objectiveTitle:plan.objectiveTitle,instructions:plan.instructions,clues}},plan.interactions,plan.requiredInteractionIds,true,{validateGeneratedChoices:options.validateGeneratedChoices});
-      throw new RecognitionReviewError(validateRecognitionReview({kind:"recognition-review",version:1,draft,issues:[{
-        id:"source-outline",objectId:error.objectId,label:"Check the whole object",message:error.message}]}));
+      throw new RecognitionReviewError(validateRecognitionReview({kind:"recognition-review",version:1,draft,issues:error.objectIds.map((objectId,index)=>({
+        id:index===0?"source-outline":`source-outline-${index+1}`,objectId,label:"Check the whole object",message:error.message}))}));
     }
     if (moving.length) {
       let repairNote="";
-      entities[0].art = await sourceScenery(source, moving, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";},signal);
+      entities[0].art = await sourceScenery(source, moving, plan.interactions,undefined,details=>{repairNote=details.method==="lama" ? " Background reconstructed with local LaMa." : " Background reconstructed with local classical inpainting.";},signal,inputKind);
       entities[0].artNote = SOURCE_SCENERY_NOTE+repairNote;
     }
   }

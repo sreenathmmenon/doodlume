@@ -12,12 +12,18 @@ import type { ModelConnection } from "./provider.js";
 import type { WorldEntity, InputKind } from "../shared/world.js";
 import { localSegmentationArtwork, localSegmentationConfig, type LocalSegmentationConfig } from "./local-segmentation.js";
 
+import type { SourceSelection } from "./creative-adaptation.js";
+
+/** Owned by one interpretation request; never persisted or exposed to clients. */
+export type SourceRecoveryCache = Map<string, SourceSelection>;
+
 export interface SegmentationConnection {
   enabled: boolean;
   apiKey: string;
   reserveRequest?: () => void;
   provider?: "meta-api" | "local-sam2";
   local?: LocalSegmentationConfig;
+  sourceRecoveryCache?: SourceRecoveryCache;
 }
 export interface ArtworkObject {
   id: string;

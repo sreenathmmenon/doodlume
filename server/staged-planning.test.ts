@@ -173,3 +173,29 @@ test("a revised outline review returns normally, while abort, network failure an
     assert.equal(calls,3);
   }
 });
+
+test("photo-only rollout uses frozen inventory while drawings keep their existing interpretation path",async()=>{
+  const {interpretDrawing}=await import('./interpret.js');
+  const {default:sharp}=await import('sharp');
+  const image='data:image/png;base64,'+(await sharp({create:{width:1000,height:1000,channels:3,background:'#ccddee'}}).png().toBuffer()).toString('base64');
+  const before=process.env.SOURCE_PLANNING;
+  process.env.SOURCE_PLANNING='photos';
+  try{
+    const requests:any[]=[];
+    const world=await interpretDrawing(image,'Supply water to the recipient',connection,new AbortController().signal,{enabled:false,apiKey:''},async(_url,init)=>{
+      requests.push(JSON.parse(String(init?.body)));return response(requests.length===1?inventory:design);
+    },'picture');
+    assert.equal(requests.length,2);
+    assert.equal(world.interactions?.objects.find(object=>object.entityId==='source')?.usableInPlace,true);
+    assert.deepEqual(world.goalRules?.requiredResourceIds,['receiver']);
+    assert.deepEqual(world.entities.find(object=>object.id==='source')?.artSource,{x:10,y:20,width:90,height:130});
+    let drawingCalls=0;
+    await assert.rejects(interpretDrawing(image,'Explore the drawing',connection,new AbortController().signal,{enabled:false,apiKey:''},async(_url,init)=>{
+      drawingCalls++;const request=JSON.parse(String(init?.body));
+      assert.ok(request.response_format.schema.properties.objects,'Drawings still send their original recognition/gameplay contract.');
+      assert.equal(request.response_format.schema.anyOf,undefined);
+      return new Response('',{status:502});
+    },'drawing'),/could not complete/);
+    assert.equal(drawingCalls,1);
+  }finally{if(before===undefined)delete process.env.SOURCE_PLANNING;else process.env.SOURCE_PLANNING=before;}
+});

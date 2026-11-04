@@ -3,24 +3,26 @@ import { includeSourceRepairMargin } from '../shared/source-outline.js';
 import { repairSourceBackgroundDetailed } from './source-background.js';
 import { imageData, pixelBox } from './images.js';
 import type { InteractionPlan } from '../shared/interactions.js';
-import type { WorldEntity } from '../shared/world.js';
+import type { WorldEntity, InputKind } from '../shared/world.js';
 
 export { SOURCE_SCENERY_NOTE } from "../shared/source-scenery.js";
 
-/** Preserve stationary source pixels; reconstruct only the removed moving
- * silhouette from adjacent source colors. This is deterministic background
- * interpolation, not generated artwork or a claimed model inpainting result. */
-export async function sourceScenery(source: Buffer, entities: WorldEntity[], interactions?: InteractionPlan, inspectRepair?: (source:Buffer,mask:Buffer)=>Promise<void>, reportRepair?: (details:{method:"lama"|"classical";dilationPixels:number})=>void, signal?:AbortSignal): Promise<string> {
+/** Preserve stationary source pixels and reconstruct the permitted moving
+ * silhouette coverage. Repair may inspect a broader context without gaining
+ * permission to erase unrelated photograph pixels. */
+export async function sourceScenery(source: Buffer, entities: WorldEntity[], interactions?: InteractionPlan, inspectRepair?: (source:Buffer,mask:Buffer)=>Promise<void>, reportRepair?: (details:{method:"lama"|"classical";dilationPixels:number})=>void, signal?:AbortSignal, inputKind:InputKind = "drawing"): Promise<string> {
   signal?.throwIfAborted();
   const { data, info } = await sharp(source).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const original = Buffer.from(data);
   const repairMask = Buffer.alloc(info.width * info.height);
   const hasConfirmedOutline = entities.some(entity => entity.artMethod === 'outline');
-  // A reconstruction model may expand its working mask for context. When a
-  // creator supplied an outline, use only its explicitly chosen coverage/margin while allowing the
-  // independently automatic masks their reported model repair margin.
-  const writable = hasConfirmedOutline ? Buffer.alloc(info.width * info.height) : undefined;
-  const automaticRepair = hasConfirmedOutline ? Buffer.alloc(info.width * info.height) : undefined;
+  const exactPhotoCoverage = inputKind === 'picture';
+  // A model may expand its inference mask without gaining permission to erase
+  // stationary photograph pixels. Photo writeback follows only actual foreground
+  // coverage (plus an explicitly chosen creator margin). Drawing masks retain
+  // their existing automatic ink/halo cleanup region.
+  const writable = hasConfirmedOutline || exactPhotoCoverage ? Buffer.alloc(info.width * info.height) : undefined;
+  const automaticRepair = hasConfirmedOutline && !exactPhotoCoverage ? Buffer.alloc(info.width * info.height) : undefined;
   const interactionGates = new Set((interactions?.actions ?? []).flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === 'openGate' || effect.kind === 'moveObject' ? [effect.entityId] : [])));
   const carried = new Set((interactions?.objects ?? []).filter(object => object.carryable).map(object => object.entityId));
   for (const entity of entities) {
@@ -72,7 +74,7 @@ export async function sourceScenery(source: Buffer, entities: WorldEntity[], int
     const paper = edges.every(edge => edge.total > 0 && edge.paper / edge.total >= .85)
       ? [0,1,2].map(channel => paperSamples.map(rgb => rgb[channel]).sort((a,b)=>a-b)[Math.floor(paperSamples.length / 2)]) : undefined;
     const originalMask = mask;
-    if (mask && paper && entity.artMethod !== 'outline') {
+    if (mask && paper && entity.artMethod !== 'outline' && !exactPhotoCoverage) {
       mask = Buffer.from(mask);
       for (let y = 0; y < box.height; y++) for (let x = 0; x < box.width; x++) {
         let alpha = 0;
@@ -148,7 +150,7 @@ export async function sourceScenery(source: Buffer, entities: WorldEntity[], int
     if (repaired) {
       reportRepair?.({method:repaired.method,dilationPixels:repaired.dilationPixels});
       if (!writable) return imageData(await sharp(repaired.image).ensureAlpha().png().toBuffer());
-      includeSourceRepairMargin(writable,automaticRepair!,info.width,info.height,repaired.dilationPixels);
+      if (automaticRepair) includeSourceRepairMargin(writable,automaticRepair,info.width,info.height,repaired.dilationPixels);
       const result = await sharp(repaired.image).ensureAlpha().raw().toBuffer();
       for (let at = 0; at < writable.length; at++) {
         if (writable[at] === 0) original.copy(result, at * 4, at * 4, at * 4 + 4);

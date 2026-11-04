@@ -325,7 +325,7 @@ export async function interpretAmendment(
   signal.throwIfAborted();
   const revisedScenery = sourceBackdrop ? {
     id: sourceBackdrop.id,
-    art: await sourceScenery(after, [...world.entities, ...additions], world.interactions,undefined,undefined,signal),
+    art: await sourceScenery(after, [...world.entities, ...additions], world.interactions,undefined,undefined,signal,world.inputKind),
   } : undefined;
   signal.throwIfAborted();
   const patch = {
