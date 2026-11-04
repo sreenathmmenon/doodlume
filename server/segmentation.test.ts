@@ -12,7 +12,9 @@ import { emptyPlayState } from "../shared/world.js";
 import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { localSegmentationArtwork, closeLocalSegmentationWorkers } from "./local-segmentation.js";
+import { groundWholeActor } from "./actor-grounding.js";
 
 // Published Meta wire-format example, used as synthetic protocol data only.
 // It is not an inference result from this app or a drawing-recognition benchmark.
@@ -33,6 +35,51 @@ const image = await sharp(
 )
   .png()
   .toBuffer();
+
+test("whole-object fallback separates prompt from output bounds and still requires independent agreement", async () => {
+  const directory=await mkdtemp(join(tmpdir(),"doodlume-context-test-"));
+  const source=await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="34" y="36" width="12" height="25" fill="#45678a"/></svg>')).png().toBuffer();
+  const crop=await sharp(source).extract({left:24,top:34,width:32,height:32}).ensureAlpha().raw().toBuffer();
+  let visible=0;
+  for(let i=0;i<32*32;i++){crop[i*4+3]=crop[i*4]===255?0:255;if(crop[i*4+3])visible++;}
+  const png=(await sharp(crop,{raw:{width:32,height:32,channels:4}}).png().toBuffer()).toString('base64');
+  const actor={id:'subject',kind:'decoration' as const,label:'Subject',x:300,y:400,width:200,height:200};
+  const configFor=async(name:string,agree:boolean)=>{
+    const executable=join(directory,name);
+    await writeFile(executable,`#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');let pending='';process.stdin.on('data',chunk=>{pending+=chunk;let end;while((end=pending.indexOf('\\n'))!==-1){const r=JSON.parse(pending.slice(0,end));pending=pending.slice(end+1);const objects=r.objects.filter(o=>o.prompt);const records=objects.filter((o,i)=>${agree?'true':'i===0'}).map(o=>({id:o.id,png:'${png}',score:.9,visible:${visible},pixels:1024}));process.stdout.write(JSON.stringify({id:r.id,records,ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');}});`);
+    await chmod(executable,0o700);
+    return {python:executable,checkpoint:'synthetic-protocol-only',worker:'synthetic-protocol-only',configured:true};
+  };
+  try{
+    const recovered=await groundWholeActor(source,actor,await configFor('agree',true),signal,[],undefined,true);
+    assert.ok(recovered.artwork);
+    assert.deepEqual({x:recovered.x,y:recovered.y,width:recovered.width,height:recovered.height},{x:340,y:360,width:120,height:250});
+    assert.match(recovered.artwork.artNote!,/Tight object prompts agreed/);
+    const actual=await sharp(Buffer.from(recovered.artwork.art!.split(',')[1],'base64')).removeAlpha().raw().toBuffer();
+    assert.deepEqual(actual,await sharp(source).extract({left:34,top:36,width:12,height:25}).removeAlpha().raw().toBuffer());
+    const uncertain=await groundWholeActor(source,actor,await configFor('no-agreement',false),signal,[],undefined,true);
+    assert.equal(uncertain.artwork,undefined,"One bounded mask is not enough to bypass the outline review.");
+    const config=await configFor('invalid-prompt',true);
+    for(const prompt of [{left:0,top:34,right:46,bottom:61},{left:34.5,top:36,right:46,bottom:61},{left:46,top:36,right:34,bottom:61}])
+      await assert.rejects(()=>localSegmentationArtwork(source,[{id:'subject',left:24,top:34,right:56,bottom:66,prompt}],config,signal),/prompts must fit/);
+  }finally{closeLocalSegmentationWorkers();await rm(directory,{recursive:true,force:true});}
+});
+
+test("an agreed tight fragment cannot discard a long appendage outside a clipped model box", async () => {
+  const directory=await mkdtemp(join(tmpdir(),"doodlume-appendage-test-"));
+  const executable=join(directory,'mask-worker.cjs');
+  // Synthetic protocol fixture: broad prompts see the whole body and tail;
+  // every tight prompt consistently misses the tail. Agreement alone is unsafe.
+  const source=await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="31" y="41" width="18" height="18" fill="#45678a"/><rect x="49" y="45" width="19" height="4" fill="#ac5723"/></svg>')).png().toBuffer();
+  await writeFile(executable,`#!/usr/bin/env node\nconst sharpModule=require(${JSON.stringify(fileURLToPath(import.meta.resolve('sharp')))});const sharp=sharpModule.default??sharpModule;const readline=require('node:readline');process.stdout.write(JSON.stringify({ready:true,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');readline.createInterface({input:process.stdin}).on('line',async line=>{const r=JSON.parse(line),records=[];for(const o of r.objects){const width=o.right-o.left,height=o.bottom-o.top;const data=await sharp(Buffer.from(r.image,'base64')).extract({left:o.left,top:o.top,width,height}).ensureAlpha().raw().toBuffer();let visible=0;for(let i=0;i<width*height;i++){const keep=data[i*4]===69||(!o.prompt&&data[i*4]===172);data[i*4+3]=keep?255:0;if(keep)visible++;}if(!visible)continue;const png=(await sharp(data,{raw:{width,height,channels:4}}).png().toBuffer()).toString('base64');records.push({id:o.id,png,visible,pixels:width*height,score:.9});}process.stdout.write(JSON.stringify({id:r.id,records,ms:1,model:'Meta SAM 2.1 tiny',device:'cpu'})+'\\n');});`);
+  await chmod(executable,0o700);
+  try{
+    const actor={id:'subject',kind:'decoration' as const,label:'Subject',x:300,y:400,width:199,height:200};
+    const recovered=await groundWholeActor(source,actor,{python:executable,checkpoint:'synthetic-protocol-only',worker:'synthetic-protocol-only',configured:true},signal,[],undefined,true);
+    assert.equal(recovered.artwork,undefined,"Conflicting whole-subject evidence must retain review instead of deleting the tail.");
+    assert.deepEqual(recovered,actor,"The original source selection must remain recoverable.");
+  }finally{closeLocalSegmentationWorkers();await rm(directory,{recursive:true,force:true});}
+});
 
 test("local cutout replies cannot change crop dimensions, failures stay local and cancellation stops an owned worker", async () => {
   const directory = await mkdtemp(join(tmpdir(), "doodlume-local-mask-test-"));

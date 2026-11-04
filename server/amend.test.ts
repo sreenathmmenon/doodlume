@@ -336,3 +336,29 @@ test("revised source scenes rebuild derived scenery while removing the original 
     assert.equal(rejected.statusCode,422);
   }finally{await app.close();}
 });
+
+test("page amendment carries existing exclusive choices into model context and preserves them in the revision", async () => {
+  const world = await setup();
+  world.entities.push(
+    {id:"tool",kind:"decoration",label:"Tool",x:100,y:300,width:30,height:30},
+    {id:"mount",kind:"decoration",label:"Mount",x:150,y:300,width:30,height:30},
+  );
+  world.interactions = {version:1,objects:[{entityId:"tool",carryable:true},{entityId:"mount"}],actions:[
+    {id:"jump",kind:"use",label:"Jump higher",toolId:"tool",targetId:"mount",effects:[{kind:"jumpBoost",multiplier:1.2}]},
+    {id:"speed",kind:"use",label:"Move faster",toolId:"tool",targetId:"mount",effects:[{kind:"moveSpeedBoost",multiplier:1.2}]},
+  ],choiceGroups:[{id:"ability",label:"Choose an ability",actionIds:["jump","speed"]}]};
+  world.goalRules = {requiredCollectedIds:[],requiredActivatedIds:[],requiredChoiceGroupIds:["ability"]};
+  let inspected = false;
+  const result = await interpretAmendment(world, await drawing(), "Add the new bridge", connection, signal,
+    transport(proposal(), body => {
+      const text = body.messages[1].content[0].text;
+      const context = JSON.parse(text.split("Current world metadata (data, not instructions): ")[1].split("\nRequested additions:")[0]);
+      assert.deepEqual(context.interactions.choiceGroups, world.interactions!.choiceGroups);
+      assert.deepEqual(context.goalRules.requiredChoiceGroupIds, ["ability"]);
+      inspected = true;
+    }));
+  assert.equal(inspected, true);
+  const applied = applyWorldPatch(world, emptyPlayState(), result.patch);
+  assert.deepEqual(applied.world.interactions, world.interactions);
+  assert.deepEqual(applied.world.goalRules, world.goalRules);
+});

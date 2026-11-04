@@ -107,3 +107,46 @@ test("independent optional capabilities do not exhaust the route search before a
   f.interactions.actions.push({ ...open, requires: ["prepare-4"] });
   assert.doesNotThrow(() => checkRoamRoute(1000, 600, f.guide, f.entities, rules, f.interactions));
 });
+
+test("required exclusive routes use OR semantics when both physical outcomes can finish", () => {
+  for (const reverse of [false, true]) {
+    const f = fixture();
+    f.interactions.actions[0].effects = [{kind:"openGate",entityId:"door"}];
+    f.interactions.choiceGroups = [{ id: "route", label: "Choose a route", actionIds: ["spend", "open"] }];
+    if (reverse) f.interactions.actions.reverse();
+    assert.doesNotThrow(() => checkRoamRoute(1000, 600, f.guide, f.entities, { ...rules, requiredChoiceGroupIds: ["route"] }, f.interactions));
+  }
+});
+
+test("a required choice must be performed even when the finish is already reachable", () => {
+  const f = fixture();
+  f.entities.find(entity => entity.id === "destination")!.x = 300;
+  for (const id of ["unused-recipient", "control"]) f.entities.find(entity => entity.id === id)!.x = 800;
+  f.interactions.choiceGroups = [{ id: "route", label: "Choose a route", actionIds: ["spend", "open"] }];
+  assert.throws(() => checkRoamRoute(1000, 600, f.guide, f.entities, { ...rules, requiredChoiceGroupIds: ["route"] }, f.interactions), /choice route/);
+});
+
+
+test("an offered choice that opens the wrong gate is rejected even when its sibling finishes", () => {
+  for (const reverse of [false, true]) {
+    const f = fixture();
+    f.entities.push(entity("other-door", "gate", 950, 20, 30, 40));
+    f.interactions.actions[0].effects = [{kind:"openGate",entityId:"other-door"}];
+    f.interactions.choiceGroups = [{ id: "route", label: "Choose a route", actionIds: ["spend", "open"] }];
+    if (reverse) f.interactions.actions.reverse();
+    assert.throws(() => checkRoamRoute(1000, 600, f.guide, f.entities, { ...rules, requiredChoiceGroupIds: ["route"] }, f.interactions), /choice route/);
+  }
+});
+
+test("individually useful members cannot hide a losing combination across choice groups", () => {
+  const f = fixture();
+  f.entities.push(entity("second-door", "gate", 700, 0, 30, 600));
+  f.interactions.actions = ["first", "second"].flatMap(prefix => [
+    {id:`${prefix}-left`,kind:"use",label:"Open first door",toolId:"charge",targetId:"control",effects:[{kind:"openGate",entityId:"door"}]},
+    {id:`${prefix}-right`,kind:"use",label:"Open second door",toolId:"charge",targetId:"control",effects:[{kind:"openGate",entityId:"second-door"}]},
+  ]);
+  f.interactions.choiceGroups = ["first", "second"].map(id=>({id,label:id,actionIds:[`${id}-left`,`${id}-right`]}));
+  // Each member occurs in a winning opposite-door pairing. The same-door
+  // pairings still strand the player and must not be accepted as choices.
+  assert.throws(() => checkRoamRoute(1000, 600, f.guide, f.entities, { ...rules, requiredChoiceGroupIds:["first","second"] }, f.interactions), /choice route/);
+});

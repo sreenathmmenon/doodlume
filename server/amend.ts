@@ -131,6 +131,8 @@ export async function interpretAmendment(
   const context = JSON.stringify({
     worldId: world.id,
     revision: world.revision,
+    interactions: world.interactions ?? null,
+    goalRules: world.goalRules ?? null,
     page: {
       rasterWidth: am.width,
       rasterHeight: am.height,

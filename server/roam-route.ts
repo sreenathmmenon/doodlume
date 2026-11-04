@@ -78,6 +78,8 @@ export function checkRoamRoute(width: number, height: number, guide: WorldEntity
   const byId = new Map(entities.map(entity => [entity.id, entity]));
   const allActions = behaviorWorld?.interactions?.actions ?? [];
   const relevantActions = new Set(rules.requiredInteractionIds ?? []);
+  const choiceMembers = new Set(interactions?.choiceGroups?.flatMap(group => group.actionIds) ?? []);
+  for (const actionId of choiceMembers) relevantActions.add(actionId);
   const relevantResources = new Set(rules.requiredResourceIds ?? []);
   const relevantObjects = new Set([...required, ...goals.map(goal => goal.id)]);
   // Backward slice from winning conditions and source access. Keep the whole
@@ -103,9 +105,11 @@ export function checkRoamRoute(width: number, height: number, guide: WorldEntity
   const routeActions = allActions.filter(action => relevantActions.has(action.id));
   const frontier: PlayState[] = [emptyPlayState()];
   const seenStates = new Set<string>([""]);
+  const predecessors = new Map<string, Set<string>>(), winning = new Set<string>();
   let bounded = false;
   for (let head = 0; head < frontier.length; head++) {
     const state = frontier[head];
+    const stateKey = [...(state.interactions?.completed ?? [])].sort().join("|");
     const effects: Pick<ReturnType<typeof interactionEffects>, "openGateIds" | "objectMoves"> = behaviorWorld ? interactionEffects(behaviorWorld, state) : { openGateIds: [], objectMoves: {} };
     const opened = new Set<string>(effects.openGateIds);
     let cells = region(opened);
@@ -142,11 +146,16 @@ export function checkRoamRoute(width: number, height: number, guide: WorldEntity
       return position;
     };
     const actionsComplete = (rules.requiredInteractionIds ?? []).every(id => state.interactions?.completed.includes(id));
+    const choicesComplete = (rules.requiredChoiceGroupIds ?? []).every(id =>
+      interactions?.choiceGroups?.find(group => group.id === id)?.actionIds.some(actionId => state.interactions?.completed.includes(actionId)));
     const resourcesComplete = (rules.requiredResourceIds ?? []).every(id => {
       const resource = interactions!.objects.find(object => object.entityId === id)!.resource!;
       return (state.interactions?.quantities[id] ?? resource.initial) >= resource.capacity;
     });
-    if (actionsComplete && resourcesComplete && [...required].every(id => reachable(currentEntity(id), cells)) && (!goals.length || goals.some(goal => reachable(currentEntity(goal.id), cells)))) return;
+    if (actionsComplete && choicesComplete && resourcesComplete && [...required].every(id => reachable(currentEntity(id), cells)) && (!goals.length || goals.some(goal => reachable(currentEntity(goal.id), cells)))) {
+      if (!choiceMembers.size) return;
+      winning.add(stateKey);
+    }
     if (!behaviorWorld) break;
     for (const action of routeActions) {
       if (state.interactions?.completed.includes(action.id) || !reachable(currentEntity(action.toolId), cells) || !reachable(currentEntity(action.targetId), cells)) continue;
@@ -155,14 +164,25 @@ export function checkRoamRoute(width: number, height: number, guide: WorldEntity
       if (!picked.ok) continue;
       const performed = reduceInteraction(behaviorWorld, picked.state, { type: "perform", actionId: action.id });
       if (!performed.ok) continue;
-      // Validated moves of one object have an explicit dependency order;
+      // Validated moves of one object have a dependency order or are exclusive;
       // quantities and attachments are determined by the completed action set.
       const key = [...performed.state.interactions!.completed].sort().join("|");
+      if (!predecessors.has(key)) predecessors.set(key, new Set());
+      predecessors.get(key)!.add(stateKey);
       if (seenStates.has(key)) continue;
       if (seenStates.size >= 2048) { bounded = true; continue; }
       seenStates.add(key); frontier.push(performed.state);
     }
   }
   if (bounded) throw new InterpretationError("This route has too many interacting choices to verify. Simplify its dependencies or obstacles before playing.");
+  if (choiceMembers.size) {
+    // Every offered selection, including combinations across groups, must still
+    // have a physical route to completion. Undo is not a substitute for a route.
+    const viable = new Set(winning), queue = [...winning];
+    for (let head = 0; head < queue.length; head++) for (const prior of predecessors.get(queue[head]) ?? [])
+      if (!viable.has(prior)) { viable.add(prior); queue.push(prior); }
+    if (viable.size === seenStates.size && [...choiceMembers].every(id => frontier.some(state => state.interactions?.completed.includes(id)))) return;
+    throw new InterpretationError("The intended obstacles block a choice route. Every offered choice must remain reachable and allow the required objects or destination to be completed. Check its targets, supplies and opened paths.");
+  }
   throw new InterpretationError("The intended obstacles block the route to the required objects or destination. Check access to the tools, targets and supplies; no substitute route has been added.");
 }

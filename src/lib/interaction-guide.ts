@@ -1,5 +1,5 @@
 import type { PlayState, WorldDefinition } from "../../shared/world";
-import { interactionState, safeAvailableInteractions } from "../../shared/interactions";
+import { interactionChoiceBlockedReason, interactionState, safeAvailableInteractions } from "../../shared/interactions";
 import { objectName } from "./object-name";
 
 export interface InteractionHint {
@@ -24,9 +24,9 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
   };
   const requireAction = (id: string) => {
     if (needed.has(id) || progress.completed.includes(id)) return;
-    needed.add(id);
     const action = actions.find(action => action.id === id);
-    if (!action) return;
+    if (!action || interactionChoiceBlockedReason(world, progress, action)) return;
+    needed.add(id);
     for (const prior of action.requires ?? []) requireAction(prior);
     for (const resource of action.requiresResourceIds ?? []) requireResource(resource);
     // A refill can be the useful next move, even though only the delivery is
@@ -43,6 +43,12 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
   };
   for (const id of world.goalRules?.requiredInteractionIds ?? []) requireAction(id);
   for (const id of world.goalRules?.requiredResourceIds ?? []) requireResource(id);
+  for (const id of world.goalRules?.requiredChoiceGroupIds ?? []) {
+    const group = world.interactions.choiceGroups?.find(group => group.id === id);
+    if (group && !group.actionIds.some(id => progress.completed.includes(id))) {
+      for (const actionId of group.actionIds) requireAction(actionId);
+    }
+  }
   const hasUnfinishedTasks = needed.size > 0;
   const candidates = world.interactions.objects.flatMap(object => {
     if (!object.carryable || progress.attachments[object.entityId]) return [];
@@ -57,6 +63,12 @@ export function nextInteractionHint(world: WorldDefinition, state: PlayState): I
   candidates.sort((a, b) => Number(b.toolId === progress.heldEntityId) - Number(a.toolId === progress.heldEntityId)
     || distance(a.toolId === progress.heldEntityId ? a.targetId : a.toolId) - distance(b.toolId === progress.heldEntityId ? b.targetId : b.toolId));
   const next = candidates[0];
+  const choice = world.interactions.choiceGroups?.find(group => next && group.actionIds.includes(next.id));
+  const alternatives = choice ? candidates.filter(action => choice.actionIds.includes(action.id)) : [];
+  if (next && alternatives.length > 1) {
+    const names = alternatives.slice(0, 2).map(action => action.label);
+    return { entityId: next.toolId, text: `Choose: ${names.join(" or ")}${alternatives.length > 2 ? `, or ${alternatives.length - 2} more` : ""}.` };
+  }
   if (next) return next.toolId === progress.heldEntityId
     ? { entityId: next.targetId, text: `${next.label} · ${objectName(world, next.targetId, 48)}` }
     : { entityId: next.toolId, text: `Take ${objectName(world, next.toolId, 48)} to ${next.label.charAt(0).toLowerCase()}${next.label.slice(1)}.` };

@@ -42,13 +42,13 @@ export function GoalRules({
   const hasGoal = world.entities.some((e) => e.kind === "goal");
   const canFinish = hasGoal || Boolean(world.interactions);
   const count =
-    rules.requiredCollectedIds.length + rules.requiredActivatedIds.length + (rules.requiredInteractionIds?.length ?? 0) + (rules.requiredResourceIds?.length ?? 0);
+    rules.requiredCollectedIds.length + rules.requiredActivatedIds.length + (rules.requiredInteractionIds?.length ?? 0) + (rules.requiredResourceIds?.length ?? 0) + (rules.requiredChoiceGroupIds?.length ?? 0);
   const quantities = interactionState(world, state ?? emptyPlayState()).quantities;
   const original = world.goalRules ?? {
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (["requiredCollectedIds", "requiredActivatedIds", "requiredInteractionIds", "requiredResourceIds"] as (keyof Rules)[]).some(
+  const changed = Object.entries(clueTexts).some(([id,text]) => text !== world.gameplay?.clues?.find(clue => clue.entityId === id)?.text) || (["requiredCollectedIds", "requiredActivatedIds", "requiredInteractionIds", "requiredResourceIds", "requiredChoiceGroupIds"] as (keyof Rules)[]).some(
     (key) =>
       (rules[key] ?? []).length !== (original[key] ?? []).length ||
       (rules[key] ?? []).some((id) => !(original[key] ?? []).includes(id)),
@@ -121,7 +121,7 @@ export function GoalRules({
             className="text-button"
             disabled={!count}
             onClick={() =>
-              setRules({ requiredCollectedIds: [], requiredActivatedIds: [], requiredInteractionIds: [], requiredResourceIds: [] })
+              setRules({ requiredCollectedIds: [], requiredActivatedIds: [], requiredInteractionIds: [], requiredResourceIds: [], requiredChoiceGroupIds: [] })
             }
           >
             Make all optional
@@ -147,12 +147,20 @@ export function GoalRules({
         )}
         {choices("coin", "requiredCollectedIds")}
         {choices("lever", "requiredActivatedIds")}
-        {world.interactions && <fieldset className="goal-rules-group" disabled={!canFinish}>
+        {world.interactions?.actions.some(action => !world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)) || rules.requiredInteractionIds?.includes(action.id)) && <fieldset className="goal-rules-group" disabled={!canFinish}>
           <legend>Complete before finishing</legend>
-          {world.interactions.actions.map(action => <label className="goal-rules-choice" key={action.id}>
+          {world.interactions.actions.filter(action => !world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)) || rules.requiredInteractionIds?.includes(action.id)).map(action => <label className="goal-rules-choice" key={action.id}>
             <input type="checkbox" checked={(rules.requiredInteractionIds ?? []).includes(action.id)} onChange={() => toggle("requiredInteractionIds", action.id)} />
-            <span><strong>{action.label}</strong></span>
+            <span><strong>{world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)) ? `Must choose ${action.label}` : action.label}</strong></span>
             {state?.interactions?.completed.includes(action.id) && <em>Done</em>}
+          </label>)}
+        </fieldset>}
+        {Boolean(world.interactions?.choiceGroups?.length) && <fieldset className="goal-rules-group" disabled={!canFinish}>
+          <legend>Choose one to finish</legend>
+          {world.interactions!.choiceGroups!.map(group => <label className="goal-rules-choice" key={group.id}>
+            <input type="checkbox" checked={(rules.requiredChoiceGroupIds ?? []).includes(group.id)} onChange={() => toggle("requiredChoiceGroupIds", group.id)} />
+            <span><strong>{group.label}</strong><small>{group.actionIds.map(id => world.interactions!.actions.find(action => action.id === id)?.label ?? id).join(" or ")}</small></span>
+            {group.actionIds.some(id => state?.interactions?.completed.includes(id)) && <em>Done</em>}
           </label>)}
         </fieldset>}
         {world.interactions?.objects.some(object => object.resource) && <fieldset className="goal-rules-group" disabled={!canFinish}>

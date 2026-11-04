@@ -1,3 +1,4 @@
+import { validateGeneratedPlacementVisibility } from "./placement-visibility.js";
 import { prepareMovingSourceArt, MovableArtworkReviewError } from "./moving-source-art.js";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
@@ -45,6 +46,7 @@ export interface GameplayPlan {
   interactions?: PlannedInteractions;
   requiredInteractionIds?: string[];
   requiredResourceIds?: string[];
+  requiredChoiceGroupIds?: string[];
 }
 
 export const gameplaySchema = {
@@ -58,6 +60,7 @@ export const gameplaySchema = {
     interactions: interactionsSchema,
     requiredResourceIds: { type: "array", maxItems: 24, items: { type: "string" } },
     requiredInteractionIds: { type: "array", maxItems: 16, items: { type: "string" } },
+    requiredChoiceGroupIds: { type: "array", maxItems: 8, uniqueItems: true, items: { type: "string" } },
     clues: {
       type: "array", maxItems: 24,
       items: {
@@ -85,7 +88,7 @@ export const gameplaySchema = {
 };
 
 export const creativeInstructions = `Your job has TWO separate outputs: honest visual recognition in objects, and an explicit gameplay design in gameplay. Almost any supplied image can inspire a game; it does NOT need to depict a platform game. Never ask the person to draw a player or terrain merely because they are absent. Select only actual visible subjects, parts, shapes and surfaces with tight normalized 0..1000 source boxes. Assign actual fruit, leaves, droplets, gears, details, stars or separable paint marks a coin role when the game asks the person to find them. This is a game-role assignment, not a claim that the original picture was a game. A lever can represent an actual visible button, gear or switch to activate. Keep their source IDs and original source positions.
-DESIGN THE ACTIVITY BEFORE CHOOSING MOVEMENT. A neutral request such as "make this a game" asks you to choose a compelling supported activity; it is not a request for a search-and-click hunt. First inspect relationships between actual visible objects, then choose (1) the player's role, (2) a concrete change they can cause, (3) a meaningful decision or dependency, and (4) a visible payoff. Explain that specific choice briefly in gameplay.reason. When the image has separable tools/supplies and compatible recipients/parts, prefer source-native object play with gameplay.interactions over merely finding those objects. Use bounded transfer, placement, attachment, gate opening or source-object movement only as the engine actually supports; perceived categories alone never select a preset game. A neutral task must have an earned finishing condition in requiredInteractionIds or requiredResourceIds when using interactions, unless the person explicitly requests free play. Resource units are game quantities, not measured physical facts. Keep ordinary photographs semantically plausible unless the creator explicitly requests fantasy; do not manufacture a metaphorical supply/receiver relationship between unrelated objects.
+DESIGN THE ACTIVITY BEFORE CHOOSING MOVEMENT. A neutral request such as "make this a game" asks you to choose a compelling supported activity; it is not a request for a search-and-click hunt. First inspect relationships between actual visible objects, then choose (1) the player's role, (2) a concrete change they can cause, (3) a meaningful decision or dependency, and (4) a visible payoff. Explain that specific choice briefly in gameplay.reason. When the image has separable tools/supplies and compatible recipients/parts, prefer source-native object play with gameplay.interactions over merely finding those objects. Use bounded transfer, placement, attachment, gate opening or source-object movement only as the engine actually supports; perceived categories alone never select a preset game. A neutral task must have an earned finishing condition in requiredInteractionIds, requiredResourceIds or requiredChoiceGroupIds when using interactions, unless the person explicitly requests free play. Resource units are game quantities, not measured physical facts. Keep ordinary photographs semantically plausible unless the creator explicitly requests fantasy; do not manufacture a metaphorical supply/receiver relationship between unrelated objects.
 Do not force a roleplay task onto an isolated face, single scribble or image without coherent separable relationships. Preserve the drawing's identity: a simple figure with suitable scenery may become traversal; an image rich in meaningful details may support an investigation. Compare these choices against the actual source instead of treating every photograph as a hunt. Do not split one object into fictional supply and recipient boxes just to create an interaction. The requested intention remains authoritative, and optional actions must remain optional.
 Choose gameplay.movement to fit BOTH this image's composition and explicit intent. platform is a side-view running/jumping adventure: use it when recognizable side-view paths or a detached character and sensible jump adventure fit. roam is free four-direction exploration across the unchanged source image, with a clearly introduced geometric explorer; it is not a floor-and-bridges platformer. discover supports image-native object play AND investigation: the person points/taps actual source objects in place, with no moving player or added bridges. With interactions, the player selects tools, arranges real source objects, routes supplies and changes the scene through supported effects. Only moving source objects are extracted; stationary details remain in the original image. Without coherent action relationships, an investigation may use a few meaningful real source details with image-specific clues; do not pad an image to reach an item count. Do not reduce every image to the same chain of jumping platforms. Do not choose by file names or assumed categories; inspect its actual visual content.
 For a platform adventure, only assign a lever when it opens an actual recognized gate and set its targetId. A decorative gear with no gate connection is decoration, not a lever; do not invent an activation mechanic. Recognize ALL meaningful actual walkable ledges, platforms, cliff tops and bridges as separate terrain/bridge objects, even in creative mode. The real source surfaces are authoritative stage geometry; the compiler only connects genuinely unreachable gaps. Bound each separate solid mass tightly, without enclosing empty space between disconnected ledges. Keep a pillar shaft separate from its usable top: shafts, towers and architectural walls are decoration, not terrain, unless they are deliberately intended to block movement. For a doorway atop a tower, recognize the ledge at the doorway base as terrain; the full tower must not become a giant blocking rectangle. Bound the WHOLE moving character, including every leg, antenna and protruding part, never just its center or head. Recognize actual source destinations, collectibles, switches and gates too; link a source lever to its actual gate only when that relationship is visible or deliberately assigned in the game design. Never invent a pictured support, switch, gate, flag or collectible to fill a role. Choose source-grounded collect-and-activate prerequisites together when these create a meaningful causal route. Avoid decorative mechanic claims that the engine cannot implement: a pictured spike or gear is not automatically simulated damage or machinery.
@@ -107,7 +110,7 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
     objectiveTitle: input.objectiveTitle ?? input.objectiveLabel,
     instructions: input.instructions ?? `Reach ${input.destinationLabel ?? "the destination"}.`,
     clues: input.clues ?? [], obstacleIds: input.obstacleIds ?? [],
-    interactions: readPlannedInteractions(input.interactions), requiredInteractionIds: input.requiredInteractionIds ?? [], requiredResourceIds: input.requiredResourceIds ?? [] } as GameplayPlan;
+    interactions: readPlannedInteractions(input.interactions), requiredInteractionIds: input.requiredInteractionIds ?? [], requiredResourceIds: input.requiredResourceIds ?? [], requiredChoiceGroupIds: input.requiredChoiceGroupIds ?? [] } as GameplayPlan;
   if (plan.movement === "discover" && typeof plan.destinationLabel === "string" && !plan.destinationLabel.trim() && plan.clues.length)
     plan.destinationLabel = plan.objectiveTitle || plan.objectiveLabel;
   // Pointer object tasks complete through their real actions/resources. Empty
@@ -136,6 +139,8 @@ export function readGameplayPlan(value: unknown): GameplayPlan | undefined {
       new Set(plan.requiredInteractionIds).size !== plan.requiredInteractionIds.length ||
       plan.requiredInteractionIds.some(id => typeof id !== "string" || !/^[\w-]{1,60}$/.test(id)) ||
       (!plan.interactions && plan.requiredInteractionIds.length > 0) ||
+      !Array.isArray(plan.requiredChoiceGroupIds) || plan.requiredChoiceGroupIds.length > 8 || new Set(plan.requiredChoiceGroupIds).size !== plan.requiredChoiceGroupIds.length ||
+      plan.requiredChoiceGroupIds.some(id => typeof id !== "string" || !plan.interactions?.choiceGroups?.some(group => group.id === id)) ||
       !Array.isArray(plan.path) || plan.path.length < 3 || plan.path.length > 6 ||
       plan.path.some(p => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 1000 || !boundedText(p.label, 80)))
     throw new ModelPlanError("Meta's game plan was incomplete. Try the same image again; your current world is unchanged.");
@@ -153,6 +158,8 @@ interface AdaptationOptions {
   objects: SourceSelection[];
   plan: GameplayPlan;
   sourceGoalRules?: unknown;
+  /** False only when rebuilding existing creator-reviewed artwork, not admitting a model plan. */
+  validateGeneratedChoices?: boolean;
   intent?: string;
   segmentation: SegmentationConnection;
   signal: AbortSignal;
@@ -178,7 +185,7 @@ function finishingRequirements(options: AdaptationOptions, entities: WorldEntity
     requiredActivatedIds: explicitSelection ? [...requested.requiredActivatedIds] : [...new Set([
       ...defaults.requiredActivatedIds, ...entities.filter(entity => entity.kind === "lever" && authoredClueTargets.has(entity.id)).map(entity => entity.id),
     ])],
-    ...(options.plan.interactions ? { requiredInteractionIds: [...(options.plan.requiredInteractionIds ?? defaults.requiredInteractionIds ?? [])], requiredResourceIds: [...(options.plan.requiredResourceIds ?? [])] } : {}),
+    ...(options.plan.interactions ? { requiredInteractionIds: [...(options.plan.requiredInteractionIds ?? defaults.requiredInteractionIds ?? [])], requiredResourceIds: [...(options.plan.requiredResourceIds ?? [])], ...(options.plan.requiredChoiceGroupIds?.length ? {requiredChoiceGroupIds:[...options.plan.requiredChoiceGroupIds]} : {}) } : {}),
   };
   const text = options.intent ?? "";
   const freelyExplore = !/\b(?:except|unless)\b/i.test(text) && /\b(?:everything\s+(?:is\s+)?optional|all (?:actions|activities|requirements)\s+(?:are\s+)?optional|no required actions|no finishing requirements|free exploration|just explore|freely explore)\b/i.test(text);
@@ -197,9 +204,10 @@ function finishingRequirements(options: AdaptationOptions, entities: WorldEntity
   return rules;
 }
 
-function checkedCompiledWorld(world: WorldDefinition, plan?: GameplayPlan): WorldDefinition {
-  if (plan) world = applyPlannedInteractions({...world, goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],...world.goalRules,requiredResourceIds:plan.requiredResourceIds ?? []}}, plan.interactions, plan.requiredInteractionIds);
+async function checkedCompiledWorld(world: WorldDefinition, plan?: GameplayPlan, validateGeneratedChoices = true): Promise<WorldDefinition> {
+  if (plan) world = applyPlannedInteractions({...world, goalRules:{requiredCollectedIds:[],requiredActivatedIds:[],...world.goalRules,requiredResourceIds:plan.requiredResourceIds ?? [], ...(plan.requiredChoiceGroupIds?.length ? {requiredChoiceGroupIds:[...plan.requiredChoiceGroupIds]} : {})}}, plan.interactions, plan.requiredInteractionIds, false, {validateGeneratedChoices});
   validateWorld(world);
+  if (validateGeneratedChoices) await validateGeneratedPlacementVisibility(world);
   const placement = setupFeedback(world);
   if (placement.errors.length)
     throw new InterpretationError(
@@ -343,7 +351,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
       id: "interaction-preflight", name: options.name, description: options.description, theme: options.theme,
       width, height, source: "meta", sourceImage: imageData(source), inputKind, revision: 1,
       entities, goalRules: rules, gameplay: { movement: plan.movement, objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues },
-    }, plan.interactions, plan.requiredInteractionIds, true);
+    }, plan.interactions, plan.requiredInteractionIds, true, {validateGeneratedChoices:options.validateGeneratedChoices});
     const movingIds = new Set([
       ...plan.interactions.objects.filter(object => object.carryable).map(object => object.entityId),
       ...plan.interactions.actions.flatMap(action => (action.effects ?? []).flatMap(effect => effect.kind === "openGate" || effect.kind === "moveObject" ? [effect.entityId] : [])),
@@ -358,7 +366,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
         art:await cropArtwork(source,object,false),artMethod:"crop" as const,artNote:"Original selection for correction; whole outline is not yet verified."})));
       const draft=applyPlannedInteractions({id:randomUUID(),name:options.name.slice(0,80),description:options.description.slice(0,500),theme:options.theme,
         width:1440,height:820,source:"meta",sourceImage:imageData(source),inputKind,revision:1,entities:draftEntities,goalRules:rules,
-        gameplay:{movement:plan.movement,objectiveTitle:plan.objectiveTitle,instructions:plan.instructions,clues}},plan.interactions,plan.requiredInteractionIds,true);
+        gameplay:{movement:plan.movement,objectiveTitle:plan.objectiveTitle,instructions:plan.instructions,clues}},plan.interactions,plan.requiredInteractionIds,true,{validateGeneratedChoices:options.validateGeneratedChoices});
       throw new RecognitionReviewError(validateRecognitionReview({kind:"recognition-review",version:1,draft,issues:[{
         id:"source-outline",objectId:error.objectId,label:"Check the whole object",message:error.message}]}));
     }
@@ -373,7 +381,7 @@ async function compileImageNative(options: AdaptationOptions): Promise<WorldDefi
     id: randomUUID(), name: options.name.trim().slice(0, 80) || "My image adventure", description: options.description.slice(0, 500),
     theme: options.theme, width, height, source: "meta", sourceImage: imageData(source), inputKind, revision: 1, entities, goalRules: rules,
     gameplay: { movement: plan.movement, objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues },
-  }, plan);
+  }, plan, options.validateGeneratedChoices);
 }
 
 /** Compiles actual Meta semantic anchors into bounded, traversable game geometry.
@@ -408,7 +416,7 @@ export async function compileCreativeAdaptation(options: AdaptationOptions): Pro
     })));
     const draft = applyPlannedInteractions({ id: randomUUID(), name: options.name.slice(0, 80), description: options.description.slice(0, 500),
         theme: options.theme, width: 1440, height: 820, source: "meta", sourceImage: imageData(source), inputKind,
-        revision: 1, entities: draftEntities, goalRules: {...requestedRules, requiredResourceIds:plan.requiredResourceIds ?? []},
+        revision: 1, entities: draftEntities, goalRules: {...requestedRules, requiredResourceIds:plan.requiredResourceIds ?? [], ...(plan.requiredChoiceGroupIds?.length ? {requiredChoiceGroupIds:[...plan.requiredChoiceGroupIds]} : {})},
         gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions, clues: plan.clues } },
       plan.interactions, plan.requiredInteractionIds, true);
     throw new RecognitionReviewError(validateRecognitionReview({ kind: "recognition-review", version: 1, draft,
@@ -671,11 +679,11 @@ export async function prepareSourceInteractionReview(value:unknown, segmentation
   const plan:GameplayPlan={mode:"creative",movement:"discover",avatarId:null,reason:"Creator corrected the original source selections.",objective:"explore",
     objectiveTitle:world.gameplay.objectiveTitle,instructions:world.gameplay.instructions,objectiveLabel:world.gameplay.objectiveTitle,destinationLabel:world.gameplay.objectiveTitle,
     path:Array.from({length:3},(_,index)=>{const object=objects[Math.min(index,objects.length-1)];return{x:object.x+object.width/2,y:object.y+object.height/2,label:object.label};}),
-    clues:world.gameplay.clues??[],obstacleIds:[],interactions,requiredInteractionIds:world.goalRules?.requiredInteractionIds??[],requiredResourceIds:world.goalRules?.requiredResourceIds??[]};
+    clues:world.gameplay.clues??[],obstacleIds:[],interactions,requiredInteractionIds:world.goalRules?.requiredInteractionIds??[],requiredResourceIds:world.goalRules?.requiredResourceIds??[],requiredChoiceGroupIds:world.goalRules?.requiredChoiceGroupIds??[]};
   try {
   const rebuilt=await compileImageNative({source,inputKind:world.inputKind??"drawing",name:world.name,description:world.description,theme:world.theme,objects,plan,
     sourceGoalRules:{requiredCollectedIds:world.goalRules?.requiredCollectedIds??[],requiredActivatedIds:world.goalRules?.requiredActivatedIds??[]},
-    segmentation,signal,transport:fetch});
+    segmentation,signal,transport:fetch,validateGeneratedChoices:false});
   return {...rebuilt,id:world.id,revision:world.revision};
   } catch(error) {
     if(error instanceof RecognitionReviewError) {error.recovery.draft.id=world.id;error.recovery.draft.revision=world.revision;}

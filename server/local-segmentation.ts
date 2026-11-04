@@ -12,7 +12,12 @@ export interface LocalSegmentationConfig {
   worker: string;
   configured: boolean;
 }
-export interface LocalMaskBox { id: string; left: number; top: number; right: number; bottom: number }
+interface LocalMaskBounds { left: number; top: number; right: number; bottom: number }
+export interface LocalMaskBox extends LocalMaskBounds {
+  id: string;
+  /** A tight object prompt may return pixels in a larger, bounded context. */
+  prompt?: LocalMaskBounds;
+}
 interface MaskRecord { id: string; png: string; score: number; visible: number; pixels: number }
 interface MaskReply { id: string; records: MaskRecord[]; ms: number; model: string; device: string }
 const MODEL = "Meta SAM 2.1 tiny";
@@ -199,6 +204,10 @@ export async function localSegmentationArtwork(source: Buffer, boxes: LocalMaskB
     if (!/^[\w-]{1,60}$/.test(box.id) || ids.has(box.id) || ![box.left, box.top, box.right, box.bottom].every(Number.isSafeInteger) ||
         box.left < 0 || box.top < 0 || box.right > size.width || box.bottom > size.height || box.right <= box.left || box.bottom <= box.top)
       throw new Error("Local cutout selections are invalid.");
+    if (box.prompt && (![box.prompt.left, box.prompt.top, box.prompt.right, box.prompt.bottom].every(Number.isSafeInteger) ||
+        box.prompt.left < box.left || box.prompt.top < box.top || box.prompt.right > box.right || box.prompt.bottom > box.bottom ||
+        box.prompt.right <= box.prompt.left || box.prompt.bottom <= box.prompt.top))
+      throw new Error("Local cutout object prompts must fit within their output context.");
     ids.add(box.id); pixels += (box.right - box.left) * (box.bottom - box.top);
   }
   if (pixels > MAX_CROP_PIXELS) throw new Error("Local cutout selections exceed their combined bounds.");

@@ -1,12 +1,50 @@
 import sharp from 'sharp';
 import { pixelBox } from './images.js';
-import { localSegmentationArtwork, type LocalSegmentationConfig } from './local-segmentation.js';
+import { localSegmentationArtwork, type LocalSegmentationConfig, type LocalMaskBox } from './local-segmentation.js';
 import type { SourceSelection } from './creative-adaptation.js';
 
 /** A box prompt needs context to recover a limb that the language model's box
  * clipped. Use real local SAM pixels to bound the principal connected subject,
  * retaining nearby appendages while excluding distant neighboring objects. */
 export async function groundWholeActor(source: Buffer, actor: SourceSelection, config: LocalSegmentationConfig, signal: AbortSignal, surfaces: SourceSelection[] = [], contextActor: SourceSelection = actor, compactContext = false): Promise<SourceSelection> {
+  const recovered=await groundWholeActorPass(source,actor,config,signal,surfaces,contextActor,compactContext);
+  if (!compactContext || (recovered.artwork && recovered.width*recovered.height<=actor.width*actor.height*1.5)) return recovered;
+  // Expanding the SAM prompt can invite a neighboring object into the mask.
+  // Retry bounded tight prompts with a separate output context; only agreement
+  // across distinct prompts can admit this fallback. No RGB is synthesized.
+  const tight=await groundWholeActorPass(source,actor,config,signal,surfaces,contextActor,true,true);
+  if (!recovered.artwork) return tight;
+  if (!tight.artwork) return recovered;
+  // A greatly expanded mask can fuse a prop with nearby scenery. Prefer an
+  // independently agreed tight subject only if it still covers the recognized
+  // body and preserves its ink, rather than merely producing a smaller mask.
+  const overlap=Math.max(0,Math.min(tight.x+tight.width,actor.x+actor.width)-Math.max(tight.x,actor.x))*
+    Math.max(0,Math.min(tight.y+tight.height,actor.y+actor.height)-Math.max(tight.y,actor.y));
+  if (overlap<actor.width*actor.height*.75 || tight.width*tight.height>=recovered.width*recovered.height) return recovered;
+  const size=await sharp(source).metadata(),seed=pixelBox(actor,size.width!,size.height!);
+  const earlierBox=pixelBox(recovered,size.width!,size.height!),tightBox=pixelBox(tight,size.width!,size.height!);
+  const earlier=await sharp(Buffer.from(recovered.artwork.art!.split(',')[1],'base64')).ensureAlpha().raw().toBuffer();
+  const replacement=await sharp(Buffer.from(tight.artwork.art!.split(',')[1],'base64')).ensureAlpha().raw().toBuffer();
+  let ink=0,retained=0,outsideInk=0,outsideRetained=0;
+  for(let y=0;y<earlierBox.height;y++)for(let x=0;x<earlierBox.width;x++){
+    const sx=earlierBox.left+x,sy=earlierBox.top+y,at=(y*earlierBox.width+x)*4;
+    if(earlier[at+3]<=20)continue;
+    const rgb=[earlier[at],earlier[at+1],earlier[at+2]];
+    if(Math.min(...rgb)>=180&&Math.max(...rgb)-Math.min(...rgb)<=35)continue;
+    const xx=sx-tightBox.left,yy=sy-tightBox.top;
+    const kept=xx>=0&&yy>=0&&xx<tightBox.width&&yy<tightBox.height&&replacement[(yy*tightBox.width+xx)*4+3]>20;
+    if(sx<seed.left||sx>=seed.left+seed.width||sy<seed.top||sy>=seed.top+seed.height){outsideInk++;if(kept)outsideRetained++;}
+    else{ink++;if(kept)retained++;}
+  }
+  if(ink<3||retained/ink<.9)return recovered;
+  // An appendage outside the model's clipped seed is just as real as the body.
+  // Without another source-supported identity signal, a lost outside stroke
+  // might be a tail rather than a neighbor. Preserve the source for review.
+  if(outsideInk>=3&&outsideRetained/outsideInk<.95)return actor;
+  return tight;
+}
+
+async function groundWholeActorPass(source: Buffer, actor: SourceSelection, config: LocalSegmentationConfig, signal: AbortSignal, surfaces: SourceSelection[], contextActor: SourceSelection, compactContext: boolean, separatePrompt=false): Promise<SourceSelection> {
   const meta = await sharp(source).metadata();
   const iw = meta.width!, ih = meta.height!;
   const support = surfaces.filter(surface => ['terrain','bridge'].includes(surface.kind) &&
@@ -14,7 +52,13 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
     surface.y > actor.y + actor.height * .6 && Math.abs(surface.y - actor.y - actor.height) < 80)
     .sort((a,b) => Math.abs(a.y - actor.y - actor.height) - Math.abs(b.y - actor.y - actor.height))[0];
   const bottomLimit = support ? Math.min(1000, support.y + 6) : 1000;
-  const regions = compactContext ? (actor.width*actor.height < 40000
+  const expandedBox=(padding:number)=>{
+    const x=Math.max(0,actor.x-actor.width*padding),y=Math.max(0,actor.y-actor.height*padding);
+    return pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+padding))-x,height:Math.min(1000,actor.y+actor.height*(1+padding))-y},iw,ih);
+  };
+  const regions: (ReturnType<typeof pixelBox>&{prompt?:ReturnType<typeof pixelBox>})[] = separatePrompt
+    ? [.02,.04,.08].map(padding=>({...expandedBox(.3),prompt:expandedBox(padding)}))
+    : compactContext ? (actor.width*actor.height < 40000
     ? [...[.02,.04].map(padding=>({padding,bottom:0})), ...[.08,.18,.3].flatMap(padding=>[0,.3,.6].map(bottom=>({padding,bottom}))), ...[.6,1].map(padding=>({padding,bottom:0}))]
     : [.02,.04,.08,.18,.3].map(padding=>({padding,bottom:0}))).map(({padding,bottom}) => {
     const x = Math.max(0,actor.x-actor.width*padding), y = Math.max(0,actor.y-actor.height*padding);
@@ -28,18 +72,19 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
       return pixelBox(region, iw, ih);
     }));
   });
-  if (compactContext && actor.width*actor.height < 40000) for (const shift of [-.6,.6]) {
+  if (!separatePrompt && compactContext && actor.width*actor.height < 40000) for (const shift of [-.6,.6]) {
     const x=Math.max(0,actor.x+actor.width*shift-actor.width*.12), y=Math.max(0,actor.y-actor.height*.12);
     regions.push(pixelBox({x,y,width:Math.min(1000,actor.x+actor.width*(1+shift+.12))-x,height:Math.min(1000,actor.y+actor.height*1.5)-y},iw,ih));
   }
   // Keep the worker's per-request pixel bound when extra tight contexts are
   // needed for a large photograph; its image embedding stays cached across batches.
   const masks=new Map<string,string>();
-  let batch:{id:string;left:number;top:number;right:number;bottom:number}[]=[],pixels=0;
+  let batch:LocalMaskBox[]=[],pixels=0;
   const flush=async()=>{if(!batch.length)return;for(const [id,art] of await localSegmentationArtwork(source,batch,config,signal,{selectPrincipalComponent:true}))masks.set(id,art);batch=[];pixels=0;};
   for(const [index,box] of regions.entries()){
     if(batch.length && (pixels+box.width*box.height>8_000_000 || batch.length>=24))await flush();
-    batch.push({id:`actor-context-${index}`,left:box.left,top:box.top,right:box.left+box.width,bottom:box.top+box.height});pixels+=box.width*box.height;
+    batch.push({id:`actor-context-${index}`,left:box.left,top:box.top,right:box.left+box.width,bottom:box.top+box.height,
+      ...(box.prompt?{prompt:{left:box.prompt.left,top:box.prompt.top,right:box.prompt.left+box.prompt.width,bottom:box.prompt.top+box.prompt.height}}:{})});pixels+=box.width*box.height;
   }
   await flush();
   const candidates: {subject: SourceSelection; score:number; sparse:boolean; pixels:Uint32Array; context:string}[]=[];
@@ -91,17 +136,18 @@ export async function groundWholeActor(source: Buffer, actor: SourceSelection, c
   const png = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).extract(trim).png().toBuffer();
   const subject:SourceSelection = { ...actor, x: (box.left + x1) / iw * 1000, y: (box.top + y1) / ih * 1000,
     width: trim.width / iw * 1000, height: trim.height / ih * 1000,
-    artwork: { art: `data:image/png;base64,${png.toString('base64')}`, artMethod: 'sam', artNote: 'Whole source subject bounded by local Meta SAM 2.1 in an expanded context; original pixels retained.' } };
-  candidates.push({subject,score:subjectScore,sparse,context:`${box.left},${box.top},${box.width},${box.height}`,
+    artwork: { art: `data:image/png;base64,${png.toString('base64')}`, artMethod: 'sam', artNote: 'Source mask extracted by local Meta SAM 2.1 with surrounding context; original pixels retained. Nearby crossing strokes may need review.' } };
+  candidates.push({subject,score:subjectScore,sparse,context:JSON.stringify(box.prompt ?? box),
     pixels:compactContext ? Uint32Array.from(largest,at=>(box.top+Math.floor(at/info.width))*iw+box.left+at%info.width).sort() : new Uint32Array()});
   }
   // Thin lines are a legitimate subject, not evidence of a broken mask. Admit
   // sparse figures only when independent context prompts agree on their actual
   // source pixels. Existing whole-box, neighbor-growth and edge guards still apply.
-  const accepted=candidates.filter(candidate=>!candidate.sparse || candidates.some(other=>
+  const accepted=candidates.filter(candidate=>(!candidate.sparse && !separatePrompt) || candidates.some(other=>
     other.context!==candidate.context && sourceMaskAgreement(candidate.pixels,other.pixels)>=.9));
   accepted.sort((a,b)=>b.score-a.score);
   if(accepted[0]?.sparse)accepted[0].subject.artwork!.artNote+=' Sparse source strokes agreed across distinct context prompts.';
+  if(accepted[0] && separatePrompt)accepted[0].subject.artwork!.artNote+=' Tight object prompts agreed within a separate output context.';
   return accepted[0]?.subject ?? actor;
 }
 

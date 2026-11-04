@@ -42,6 +42,34 @@ test("source platform action preflight preserves independent artwork and rejects
   assert.match(reason, /ledge crosses the character's body.*foreground support/);
   const imperfectFeet = continuous.map(object => object.id === "hero" ? {...object,y:500,height:110} : object);
   assert.ok(await compile(plan, imperfectFeet), `Small foot overlap remains accepted: ${reason}`);
+  const choicePlan = structuredClone(plan);
+  choicePlan.requiredInteractionIds = ["fill"];
+  choicePlan.requiredChoiceGroupIds = ["assembly"];
+  choicePlan.interactions!.actions.push({...structuredClone(choicePlan.interactions!.actions[1]), id:"fit-fast",
+    effects:[{kind:"openGate",entityId:"barrier"},{kind:"moveSpeedBoost",multiplier:1.1}]});
+  choicePlan.interactions!.choiceGroups = [{id:"assembly",label:"Choose an assembly",actionIds:["fit","fit-fast"]}];
+  const separatedGate = objects.map(object=>object.id==="barrier" ? {...object,x:410,y:0,width:30,height:1000} : object);
+  const safeChoices = await compile(choicePlan, separatedGate);
+  assert.ok(safeChoices, reason);
+  assert.deepEqual(safeChoices.goalRules?.requiredChoiceGroupIds, ["assembly"]);
+  assert.ok(await compile(choicePlan, continuous), `Both gate-opening choices work on one continuous support: ${reason}`);
+  const jumpChoices = structuredClone(choicePlan);
+  jumpChoices.interactions!.actions.find(action=>action.id==="fit-fast")!.effects = [{kind:"jumpBoost",multiplier:1.6}];
+  const continuousBarrier = continuous.map(object=>object.id==="barrier" ? {...object,x:550,y:380,width:30,height:220} : object);
+  const openOrJump = await compile(jumpChoices, continuousBarrier);
+  assert.ok(openOrJump, `Opening the passage or jumping over the closed gate both finish: ${reason}`);
+  assert.deepEqual(openOrJump.entities.find(entity=>entity.id==="barrier")?.artSource, {x:550,y:380,width:30,height:220}, "Proof-only splitting keeps the source gate unchanged");
+  jumpChoices.interactions!.actions.find(action=>action.id==="fit-fast")!.effects = [{kind:"jumpBoost",multiplier:1.05}];
+  assert.equal(await compile(jumpChoices, continuousBarrier), null, "An insufficient boost must not walk through the same-support gate");
+  assert.match(reason,/choice|route/);
+  for (const reverse of [false, true]) {
+    const blockedChoice = structuredClone(choicePlan);
+    blockedChoice.interactions!.actions.find(action=>action.id==="fit-fast")!.effects = [{kind:"moveSpeedBoost",multiplier:1.1}];
+    if (reverse) blockedChoice.interactions!.actions.reverse();
+    const blockedObjects = objects.map(object=>object.id==="barrier" ? {...object,x:410,y:0,width:30,height:1000} : object);
+    assert.equal(await compile(blockedChoice, blockedObjects), null, "A successful sibling cannot hide a locked route");
+    assert.match(reason,/choice|route|connections/);
+  }
   const impossible = structuredClone(plan);
   impossible.interactions!.objects[0].resource!.initial=0;
   assert.equal(await compile(impossible),null);

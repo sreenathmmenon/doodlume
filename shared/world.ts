@@ -49,6 +49,8 @@ export interface GoalRules {
   requiredInteractionIds?: string[];
   /** Referenced resource objects must be full at the same time. */
   requiredResourceIds?: string[];
+  /** Complete any one member of each referenced exclusive choice group. */
+  requiredChoiceGroupIds?: string[];
 }
 
 export interface WorldGameplay {
@@ -365,13 +367,19 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
     const resource = world.interactions?.objects.find(object => object.entityId === id)?.resource;
     return !resource || (interactionProgress.quantities[id] ?? 0) < resource.capacity;
   });
+  const missingChoiceGroupIds = (world.goalRules?.requiredChoiceGroupIds ?? []).filter(id => {
+    const group = world.interactions?.choiceGroups?.find(group => group.id === id);
+    return !group || !group.actionIds.some(actionId => interactionProgress.completed.includes(actionId));
+  });
   const total =
+    (world.goalRules?.requiredChoiceGroupIds?.length ?? 0) +
     (world.goalRules?.requiredResourceIds?.length ?? 0) +
     (world.goalRules?.requiredInteractionIds?.length ?? 0) +
     (world.goalRules?.requiredCollectedIds.length ?? 0) +
     (world.goalRules?.requiredActivatedIds.length ?? 0);
-  const remaining = missingCollectedIds.length + missingActivatedIds.length + missingInteractionIds.length + missingResourceIds.length;
+  const remaining = missingCollectedIds.length + missingActivatedIds.length + missingInteractionIds.length + missingResourceIds.length + missingChoiceGroupIds.length;
   const actions = [
+    ...missingChoiceGroupIds.map(id => `choose ${world.interactions?.choiceGroups?.find(group => group.id === id)?.label || id}`),
     ...missingResourceIds.map(id => `fill ${objectiveObjectLabel(world, id)}`),
     ...missingInteractionIds.map(id => world.interactions?.actions.find(action => action.id === id)?.label ?? id),
     ...missingCollectedIds.map(
@@ -398,6 +406,7 @@ export function goalProgress(world: WorldDefinition, state: PlayState) {
     missingActivatedIds,
     missingInteractionIds,
     missingResourceIds,
+    missingChoiceGroupIds,
     hint,
   };
 }

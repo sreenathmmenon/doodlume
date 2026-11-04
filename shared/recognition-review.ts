@@ -81,6 +81,12 @@ export function reviewGoalRules(
       issues.push("A required interaction could not be matched to its action. Review the object actions.");
     } else rules.requiredInteractionIds = [...selected];
   }
+  if (input.requiredChoiceGroupIds !== undefined) {
+    const selected = input.requiredChoiceGroupIds;
+    if (!Array.isArray(selected) || selected.length > 8 || selected.some(id => typeof id !== "string" || !interactions?.choiceGroups?.some(group => group.id === id)) || new Set(selected).size !== selected.length) {
+      issues.push("A required choice could not be matched to its alternatives. Review the object actions.");
+    } else rules.requiredChoiceGroupIds = [...selected];
+  }
   if (input.requiredResourceIds !== undefined) {
     const selected = input.requiredResourceIds;
     if (!Array.isArray(selected) || selected.length > 64 || selected.some(id => typeof id !== "string" || !interactions?.objects.some(object => object.entityId === id && object.resource)) || new Set(selected).size !== selected.length) {

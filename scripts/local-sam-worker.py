@@ -67,7 +67,11 @@ for line in sys.stdin:
             b = [o["left"], o["top"], o["right"], o["bottom"]]
             if not all(isinstance(v, (int,float)) and np.isfinite(v) for v in b) or not (0 <= b[0] < b[2] <= w and 0 <= b[1] < b[3] <= h):
                 raise ValueError("Invalid object bounds")
-            boxes.append(b)
+            prompt = o.get("prompt")
+            p = [prompt[k] for k in ["left", "top", "right", "bottom"]] if prompt is not None else b
+            if not all(isinstance(v, (int,float)) and np.isfinite(v) for v in p) or not (b[0] <= p[0] < p[2] <= b[2] and b[1] <= p[1] < p[3] <= b[3]):
+                raise ValueError("Invalid object prompt")
+            boxes.append(p)
         masks, scores, _ = predictor.predict(box=np.asarray(boxes, dtype=np.float32), multimask_output=False)
         records = []
         if masks.ndim == 3:
@@ -77,7 +81,9 @@ for line in sys.stdin:
         for index, o in enumerate(objects):
             score = float(np.asarray(scores[index]).reshape(-1)[0])
             mask = np.asarray(masks[index]).reshape(-1,h,w)[0]
-            left, top, right, bottom = [int(v) for v in boxes[index]]
+            # The prompt identifies the object; the output context must not
+            # truncate pixels that SAM recovered beyond that initial prompt.
+            left, top, right, bottom = [int(o[k]) for k in ["left", "top", "right", "bottom"]]
             alpha = np.asarray(mask[top:bottom,left:right] > 0, dtype=np.uint8) * 255
             visible = int(np.count_nonzero(alpha))
             if score < .5 or visible < 3 or visible / alpha.size < .005:

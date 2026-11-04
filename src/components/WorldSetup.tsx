@@ -135,9 +135,9 @@ export function WorldSetup({
     requiredCollectedIds: [],
     requiredActivatedIds: [],
   };
-  const requiredActionCount = goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length + (goalRules.requiredInteractionIds?.length ?? 0) + (goalRules.requiredResourceIds?.length ?? 0);
+  const requiredActionCount = goalRules.requiredCollectedIds.length + goalRules.requiredActivatedIds.length + (goalRules.requiredInteractionIds?.length ?? 0) + (goalRules.requiredResourceIds?.length ?? 0) + (goalRules.requiredChoiceGroupIds?.length ?? 0);
   const hasDestination = world.entities.some((entity) => entity.kind === "goal");
-  function toggleRule(key: "requiredCollectedIds" | "requiredActivatedIds" | "requiredInteractionIds" | "requiredResourceIds", id: string) {
+  function toggleRule(key: "requiredCollectedIds" | "requiredActivatedIds" | "requiredInteractionIds" | "requiredResourceIds" | "requiredChoiceGroupIds", id: string) {
     setWorld((current) => {
       const rules = current.goalRules ?? {
         requiredCollectedIds: [],
@@ -689,6 +689,10 @@ export function WorldSetup({
               <button
                 className="text-button"
                 onClick={() => {
+                  const member = world.interactions?.actions.find(action =>
+                    (action.toolId === selected || action.targetId === selected || action.effects?.some(effect => "entityId" in effect && effect.entityId === selected))
+                    && world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)));
+                  if (member) { setError("This object belongs to a player choice. Edit or remove that choice before removing the object."); return; }
                   setWorld((w) => ({
                     ...w,
                     entities: w.entities.filter((e) => e.id !== selected),
@@ -882,11 +886,18 @@ export function WorldSetup({
         <div className="setup-rule-columns">
           {ruleChoices("requiredCollectedIds", "coin")}
           {ruleChoices("requiredActivatedIds", "lever")}
-          {Boolean(world.interactions?.actions.length) && <fieldset className="setup-rule-group">
+          {world.interactions?.actions.some(action => !world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)) || goalRules.requiredInteractionIds?.includes(action.id)) && <fieldset className="setup-rule-group">
             <legend>Object actions</legend>
-            {world.interactions!.actions.map((action) => <label key={action.id}>
+            {world.interactions!.actions.filter(action => !world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)) || goalRules.requiredInteractionIds?.includes(action.id)).map((action) => <label key={action.id}>
               <input type="checkbox" checked={(goalRules.requiredInteractionIds ?? []).includes(action.id)} onChange={() => toggleRule("requiredInteractionIds", action.id)} />
-              <span>{action.label}</span>
+              <span>{world.interactions?.choiceGroups?.some(group => group.actionIds.includes(action.id)) ? `Must choose ${action.label}` : action.label}</span>
+            </label>)}
+          </fieldset>}
+          {Boolean(world.interactions?.choiceGroups?.length) && <fieldset className="setup-rule-group">
+            <legend>Choose one to finish</legend>
+            {world.interactions!.choiceGroups!.map(group => <label key={group.id}>
+              <input type="checkbox" checked={(goalRules.requiredChoiceGroupIds ?? []).includes(group.id)} onChange={() => toggleRule("requiredChoiceGroupIds", group.id)} />
+              <span>{group.label} · {group.actionIds.map(id => world.interactions!.actions.find(action => action.id === id)?.label ?? id).join(" or ")}</span>
             </label>)}
           </fieldset>}
           {world.interactions?.objects.some(object => object.resource) && <fieldset className="setup-rule-group">

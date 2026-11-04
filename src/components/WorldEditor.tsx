@@ -23,7 +23,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import type { InteractionPlan } from "../../shared/interactions";
-import { ObjectBehaviorEditor, clearObjectAbilityDrafts, pendingObjectAbilities, removeObjectAbilityDraft } from "./ObjectBehaviorEditor";
+import { ObjectBehaviorEditor, ChoiceGroupEditor, type ChoiceDraft, clearObjectAbilityDrafts, pendingObjectAbilities, removeObjectAbilityDraft } from "./ObjectBehaviorEditor";
 import { Modal } from "./Modal";
 import { isSourceBackdrop, isSourceAlignedScenery, sourceLayerForEdit, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 import { WrappingTextarea } from "./WrappingTextarea";
@@ -112,6 +112,9 @@ type EditorDraft = {
   sketchDraft: string | undefined;
   recovery?: EditorRecovery | null;
   interactions?: InteractionPlan;
+  requiredChoiceGroupIds?: string[];
+  requiredInteractionIds?: string[];
+  choiceDraft?: ChoiceDraft;
 };
 // Session drafts never cross a world revision or a proposed image update.
 const editorDrafts = new Map<string, EditorDraft>();
@@ -190,7 +193,12 @@ function WorldEditorSession({
   const currentEntities = world.entities.map(entity => modified[entity.id] ?? entity);
   const editableEntities = [...currentEntities.filter(entity => entity.id !== sourceBackdrop?.id), ...additions];
   const [interactions, setInteractions] = useState<InteractionPlan | undefined>(() => structuredClone(savedDraft ? savedDraft.interactions : proposal?.patch.interactions !== undefined ? proposal.patch.interactions ?? undefined : world.interactions));
-  const interactionsChanged = JSON.stringify(interactions) !== JSON.stringify(world.interactions);
+  const [requiredChoiceGroupIds, setRequiredChoiceGroupIds] = useState<string[]>(() => structuredClone(savedDraft?.requiredChoiceGroupIds ?? (proposal?.patch.goalRules ?? world.goalRules)?.requiredChoiceGroupIds ?? []));
+  const [requiredInteractionIds, setRequiredInteractionIds] = useState<string[]>(() => structuredClone(savedDraft?.requiredInteractionIds ?? (proposal?.patch.goalRules ?? world.goalRules)?.requiredInteractionIds ?? []));
+  const [choiceDraft, setChoiceDraft] = useState<ChoiceDraft | undefined>(savedDraft?.choiceDraft);
+  const interactionsChanged = JSON.stringify(interactions) !== JSON.stringify(world.interactions)
+    || JSON.stringify(requiredChoiceGroupIds) !== JSON.stringify(world.goalRules?.requiredChoiceGroupIds ?? [])
+    || JSON.stringify(requiredInteractionIds) !== JSON.stringify(world.goalRules?.requiredInteractionIds ?? []);
   const changedCount = Object.keys(modified).length;
   const [tool, setTool] = useState<Tool>("move");
   const [abilityDraftDirty, setAbilityDraftDirty] = useState(false);
@@ -220,13 +228,13 @@ function WorldEditorSession({
   const [customArtAspect, setCustomArtAspect] = useState(savedDraft?.customArtAspect ?? 1);
   const [sketchDraft, setSketchDraft] = useState<string | undefined>(savedDraft?.sketchDraft);
   useEffect(() => {
-    if (!additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !abilityDraftDirty && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
+    if (!additions.length && !Object.keys(modified).length && !expanded && !interactionsChanged && !choiceDraft && !abilityDraftDirty && !customArt && !sketchDraft && !proposal && !initialAdditions?.length && !revisedImage && !recovery) {
       editorDrafts.delete(cacheKey);
       return;
     }
-    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, recovery, interactions });
+    editorDrafts.set(cacheKey, { bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, recovery, interactions, requiredChoiceGroupIds, requiredInteractionIds, choiceDraft });
     if (editorDrafts.size > 12) editorDrafts.delete(editorDrafts.keys().next().value!);
-  }, [cacheKey, bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged, abilityDraftDirty]);
+  }, [cacheKey, bounds, additions, modified, selected, customArt, customArtAspect, sketchDraft, expanded, proposal, initialAdditions, revisedImage, recovery, interactions, interactionsChanged, requiredChoiceGroupIds, requiredInteractionIds, choiceDraft, abilityDraftDirty]);
   const [preparingArtwork, setPreparingArtwork] = useState(false);
   const artworkRequest = useRef<AbortController | null>(null);
   type PreparedScene = Pick<WorldPatch, "sourceScenery" | "sourceLayers">;
@@ -468,8 +476,9 @@ function WorldEditorSession({
       } : {}),
       ...(interactionsChanged ? { interactions: interactions ?? null,
         goalRules: { ...(proposal?.patch.goalRules ?? world.goalRules ?? { requiredCollectedIds: [], requiredActivatedIds: [] }),
-          requiredInteractionIds: (proposal?.patch.goalRules?.requiredInteractionIds ?? world.goalRules?.requiredInteractionIds ?? []).filter(id => interactions?.actions.some(action => action.id === id)),
-          requiredResourceIds: (proposal?.patch.goalRules?.requiredResourceIds ?? world.goalRules?.requiredResourceIds ?? []).filter(id => interactions?.objects.some(object => object.entityId === id && object.resource)) } } : {}),
+          requiredInteractionIds: requiredInteractionIds.filter(id => interactions?.actions.some(action => action.id === id)),
+          requiredChoiceGroupIds: requiredChoiceGroupIds.filter(id => interactions?.choiceGroups?.some(group => group.id === id)),
+          requiredResourceIds: ((proposal?.patch.goalRules ?? world.goalRules)?.requiredResourceIds ?? []).filter(id => interactions?.objects.some(object => object.entityId === id && object.resource)) } } : {}),
     }),
     [
       world.id,
@@ -483,6 +492,8 @@ function WorldEditorSession({
       expanded,
       interactions,
       interactionsChanged,
+      requiredChoiceGroupIds,
+      requiredInteractionIds,
       world.goalRules,
       world.gameplay,
       mode,
@@ -932,6 +943,7 @@ function WorldEditorSession({
   async function apply() {
     if (preparingArtwork || artworkRequest.current) return;
     if (abilityDraftDirty) { setError("Add your pending ability before applying, or discard the draft."); return; }
+    if (choiceDraft) { setError("Save or cancel the choice before applying changes."); return; }
     const submitted = patch;
     try {
       if (revisedImage && !reviewed) throw new Error("Check your additions and connections before applying.");
@@ -1076,7 +1088,7 @@ function WorldEditorSession({
                   : "I checked the new objects, their placement, and interactions."}
               </label>
             )}
-            {(additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft || abilityDraftDirty) && <p className="editor-draft-note">{abilityDraftDirty ? "Add your pending ability before applying. Your draft is kept." : "Draft kept when you close. Apply to update your world."}</p>}
+            {(additions.length > 0 || changedCount > 0 || expanded || interactionsChanged || sketchDraft || abilityDraftDirty || choiceDraft) && <p className="editor-draft-note">{choiceDraft ? "Save or cancel your choice before applying. Your draft is kept." : abilityDraftDirty ? "Add your pending ability before applying. Your draft is kept." : "Draft kept when you close. Apply to update your world."}</p>}
             {abilityDraftDirty && pendingObjectAbilities(world.id, world.revision).filter(id => id !== selected).map(id => <button key={id} className="text-button" onClick={() => selectObject(id)}>Finish ability for {editableEntities.find(entity => entity.id === id)?.label || "object"}</button>)}
             {recovery && <div className="editor-recovery" role="status">
               <span>{recovery.action === "reset" ? "Object changes reset." : "New object deleted."}</span>
@@ -1090,12 +1102,12 @@ function WorldEditorSession({
               >
                 <Undo2 size={15} /> Remove last addition
               </button>
-              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft && !abilityDraftDirty}
+              <button className="text-button" disabled={!additions.length && !changedCount && !expanded && !interactionsChanged && !customArt && !sketchDraft && !abilityDraftDirty && !choiceDraft}
                 onClick={(event) => {
                   cancelArtwork();
                   clearObjectAbilityDrafts(world.id, world.revision); setAbilityDraftDirty(false); setAbilityFormReset(value => value + 1);
                   setBounds({ width: world.width, height: world.height });
-                  setAdditions([]); setModified({}); setInteractions(structuredClone(world.interactions)); setCustomArt(null); setSketchDraft(undefined); setRecovery(null);
+                  setAdditions([]); setModified({}); setInteractions(structuredClone(world.interactions)); setRequiredChoiceGroupIds([...(world.goalRules?.requiredChoiceGroupIds ?? [])]); setRequiredInteractionIds([...(world.goalRules?.requiredInteractionIds ?? [])]); setChoiceDraft(undefined); setCustomArt(null); setSketchDraft(undefined); setRecovery(null);
                   setReviewed(false); selectObject(null); setError("");
                   editorDrafts.delete(cacheKey);
                   event.currentTarget.closest("dialog")?.querySelector<HTMLSelectElement>('select[aria-label="Select an object"]')?.focus({ preventScroll: true });
@@ -1105,7 +1117,7 @@ function WorldEditorSession({
                 disabled={
                   (!additions.length && !changedCount && !expanded && !interactionsChanged) ||
                   preparingArtwork ||
-                  abilityDraftDirty ||
+                  abilityDraftDirty || Boolean(choiceDraft) ||
                   Boolean(problem) ||
                   (Boolean(revisedImage) && !reviewed)
                 }
@@ -1465,7 +1477,13 @@ function WorldEditorSession({
                     onChange={(e) => update({ label: e.target.value })}
                   />
                 </label>
-                <ObjectBehaviorEditor key={`${item.id}:${abilityFormReset}`} world={{...world, ...bounds, entities: [...currentEntities, ...additions]}} item={item} plan={interactions} onChange={setInteractions} onDraw={!existingSelected ? () => setDrawing(true) : undefined}
+                <ObjectBehaviorEditor key={`${item.id}:${abilityFormReset}`} world={{...world, ...bounds, goalRules: patch.goalRules ?? world.goalRules, entities: [...currentEntities, ...additions]}} item={item} plan={interactions} onChange={(plan, requirements) => {
+                    setInteractions(plan);
+                    if (requirements) {
+                      setRequiredInteractionIds([...(requirements.requiredInteractionIds ?? [])]);
+                      setRequiredChoiceGroupIds([...(requirements.requiredChoiceGroupIds ?? [])]);
+                    }
+                  }} onDraw={!existingSelected ? () => setDrawing(true) : undefined}
                   onDraftChange={setAbilityDraftDirty} onCancelDestination={() => setDestinationPick(undefined)}
                   onPickDestination={(target, choose) => {
                     setPanMode(false); setTool("move"); setDrag(null);
@@ -1581,6 +1599,11 @@ function WorldEditorSession({
               </div>
             )}
           </section>
+          {interactions && (interactions.actions.length >= 2 || choiceDraft || Boolean(interactions.choiceGroups?.length)) && <section className="editor-properties" aria-label="Player choices">
+            <ChoiceGroupEditor world={{...world, ...bounds, goalRules: patch.goalRules ?? world.goalRules, entities: [...currentEntities, ...additions]}} plan={interactions}
+              requiredIds={requiredChoiceGroupIds} draft={choiceDraft} onDraftChange={setChoiceDraft}
+              onChange={(plan, ids, converted = []) => {setInteractions(plan); setRequiredChoiceGroupIds(ids); setRequiredInteractionIds(current => current.filter(id => !converted.includes(id))); setError("");}} />
+          </section>}
           {(proposal || additions.length > 0 || expanded || changedCount > 0) && <section className="editor-summary">
             {mode !== "discover" && <ArtworkReview entities={additions} />}
             {proposal && (

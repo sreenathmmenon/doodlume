@@ -213,7 +213,8 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     ...(plan.interactions ? { requiredInteractionIds: plan.requiredInteractionIds ?? [] } : {}),
   });
   if (plan.interactions) { goalRules.requiredInteractionIds = [...(plan.requiredInteractionIds ?? [])]; goalRules.requiredResourceIds = [...(plan.requiredResourceIds ?? [])]; }
-  const jump = (a: Surface, b: Surface, closed: Set<string>, extras: Surface[] = [], jumpMultiplier = 1, speedMultiplier = 1) => {
+  if (plan.requiredChoiceGroupIds?.length) goalRules.requiredChoiceGroupIds = [...plan.requiredChoiceGroupIds];
+  const jump = (a: Surface, b: Surface, closed: Set<string>, extras: Surface[] = [], jumpMultiplier = 1, speedMultiplier = 1, precise = false) => {
     if (a.id === b.id) return true;
     const rise = a.y - b.y;
     const impulse = 650 * jumpMultiplier;
@@ -222,7 +223,11 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     if (discriminant <= 0) return false;
     const duration = (impulse + Math.sqrt(discriminant)) / 1450;
     const blockers = [...surfaces, ...extras, ...gates.filter(gate => closed.has(gate.id))];
-    for (const from of landingXs(a)) for (const to of landingXs(b)) {
+    const samples = (surface: Surface) => {
+      const xs = landingXs(surface);
+      return precise && xs.length ? Array.from({length:9},(_,index)=>xs[0]+(xs[xs.length-1]-xs[0])*index/8) : xs;
+    };
+    for (const from of samples(a)) for (const to of samples(b)) {
       if (Math.abs(to - from) > 310 * speedMultiplier * Math.max(0, duration - .08)) continue;
       let clear = true;
       for (let step = 1; step < 25 && clear; step++) {
@@ -242,7 +247,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   // conservative route preflight, not a claim of a complete human playthrough.
   const behaviorWorld: WorldDefinition = { id: "preflight", name: options.name, description: "", theme: options.theme,
     width, height, source: "manual", sourceImage: "/art/preflight.png", entities: [...entities, hero], revision: 1,
-    interactions: plan.interactions, gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions } };
+    interactions: plan.interactions, goalRules, gameplay: { movement: "platform", objectiveTitle: plan.objectiveTitle, instructions: plan.instructions } };
   try { behaviorWorld.interactions = applyPlannedInteractions(behaviorWorld, plan.interactions, plan.requiredInteractionIds, true).interactions; validateInteractions(behaviorWorld, {allowUnpreparedArtwork:true}); } catch (error) { return reject(error instanceof Error ? error.message : "The source interactions need review."); }
   const requiredActions = new Set(goalRules.requiredInteractionIds ?? []);
   const addDependencies = (id: string) => {
@@ -252,7 +257,7 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
   };
   for (const id of [...requiredActions]) addDependencies(id);
   const orderedActions = [...(behaviorWorld.interactions?.actions ?? [])].sort((a, b) => Number(requiredActions.has(b.id)) - Number(requiredActions.has(a.id)));
-  const reachable = (origin: Surface = start) => {
+  const reachableGreedy = (origin: Surface = start) => {
     const closed = new Set(gates.map(gate => gate.id));
     let reached = new Set<string>(), changed: boolean;
     let progress = emptyPlayState();
@@ -277,18 +282,120 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
         for (const id of interactionEffects(behaviorWorld, progress).openGateIds) closed.delete(id);
       }
     } while (changed);
-    return { reached, closed, progress, abilities: interactionEffects(behaviorWorld, progress) };
+    return { reached, closed, progress, abilities: interactionEffects(behaviorWorld, progress), choiceSafe: true, reachableEntityIds: undefined as Set<string> | undefined };
   };
   const requiredIds = new Set([...goalRules.requiredCollectedIds, ...goalRules.requiredActivatedIds,
     ...orderedActions.filter(action => requiredActions.has(action.id)).flatMap(action => [action.toolId, action.targetId]).filter(id => id !== hero.id)]);
   const targets = [...entities.filter(entity => requiredIds.has(entity.id)), ...goals, ...coins.filter(coin => !requiredIds.has(coin.id))];
+  const resourcesComplete = (progress: ReturnType<typeof emptyPlayState>) => (goalRules.requiredResourceIds ?? []).every(id => {
+    const resource = plan.interactions?.objects.find(object => object.entityId === id)?.resource;
+    return resource && (progress.interactions?.quantities[id] ?? resource.initial) >= resource.capacity;
+  });
+  const actionsComplete = (progress: ReturnType<typeof emptyPlayState>) =>
+    [...requiredActions].every(id => progress.interactions?.completed.includes(id)) &&
+    (goalRules.requiredChoiceGroupIds ?? []).every(id => behaviorWorld.interactions?.choiceGroups?.find(group => group.id === id)
+      ?.actionIds.some(actionId => progress.interactions?.completed.includes(actionId)));
+  const reachable = (origin: Surface = start, originX = origin.id === start.id ? starting.x : center(origin)) => {
+    if (!behaviorWorld.interactions?.choiceGroups?.length) return reachableGreedy(origin);
+    // A group commits to one physical outcome. Explore each legal outcome using
+    // the runtime reducer instead of permanently taking the first listed action.
+    const queue = [emptyPlayState()], seen = new Set<string>([""]);
+    const predecessors = new Map<string, Set<string>>(), winning = new Set<string>();
+    let winningRoute: ReturnType<typeof reachableGreedy> | undefined, bounded = false;
+    let best: ReturnType<typeof reachableGreedy> | undefined, bestScore = -1;
+    for (let head = 0; head < queue.length; head++) {
+      const progress = queue[head], abilities = interactionEffects(behaviorWorld, progress);
+      const stateKey = [...(progress.interactions?.completed ?? [])].sort().join("|");
+      const closed = new Set(gates.filter(gate => !abilities.openGateIds.includes(gate.id)).map(gate => gate.id));
+      const positioned = new Map<string, WorldEntity>();
+      const currentEntity = (entity: WorldEntity): WorldEntity => {
+        const cached = positioned.get(entity.id); if (cached) return cached;
+        const moved = abilities.objectMoves[entity.id], parentId = progress.interactions?.attachments[entity.id];
+        let current = moved ? {...entity,x:moved.x,y:moved.y} : entity;
+        if (parentId) {
+          const originalParent = behaviorWorld.entities.find(candidate=>candidate.id===parentId)!;
+          const parent = currentEntity(originalParent);
+          const scale = Math.min(1,Math.max(originalParent.width,originalParent.height)*.5/Math.max(entity.width,entity.height));
+          const partWidth=entity.width*scale,partHeight=entity.height*scale;
+          current={...entity,width:partWidth,height:partHeight,x:parent.x+parent.width*.65-partWidth/2,
+            y:parent.y+parent.height/2+(parent.kind==="player" ? originalParent.height*.2-partHeight/2 : -partHeight)};
+        }
+        positioned.set(entity.id,current); return current;
+      };
+      let reached = new Set<string>(), reachableEntityIds = new Set<string>(), opened: boolean;
+      do {
+        // Split only the proof graph. A gate within one painted platform must
+        // block walking across it while a sufficiently high jump can clear it.
+        const nodes = surfaces.flatMap(surface => {
+          let intervals = [[surface.x, surface.x + surface.width]];
+          for (const gate of gates.filter(gate => closed.has(gate.id) && gate.y < surface.y && gate.y + gate.height > surface.y - bodyHeight)) {
+            intervals = intervals.flatMap(([left,right]) => gate.x >= right || gate.x + gate.width <= left ? [[left,right]] :
+              [[left,Math.max(left,gate.x)],[Math.min(right,gate.x+gate.width),right]]).filter(([left,right])=>right-left >= bodyWidth+12);
+          }
+          return intervals.map(([left,right]) => ({...surface,id:`${surface.id}:walk:${left}:${right}`,sourceId:surface.id,x:left,width:right-left}));
+        });
+        const initial = nodes.find(node => node.sourceId === origin.id && originX >= node.x + half && originX <= node.x + node.width - half);
+        const reachedNodes = new Set<string>(initial ? [initial.id] : []), surfacesQueue = initial ? [initial] : [];
+        for (let index = 0; index < surfacesQueue.length; index++) for (const candidate of nodes)
+          if (!reachedNodes.has(candidate.id) && jump(surfacesQueue[index], candidate, closed, [], abilities.jumpMultiplier, abilities.moveSpeedMultiplier, true)) {
+            reachedNodes.add(candidate.id); surfacesQueue.push(candidate);
+          }
+        reached = new Set(surfacesQueue.map(node=>node.sourceId));
+        reachableEntityIds = new Set(entities.filter(entity => {
+          const anchor = anchors.get(entity.id); if (!anchor) return false;
+          const current = currentEntity(entity), x = center(current);
+          const sourceAnchor = current !== entity ? nearestSurface(x,current.y+current.height) : anchor;
+          const point = clamp(x,sourceAnchor.x+half+6,sourceAnchor.x+sourceAnchor.width-half-6);
+          return surfacesQueue.some(node=>node.sourceId===sourceAnchor.id && point >= node.x && point <= node.x+node.width &&
+            current.y <= node.y && current.y+current.height >= node.y-bodyHeight-132*abilities.jumpMultiplier**2 &&
+            Math.abs(point-x) <= current.width/2+half+(behaviorIds.has(entity.id) ? 100 : 0));
+        }).map(entity=>entity.id));
+        if (reachedNodes.size) reachableEntityIds.add(hero.id);
+        opened = false;
+        for (const lever of levers) if (closed.has(lever.targetId!) && reachableEntityIds.has(lever.id)) {
+          closed.delete(lever.targetId!); opened = true;
+        }
+      } while (opened);
+      const route = { reached, closed, progress, abilities, choiceSafe: true, reachableEntityIds };
+      const reachedTargets = targets.filter(entity => reachableEntityIds.has(entity.id)).length;
+      const complete = resourcesComplete(progress) && actionsComplete(progress);
+      if (complete && reachedTargets === targets.length) { winning.add(stateKey); winningRoute ??= route; }
+      const score = reachedTargets * 100 + (complete ? 50 : 0) + reached.size;
+      if (score > bestScore) { best = route; bestScore = score; }
+      for (const action of orderedActions) {
+        if (progress.interactions?.completed.includes(action.id)) continue;
+        if (!reachableEntityIds.has(action.toolId) || !reachableEntityIds.has(action.targetId)) continue;
+        const dropped = reduceInteraction(behaviorWorld, progress, { type: "drop" });
+        const picked = reduceInteraction(behaviorWorld, dropped.ok ? dropped.state : progress, { type: "pickup", entityId: action.toolId });
+        if (!picked.ok) continue;
+        const used = reduceInteraction(behaviorWorld, picked.state, { type: "perform", actionId: action.id });
+        if (!used.ok) continue;
+        const key = [...(used.state.interactions?.completed ?? [])].sort().join("|");
+        if (!predecessors.has(key)) predecessors.set(key, new Set());
+        predecessors.get(key)!.add(stateKey);
+        if (!seen.has(key)) {
+          if (seen.size >= 2048) { bounded = true; continue; }
+          seen.add(key); queue.push(used.state);
+        }
+      }
+    }
+    const viable = new Set(winning), viableQueue = [...winning];
+    for (let head = 0; head < viableQueue.length; head++) for (const prior of predecessors.get(viableQueue[head]) ?? [])
+      if (!viable.has(prior)) { viable.add(prior); viableQueue.push(prior); }
+    const allMembers = behaviorWorld.interactions.choiceGroups.flatMap(group => group.actionIds);
+    const choiceSafe = !bounded && viable.size === seen.size && allMembers.every(id => queue.some(state => state.interactions?.completed.includes(id)));
+    return { ...(winningRoute ?? best!), choiceSafe };
+  };
   // Check return routes too: a collectible on a one-way drop must not strand
   // the player with the other required objects or the finish still unreachable.
-  const missionOrigins = () => [start, ...entities.filter(entity => requiredIds.has(entity.id)).map(entity => anchors.get(entity.id)!)];
+  const routeReaches = (route: ReturnType<typeof reachable>, entity: WorldEntity) => route.reachableEntityIds
+    ? route.reachableEntityIds.has(entity.id) : route.reached.has(anchors.get(entity.id)!.id);
+  const missionOrigins = () => [{surface:start,x:starting.x}, ...entities.filter(entity => requiredIds.has(entity.id))
+    .map(entity => ({surface:anchors.get(entity.id)!,x:clamp(center(entity),anchors.get(entity.id)!.x+half+6,anchors.get(entity.id)!.x+anchors.get(entity.id)!.width-half-6)}))];
   const missingConnection = () => {
     for (const origin of missionOrigins()) {
-      const route = reachable(origin);
-      const target = targets.find(entity => !route.reached.has(anchors.get(entity.id)!.id));
+      const route = reachable(origin.surface,origin.x);
+      const target = targets.find(entity => !routeReaches(route,entity));
       if (target) return { route, target };
     }
   };
@@ -324,12 +431,9 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
     surfaces.push(connector); entities.push(connector);
   }
   if (missingConnection()) return reject("The original route needs too many added connections to preserve its composition. Adjust the source platforms before playing.");
-  const resourcesComplete = (progress: ReturnType<typeof emptyPlayState>) => (goalRules.requiredResourceIds ?? []).every(id => {
-    const resource=plan.interactions?.objects.find(object=>object.entityId===id)?.resource;
-    return resource && (progress.interactions?.quantities[id] ?? resource.initial)>=resource.capacity;
-  });
   const finalRoute = reachable();
-  if (!resourcesComplete(finalRoute.progress) || [...requiredActions].some(id => !finalRoute.progress.interactions?.completed.includes(id)))
+  if (!finalRoute.choiceSafe) return reject("Every offered choice must have a verified route to completion. Check the targets, opened paths and dependencies; an unreachable or overly complex branch cannot be accepted.");
+  if (!resourcesComplete(finalRoute.progress) || !actionsComplete(finalRoute.progress))
     return reject("The required object actions cannot be completed with the reachable resources and parts. Check their quantities, dependencies and access.");
   const spawnCandidates = [...surfaces].sort((a,b) => Math.hypot(center(a)-startPoint.x,a.y-startPoint.y) - Math.hypot(center(b)-startPoint.x,b.y-startPoint.y));
   let spawn: { surface: Surface; x: number } | undefined;
@@ -338,9 +442,12 @@ export async function sourcePlatformScene(options: Options): Promise<WorldDefini
       .filter(x => stanceClear(surface, x)).filter(x => entities.filter(entity => ["coin", "goal"].includes(entity.kind)).every(entity => !overlaps(stance(surface, x), entity)))
       .sort((a,b) => Math.abs(a - startPoint.x) - Math.abs(b - startPoint.x));
     if (!positions.length) continue;
-    const route = reachable(surface);
-    if (!resourcesComplete(route.progress) || targets.some(entity => !route.reached.has(anchors.get(entity.id)!.id)) || [...requiredActions].some(id => !route.progress.interactions?.completed.includes(id))) continue;
-    spawn = { surface, x: positions[0] }; break;
+    const x = positions.find(x => {
+      const route = reachable(surface,x);
+      return route.choiceSafe && resourcesComplete(route.progress) && targets.every(entity => routeReaches(route,entity)) && actionsComplete(route.progress);
+    });
+    if (x === undefined) continue;
+    spawn = { surface, x }; break;
   }
   if (!spawn) return reject("There is no clear reachable starting position outside collectibles and the destination. Move a nearby source selection before playing.");
   hero.x = spawn.x - hero.width / 2;

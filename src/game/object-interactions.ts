@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { objectName } from "../lib/object-name";
 import type { InteractionAction } from "../../shared/interactions";
 import { safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction } from "../../shared/interactions";
-import { inspectInteractionTarget, incompatibleTargetReason, type ActionPreview } from "../../shared/interaction-preview";
+import { inspectInteractionTarget, incompatibleTargetReason, interactionOutcomeMessage, type ActionPreview } from "../../shared/interaction-preview";
 import type { PlayState, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop, sourceLayerArtworkBounds } from "../../shared/source-scenery";
 
@@ -110,7 +110,7 @@ export class ObjectInteractions {
       if (entity.artSource && !entity.sourceLayer && isSourceAlignedScenery(backdrop)) continue;
       const box = entity.sourceLayer && backdrop ? sourceLayerArtworkBounds(entity, backdrop) : entity;
       const image = scene.add.image(box.x + box.width / 2, box.y + box.height / 2, `art-${entity.id}`)
-        .setDisplaySize(box.width, box.height).setDepth(16);
+        .setDisplaySize(box.width, box.height).setDepth(this.objectDepth(entity.id));
       image.setData("home", { x: image.x, y: image.y, width: image.displayWidth, height: image.displayHeight });
       this.art.set(entity.id, image);
     }
@@ -136,6 +136,10 @@ export class ObjectInteractions {
   }
 
   private entity(id: string) { return this.world.entities.find(e => e.id === id); }
+  private objectDepth(id: string) {
+    return this.world.interactions?.objects.find(object => object.entityId === id)?.layer === "surface" ? 15 : 16;
+  }
+  private selectionDepth(id: string) { return this.art.get(id)?.depth ?? this.objectDepth(id); }
   private inspect(id: string) {
     const state = this.host.state();
     const key = JSON.stringify([id, state.interactions]);
@@ -163,7 +167,7 @@ export class ObjectInteractions {
   private objectAt(point: { x: number; y: number }) {
     const state = interactionState(this.world, this.host.state());
     const actions = safeAvailableInteractions(this.world, this.host.state());
-    return (this.world.interactions?.objects ?? [])
+    let candidates = (this.world.interactions?.objects ?? [])
       .map(o => this.entity(o.entityId)).filter((e): e is WorldEntity => Boolean(e))
       // A fitted part must not block selecting the machine beneath it. Parts
       // remain independently selectable when they are themselves usable targets.
@@ -171,7 +175,29 @@ export class ObjectInteractions {
       .filter(e => {
         const p = this.point(e), size = this.size(e);
         return Math.abs(point.x - p.x) <= size.width / 2 + 12 && Math.abs(point.y - p.y) <= size.height / 2 + 12;
-      }).sort((a, b) => a.width * a.height - b.width * b.height)[0];
+      });
+    // An explicit underlay should not steal the empty center of a pencil-drawn
+    // chair or loop. Favor an ordinary prop's forgiving selection envelope;
+    // the exposed underlay remains selectable around it or in Object controls.
+    if (candidates.some(entity => this.selectionDepth(entity.id) >= 16))
+      candidates = candidates.filter(entity => this.selectionDepth(entity.id) >= 16);
+    // At an overlap, select the artwork the player actually sees. Transparent
+    // parts of a cutout must not steal a click from the object underneath it.
+    // Keep the forgiving bounds fallback for isolated thin pencil strokes.
+    if (candidates.length > 1) {
+      const visible = candidates.filter(entity => {
+        const art = this.art.get(entity.id);
+        if (!art) return true;
+        const x = Math.floor((point.x - art.x + art.displayWidth / 2) / art.displayWidth * art.frame.width);
+        const y = Math.floor((point.y - art.y + art.displayHeight / 2) / art.displayHeight * art.frame.height);
+        return (this.scene.textures.getPixelAlpha(x, y, art.texture.key, art.frame.name) ?? 0) > 20;
+      });
+      if (visible.length) return visible.sort((a, b) =>
+        this.selectionDepth(b.id) - this.selectionDepth(a.id) ||
+        this.world.interactions!.objects.findIndex(object => object.entityId === b.id) -
+        this.world.interactions!.objects.findIndex(object => object.entityId === a.id))[0];
+    }
+    return candidates.sort((a, b) => this.selectionDepth(b.id) - this.selectionDepth(a.id) || a.width * a.height - b.width * b.height)[0];
   }
   containsPoint(point: { x: number; y: number }) { return Boolean(this.objectAt(point)); }
 
@@ -283,7 +309,7 @@ export class ObjectInteractions {
         this.pulse(entity);
         if (result.event.toolId) this.toolGesture(result.event.toolId, result.event.kind);
         if (result.event.kind === "transfer" && result.event.toolId) this.transferTrail(result.event.toolId, entity);
-        this.notice(`${choice.action.label} — done`, true);
+        this.notice(interactionOutcomeMessage(this.world, current, result.state, choice.action), true);
       }
     }
     this.render();
@@ -510,7 +536,7 @@ export class ObjectInteractions {
         continue;
       } else {
         const position = this.movedObjects.get(id) ?? home;
-        art.setPosition(position.x, position.y).setDisplaySize(position.width, position.height).setDepth(16);
+        art.setPosition(position.x, position.y).setDisplaySize(position.width, position.height).setDepth(this.objectDepth(id));
       }
     }
     for (const [id, targetId] of Object.entries(state.attachments)) {

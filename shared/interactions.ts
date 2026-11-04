@@ -4,6 +4,8 @@ import type { PlayState, WorldDefinition } from "./world.js";
 export interface InteractionObject {
   entityId: string;
   carryable?: boolean;
+  /** Explicit underlays stay behind ordinary props; never inferred from names. */
+  layer?: "surface" | "object";
   resource?: { type: string; capacity: number; initial: number };
 }
 export type InteractionEffect =
@@ -33,10 +35,17 @@ export type InteractionAction = ActionBase & (
   | { kind: "use" }
   | { kind: "place" }
 );
+export interface InteractionChoiceGroup {
+  id: string;
+  label: string;
+  actionIds: string[];
+}
 export interface InteractionPlan {
   version: 1;
   objects: InteractionObject[];
   actions: InteractionAction[];
+  /** Performing one member excludes the others for this play state. */
+  choiceGroups?: InteractionChoiceGroup[];
 }
 export interface InteractionState {
   heldEntityId: string | null;
@@ -77,18 +86,19 @@ const hasQuantity = (available: number, required: number) => available >= requir
 export function validateInteractions(world: WorldDefinition, options: { allowUnpreparedArtwork?: boolean } = {}): void {
   const p = world.interactions;
   if (p === undefined) {
-    if ((world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length)) fail("A task refers to actions that are not in this world.");
+    if ((world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length || world.goalRules?.requiredChoiceGroupIds?.length)) fail("A task refers to actions that are not in this world.");
     return;
   }
-  if (!record(p) || !keysOnly(p, ["version", "objects", "actions"]) || p.version !== 1 ||
+  if (!record(p) || !keysOnly(p, ["version", "objects", "actions", "choiceGroups"]) || p.version !== 1 ||
       !Array.isArray(p.objects) || !p.objects.length || p.objects.length > 64 ||
       !Array.isArray(p.actions) || p.actions.length > 64)
     fail("This world needs a supported interaction plan.");
   const entities = new Map(world.entities.map(e => [e.id, e]));
   const objects = new Map<string, InteractionObject>();
   for (const o of p.objects) {
-    if (!record(o) || !keysOnly(o, ["entityId", "carryable", "resource"]) || !safeId(o.entityId) ||
+    if (!record(o) || !keysOnly(o, ["entityId", "carryable", "resource", "layer"]) || !safeId(o.entityId) ||
         objects.has(o.entityId) || !entities.has(o.entityId) ||
+        (o.layer !== undefined && o.layer !== "surface" && o.layer !== "object") ||
         (o.carryable !== undefined && typeof o.carryable !== "boolean"))
       fail("An interaction needs one distinct source object.");
     // Moving a terrain/player/goal would invalidate their ordinary physics roles.
@@ -103,7 +113,6 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     objects.set(o.entityId, o);
   }
   const actions = new Map<string, InteractionAction>();
-  const attachedTools = new Set<string>();
   const movementSteps = new Map<string, {actionId: string; x: number; y: number}[]>();
   for (const a of p.actions) {
     if (!record(a) || !keysOnly(a, ["id", "label", "toolId", "targetId", "requires", "requiresResourceIds", "effects", "kind", ...(a.kind === "transfer" ? ["amount"] : [])]) ||
@@ -122,10 +131,6 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     } else if (!a.effects?.length) fail("Using, attaching or placing an object must change a supported capability.");
     if (a.kind === "place" && (a.effects?.length !== 1 || a.effects[0].kind !== "moveObject" || a.effects[0].entityId !== a.toolId))
       fail("Placing an object must move only the carried object to one destination.");
-    if (a.kind === "attach") {
-      if (attachedTools.has(a.toolId)) fail("A part can attach to only one target in this plan.");
-      attachedTools.add(a.toolId);
-    }
     for (const effect of a.effects ?? []) {
       if (!record(effect)) fail("Unsupported interaction effect.");
       if (effect.kind === "openGate") {
@@ -155,6 +160,21 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     }
     actions.set(a.id, a);
   }
+  const choiceGroups = new Map<string, InteractionChoiceGroup>();
+  const membership = new Map<string, InteractionChoiceGroup>();
+  if (p.choiceGroups !== undefined) {
+    if (!Array.isArray(p.choiceGroups) || p.choiceGroups.length > 8)
+      fail("Keep at most eight choice groups in one game.");
+    for (const group of p.choiceGroups) {
+      if (!record(group) || !keysOnly(group, ["id", "label", "actionIds"]) || !safeId(group.id) || choiceGroups.has(group.id) ||
+          typeof group.label !== "string" || !group.label.trim() || group.label.length > 80 ||
+          !Array.isArray(group.actionIds) || group.actionIds.length < 2 || group.actionIds.length > 4 ||
+          new Set(group.actionIds).size !== group.actionIds.length || group.actionIds.some(id => !safeId(id) || !actions.has(id) || membership.has(id)))
+        fail("A choice group needs a distinct ID, a short label, and two to four existing actions. Each action can belong to only one group.");
+      choiceGroups.set(group.id, group);
+      for (const id of group.actionIds) membership.set(id, group);
+    }
+  }
   const visited = new Set<string>(), visiting = new Set<string>();
   const visit = (id: string) => {
     if (visiting.has(id)) fail("Actions cannot depend on each other in a circle.");
@@ -166,15 +186,23 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     visiting.delete(id); visited.add(id);
   };
   for (const id of actions.keys()) visit(id);
-  const attachmentTargets = new Map(p.actions.filter(a => a.kind === "attach").map(a => [a.toolId, a.targetId]));
-  for (const tool of attachmentTargets.keys()) {
-    const seen = new Set<string>();
-    let current: string | undefined = tool;
-    while (current && attachmentTargets.has(current)) {
-      if (seen.has(current)) fail("Parts cannot attach to each other in a circle.");
-      seen.add(current); current = attachmentTargets.get(current);
-    }
+  // Keep attachment-cycle checks conservative across all alternative edges.
+  // Mutually exclusive plans cannot smuggle a possible parent cycle through
+  // the single-parent map used by runtime receipts.
+  const attachmentTargets = new Map<string, Set<string>>();
+  for (const action of p.actions.filter(action => action.kind === "attach")) {
+    const targets = attachmentTargets.get(action.toolId) ?? new Set<string>();
+    targets.add(action.targetId); attachmentTargets.set(action.toolId, targets);
   }
+  const attachmentVisited = new Set<string>(), attachmentVisiting = new Set<string>();
+  const visitAttachment = (id: string) => {
+    if (attachmentVisiting.has(id)) fail("Parts cannot attach to each other in a circle.");
+    if (attachmentVisited.has(id)) return;
+    attachmentVisiting.add(id);
+    for (const target of attachmentTargets.get(id) ?? []) visitAttachment(target);
+    attachmentVisiting.delete(id); attachmentVisited.add(id);
+  };
+  for (const tool of attachmentTargets.keys()) visitAttachment(tool);
   const ancestors = new Map<string, Set<string>>();
   for (const action of p.actions) {
     const dependencies = new Set<string>();
@@ -188,17 +216,43 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
     if ([...dependencies].some(id => actions.get(id)!.kind === "attach" && actions.get(id)!.toolId === action.toolId))
       fail("A part cannot be used again after a required attachment consumes it.");
   }
+  const branchAssignments = new Map<string, Map<string, string>>();
+  for (const action of p.actions) {
+    const assignments = new Map<string, string>();
+    for (const id of [action.id, ...ancestors.get(action.id)!]) {
+      const group = membership.get(id);
+      if (!group) continue;
+      const selected = assignments.get(group.id);
+      if (selected && selected !== id)
+        fail(`Action ${action.id} requires incompatible choices in ${group.label}.`);
+      assignments.set(group.id, id);
+    }
+    branchAssignments.set(action.id, assignments);
+  }
+  const exclusive = (a: string, b: string) => [...branchAssignments.get(a)!].some(([group, selected]) => {
+    const other = branchAssignments.get(b)!.get(group);
+    return other !== undefined && other !== selected;
+  });
+  const attachments = p.actions.filter(action => action.kind === "attach");
+  for (let i = 0; i < attachments.length; i++) for (let j = i + 1; j < attachments.length; j++) {
+    if (attachments[i].toolId === attachments[j].toolId && !exclusive(attachments[i].id, attachments[j].id))
+      fail("A part can attach to only one target unless its attachments belong to mutually exclusive branches.");
+  }
   for (const [entityId, steps] of movementSteps) {
     for (let i=0;i<steps.length;i++) for (let j=i+1;j<steps.length;j++) {
-      if (!ancestors.get(steps[i].actionId)!.has(steps[j].actionId) && !ancestors.get(steps[j].actionId)!.has(steps[i].actionId))
-        fail("Successive moves of one object must follow an explicit prerequisite sequence.");
+      if (!ancestors.get(steps[i].actionId)!.has(steps[j].actionId) && !ancestors.get(steps[j].actionId)!.has(steps[i].actionId) && !exclusive(steps[i].actionId, steps[j].actionId))
+        fail("Successive moves of one object must follow an explicit prerequisite sequence or mutually exclusive branches.");
     }
-    const ordered = [...steps].sort((a,b) => ancestors.get(b.actionId)!.has(a.actionId) ? -1 : 1);
-    let previous = entities.get(entityId)!;
-    for (const step of ordered) {
+    for (const step of steps) {
+      // Only this branch's latest preceding move is the actual start position.
+      // Globally sorting alternatives would compare two positions that can
+      // never coexist and reject valid departures or permit a no-op return.
+      let preceding: typeof step | undefined;
+      for (const candidate of steps) if (ancestors.get(step.actionId)!.has(candidate.actionId) &&
+          (!preceding || ancestors.get(candidate.actionId)!.has(preceding.actionId))) preceding = candidate;
+      const previous = preceding ?? entities.get(entityId)!;
       if (Math.hypot(step.x-previous.x,step.y-previous.y)<4)
         fail("Each movement must lead to a different position from the preceding step.");
-      previous = {...previous,x:step.x,y:step.y};
     }
   }
   const required = world.goalRules?.requiredInteractionIds;
@@ -207,15 +261,27 @@ export function validateInteractions(world: WorldDefinition, options: { allowUnp
   const resourceGoals = world.goalRules?.requiredResourceIds;
   if (resourceGoals !== undefined && (!Array.isArray(resourceGoals) || resourceGoals.length > 64 || new Set(resourceGoals).size !== resourceGoals.length || resourceGoals.some(id => !safeId(id) || !objects.get(id)?.resource)))
     fail("A resource task refers to a missing or repeated resource object.");
+  const requiredChoiceGroups = world.goalRules?.requiredChoiceGroupIds;
+  if (requiredChoiceGroups !== undefined && (!Array.isArray(requiredChoiceGroups) || requiredChoiceGroups.length > 8 ||
+      new Set(requiredChoiceGroups).size !== requiredChoiceGroups.length || requiredChoiceGroups.some(id => !safeId(id) || !choiceGroups.has(id))))
+    fail("A choice requirement refers to a missing or repeated choice group.");
+  const requiredAssignments = new Map<string, string>();
+  for (const id of required ?? []) for (const [group, selected] of branchAssignments.get(id)!) {
+    const earlier = requiredAssignments.get(group);
+    if (earlier && earlier !== selected) fail(`Required actions choose incompatible branches in ${choiceGroups.get(group)!.label}.`);
+    requiredAssignments.set(group, selected);
+  }
   validateInteractionFeasibility(world);
 }
 
 /** Sign only executable meaning: renaming a task must not erase earned work. */
-function signature(action: InteractionAction) {
+function signature(world: WorldDefinition, action: InteractionAction) {
+  const group = world.interactions?.choiceGroups?.find(group => group.actionIds.includes(action.id));
   return JSON.stringify({ kind: action.kind, toolId: action.toolId, targetId: action.targetId,
     requires: [...(action.requires ?? [])].sort(), effects: action.effects ?? [],
     ...(action.requiresResourceIds?.length ? {requiresResourceIds:[...action.requiresResourceIds].sort()} : {}),
-    ...(action.kind === "transfer" ? { amount: action.amount } : {}) });
+    ...(action.kind === "transfer" ? { amount: action.amount } : {}),
+    ...(group ? {choiceGroup:{id:group.id,actionIds:[...group.actionIds].sort()}} : {}) });
 }
 function initialState(world: WorldDefinition): InteractionState {
   return {
@@ -224,8 +290,29 @@ function initialState(world: WorldDefinition): InteractionState {
     completed: [], attachments: {}, completedSignatures: {},
   };
 }
+/** A closed branch also excludes every action that depends on it. Consumers can
+ * prune guidance without conflating a missing prerequisite with a closed route. */
+export function interactionChoiceBlockedReason(world: WorldDefinition, s: InteractionState, action: InteractionAction): string | undefined {
+  if (world.interactions?.choiceGroups?.length) {
+    const pending = [action.id], visited = new Set<string>();
+    while (pending.length) {
+      const id = pending.pop()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      const group = world.interactions.choiceGroups.find(group => group.actionIds.includes(id));
+      const selected = group?.actionIds.find(candidate => candidate !== id && s.completed.includes(candidate));
+      if (selected) {
+        const name = world.interactions.actions.find(candidate => candidate.id === selected)?.label || selected;
+        return `${name} already chosen.`;
+      }
+      pending.push(...(world.interactions.actions.find(candidate => candidate.id === id)?.requires ?? []));
+    }
+  }
+}
 function blockedReason(world: WorldDefinition, s: InteractionState, action: InteractionAction, checkHeld: boolean): string | undefined {
   if (s.completed.includes(action.id)) return "Already done.";
+  const choiceReason = interactionChoiceBlockedReason(world, s, action);
+  if (choiceReason) return choiceReason;
   if (action.requires?.some(id => !s.completed.includes(id))) return "Complete the earlier step first.";
   const missingResources = (action.requiresResourceIds ?? []).filter(id => {
     const resource = world.interactions!.objects.find(object => object.entityId === id)!.resource!;
@@ -259,7 +346,7 @@ function apply(world: WorldDefinition, s: InteractionState, action: InteractionA
   }
   if (action.kind === "place" && s.heldEntityId === action.toolId) s.heldEntityId = null;
   s.completed.push(action.id);
-  s.completedSignatures![action.id] = signature(action);
+  s.completedSignatures![action.id] = signature(world, action);
 }
 
 /** Replays valid receipts; saved counters cannot create resources or stale capabilities. */
@@ -269,7 +356,7 @@ export function interactionState(world: WorldDefinition, state: PlayState): Inte
   const actions = new Map(world.interactions.actions.map(a => [a.id, a]));
   for (const id of Array.isArray(saved.completed) ? saved.completed.slice(0, 64) : []) {
     const a = actions.get(id);
-    if (a && record(saved.completedSignatures) && Object.hasOwn(saved.completedSignatures, id) && saved.completedSignatures[id] === signature(a) && !blockedReason(world, result, a, false)) apply(world, result, a);
+    if (a && record(saved.completedSignatures) && Object.hasOwn(saved.completedSignatures, id) && saved.completedSignatures[id] === signature(world, a) && !blockedReason(world, result, a, false)) apply(world, result, a);
   }
   const held = saved.heldEntityId;
   if (typeof held === "string" && world.interactions.objects.some(o => o.entityId === held && o.carryable) && !result.attachments[held]) result.heldEntityId = held;
@@ -278,10 +365,11 @@ export function interactionState(world: WorldDefinition, state: PlayState): Inte
 
 /** Search only at validation/action boundaries, never in per-frame affordances.
  * Final quantities matter: filling a target and then draining it does not win. */
-function completionFeasibility(world: WorldDefinition, start: InteractionState): "possible" | "impossible" | "bounded" {
+function completionFeasibility(world: WorldDefinition, start: InteractionState, budget?: {remaining: number}): "possible" | "impossible" | "bounded" {
   const required = new Set(world.goalRules?.requiredInteractionIds ?? []);
   const resources = (world.goalRules?.requiredResourceIds ?? []).map(id => world.interactions!.objects.find(o => o.entityId === id)!);
-  if ((!required.size && !resources.length) || !world.interactions) return "possible";
+  const requiredGroups = (world.goalRules?.requiredChoiceGroupIds ?? []).map(id => world.interactions!.choiceGroups!.find(group => group.id === id)!);
+  if ((!required.size && !resources.length && !requiredGroups.length) || !world.interactions) return "possible";
   const actions = world.interactions.actions;
   const needed = new Set(required);
   const visit = (id: string) => {
@@ -296,7 +384,7 @@ function completionFeasibility(world: WorldDefinition, start: InteractionState):
   // finding a simple valid route. Retain the complete connected resource graph:
   // outgoing transfers may free capacity, incoming transfers may replenish a
   // supply, and either route may introduce further prerequisites/readiness.
-  const relevant = new Set(needed);
+  const relevant = new Set([...needed, ...requiredGroups.flatMap(group => group.actionIds)]);
   const resourceIds = new Set(resources.map(object => object.entityId));
   let changed = true;
   while (changed) {
@@ -315,11 +403,13 @@ function completionFeasibility(world: WorldDefinition, start: InteractionState):
   const seen = new Set<string>();
   let bounded = false;
   const search = (state: InteractionState): boolean => {
-    if ([...needed].every(id => state.completed.includes(id)) && resources.every(object => (state.quantities[object.entityId] ?? 0) >= object.resource!.capacity)) return true;
+    if ([...needed].every(id => state.completed.includes(id)) && resources.every(object => (state.quantities[object.entityId] ?? 0) >= object.resource!.capacity) &&
+        requiredGroups.every(group => group.actionIds.some(id => state.completed.includes(id)))) return true;
     const key = [...state.completed].sort().join("|");
     if (seen.has(key)) return false;
-    if (seen.size >= 8192) { bounded = true; return false; }
+    if (seen.size >= 8192 || (budget && budget.remaining <= 0)) { bounded = true; return false; }
     seen.add(key);
+    if (budget) budget.remaining--;
     for (const action of ordered) {
       // Possession is freely selectable for feasibility; attachments still
       // consume parts, and quantities/prerequisites use the live game's rules.
@@ -327,6 +417,7 @@ function completionFeasibility(world: WorldDefinition, start: InteractionState):
       const next = structuredClone(state);
       apply(world, next, action);
       if (search(next)) return true;
+      if (budget && budget.remaining <= 0) { bounded = true; return false; }
     }
     return false;
   };
@@ -339,6 +430,30 @@ export function validateInteractionFeasibility(world: WorldDefinition, state?: P
     ? "This action plan is too complex to verify. Simplify the required sequence before applying it."
     : state ? "Your current supplies and attached parts cannot complete these new requirements. Keep the earlier rules or add a usable supply or part."
     : "The required tasks cannot be completed with these supplies and attachments. Adjust the amounts or required actions.");
+}
+
+/** Admission check for generated plans, after structural validation. Every
+ * offered member must occur on some completing run. Manual authoring can still
+ * deliberately require one particular member, so ordinary validation omits this.
+ * This checks resources, attachments and prerequisites; geometry is separate. */
+export function validateInteractionChoiceOutcomes(world: WorldDefinition): void {
+  const groups = world.interactions?.choiceGroups ?? [];
+  if (!groups.length) return;
+  const members = groups.flatMap(group => group.actionIds.map(id => ({group, id})));
+  if (members.length > 32) fail("Keep at most 32 alternatives across eight choices.");
+  // Each individual proof retains the existing 8192-state cap; a plan cannot
+  // multiply that worst case across every declared alternative.
+  const budget = {remaining: 32768};
+  for (const {group, id} of members) {
+    const candidate: WorldDefinition = {...world, goalRules: {
+      ...(world.goalRules ?? {requiredCollectedIds: [], requiredActivatedIds: []}),
+      requiredInteractionIds: [...new Set([...(world.goalRules?.requiredInteractionIds ?? []), id])],
+    }};
+    const result = completionFeasibility(candidate, initialState(candidate), budget);
+    if (result !== "possible") fail(result === "bounded"
+      ? `Choice ${group.id} is too complex to verify for action ${id}. Simplify its prerequisites or resource routes.`
+      : `Choice ${group.id} offers action ${id}, but no completing run can include it. Adjust the alternatives or finishing requirements.`);
+  }
 }
 
 export function availableInteractions(world: WorldDefinition, state: PlayState, targetId?: string): InteractionAction[] {
@@ -358,12 +473,13 @@ export function safeAvailableInteractions(world: WorldDefinition, state: PlaySta
     world.interactions,
     world.goalRules?.requiredInteractionIds ?? [],
     world.goalRules?.requiredResourceIds ?? [],
+    world.goalRules?.requiredChoiceGroupIds ?? [],
     state.interactions ?? null,
   ]);
   let cached = safeChoiceCache.get(world);
   if (!cached || cached.fingerprint !== fingerprint) {
     const normalized = interactionState(world, state);
-    const hasGoals = Boolean(world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length);
+    const hasGoals = Boolean(world.goalRules?.requiredInteractionIds?.length || world.goalRules?.requiredResourceIds?.length || world.goalRules?.requiredChoiceGroupIds?.length);
     const actions = world.interactions.actions.filter(action => {
       if (blockedReason(world, normalized, action, true)) return false;
       if (!hasGoals) return true;

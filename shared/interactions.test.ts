@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyPlayState, goalProgress, retainPlayState, validateWorld, type PlayState, type WorldDefinition } from "./world.js";
-import { availableInteractions, safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction, type InteractionCommand } from "./interactions.js";
+import { availableInteractions, safeAvailableInteractions, interactionEffects, interactionState, reduceInteraction, validateInteractionChoiceOutcomes, type InteractionCommand } from "./interactions.js";
 import { applyWorldPatch, undoWorldPatch } from "./revisions.js";
 import { validSavedWorlds } from "../src/lib/library.js";
 import { inspectInteractionTarget, previewInteraction } from "./interaction-preview.js";
@@ -383,4 +383,209 @@ test("inspection reports actual capability when a weaker upgrade leaves the stro
   s = step(w,s,{type:"perform",actionId:"boost-0"});
   assert.equal(previewInteraction(w,s,w.interactions!.actions[1]).consequence,"Movement speed stays ×2.");
   assert.equal(interactionEffects(w,step(w,s,{type:"perform",actionId:"boost-1"})).moveSpeedMultiplier,2);
+});
+
+function choiceWorld(): WorldDefinition {
+  const w = world();
+  w.interactions!.actions = [w.interactions!.actions[0],
+    {id:"gate-route",kind:"attach",label:"Open the gate",toolId:"part",targetId:"receiver",requires:["fill"],effects:[{kind:"openGate",entityId:"barrier"}]},
+    {id:"speed-route",kind:"attach",label:"Power the fast route",toolId:"part",targetId:"supply",requires:["fill"],effects:[{kind:"moveSpeedBoost",multiplier:1.8}]},
+  ];
+  w.interactions!.choiceGroups = [{id:"route",label:"a route",actionIds:["gate-route","speed-route"]}];
+  w.goalRules = {requiredCollectedIds:[],requiredActivatedIds:[],requiredChoiceGroupIds:["route"]};
+  return validateWorld(w);
+}
+function choiceReady(w: WorldDefinition) {
+  return step(w,step(w,filled(w),{type:"drop"}),{type:"pickup",entityId:"part"});
+}
+
+test("exclusive attachments create different physical capabilities and either satisfies one OR goal",()=>{
+  const w=choiceWorld();
+  const pending=goalProgress(w,emptyPlayState());
+  assert.equal(pending.total,1);assert.equal(pending.done,0);assert.match(pending.hint,/choose a route/);
+  assert.deepEqual(pending.missingChoiceGroupIds,["route"]);
+  for(const selected of ["gate-route","speed-route"]){
+    const before=choiceReady(w);
+    assert.deepEqual(safeAvailableInteractions(w,before).map(action=>action.id),["gate-route","speed-route"]);
+    const state=step(w,before,{type:"perform",actionId:selected});
+    const effects=interactionEffects(w,state);
+    assert.deepEqual(effects.openGateIds,selected==="gate-route"?["barrier"]:[]);
+    assert.equal(effects.moveSpeedMultiplier,selected==="speed-route"?1.8:1);
+    assert.deepEqual(state.interactions!.attachments,{part:selected==="gate-route"?"receiver":"supply"});
+    assert.equal(goalProgress(w,state).ready,true);assert.equal(goalProgress(w,state).done,1);
+    const excluded=selected==="gate-route"?"speed-route":"gate-route";
+    const rejected=reduceInteraction(w,state,{type:"perform",actionId:excluded});
+    assert.equal(rejected.ok,false);assert.equal(rejected.state,state);assert.match(rejected.reason!,/already chosen/);
+    assert.doesNotMatch(rejected.reason!,/undo/i);
+    const restored=validSavedWorlds(JSON.parse(JSON.stringify([{world:w,state,savedAt:new Date().toISOString()}])))[0];
+    assert.deepEqual(interactionEffects(w,restored.state),effects);
+    assert.equal(goalProgress(w,restored.state).ready,true);
+    // Restoring the complete pre-action snapshot is sufficient for play undo:
+    // the choice lock, attachment and capability all come from the receipts.
+    assert.deepEqual(safeAvailableInteractions(w,before).map(action=>action.id),["gate-route","speed-route"]);
+    assert.deepEqual(interactionEffects(w,before).openGateIds,[]);
+    assert.equal(interactionEffects(w,before).moveSpeedMultiplier,1);
+  }
+});
+
+function branchWorld(): WorldDefinition {
+  const w=choiceWorld();
+  w.interactions!.actions=w.interactions!.actions.map(action=>action.kind==="attach"?{...action,kind:"use"}:action);
+  w.entities.find(entity=>entity.id==="receiver")!.art="/art/seed.svg";
+  w.interactions!.actions.push(
+    {id:"gate-arrival",kind:"use",label:"Bring the mechanism through the gate",toolId:"supply",targetId:"receiver",requires:["gate-route"],effects:[{kind:"moveObject",entityId:"receiver",x:700,y:120}]},
+    {id:"speed-arrival",kind:"use",label:"Bring the mechanism along the fast route",toolId:"supply",targetId:"receiver",requires:["speed-route"],effects:[{kind:"moveObject",entityId:"receiver",x:900,y:320}]},
+  );
+  w.interactions!.choiceGroups!.push({id:"arrival",label:"an arrival",actionIds:["gate-arrival","speed-arrival"]});
+  w.goalRules!.requiredChoiceGroupIds=["arrival"];
+  return validateWorld(w);
+}
+
+test("generated choices must each participate in completion while manual fixed-route rules remain valid",()=>{
+  const w=branchWorld();
+  const snapshot=JSON.stringify(w);
+  validateInteractionChoiceOutcomes(w);
+  assert.equal(JSON.stringify(w),snapshot,"Admission checks must not rewrite a plan or its requirements.");
+  const fixed=structuredClone(w);
+  fixed.goalRules!.requiredInteractionIds=["gate-route"];
+  validateWorld(fixed);
+  assert.throws(()=>validateInteractionChoiceOutcomes(fixed),/route offers action speed-route, but no completing run/);
+  const unreachable=choiceWorld();
+  unreachable.interactions!.actions.find(action=>action.id==="speed-route")!.requiresResourceIds=["receiver"];
+  validateWorld(unreachable); // Gate route still completes; six units cannot fill a ten-unit receiver.
+  assert.throws(()=>validateInteractionChoiceOutcomes(unreachable),/route offers action speed-route, but no completing run/);
+  const legacy=world();
+  validateInteractionChoiceOutcomes(legacy);
+});
+
+test("inspection preserves inherited branch locks rather than directing players to the excluded prerequisite",()=>{
+  const w=branchWorld();
+  let state=step(w,choiceReady(w),{type:"perform",actionId:"gate-route"});
+  state=step(w,step(w,state,{type:"drop"}),{type:"pickup",entityId:"supply"});
+  const action=w.interactions!.actions.find(action=>action.id==="speed-arrival")!;
+  const preview=previewInteraction(w,state,action);
+  assert.equal(preview.available,false);
+  assert.equal(preview.reason,"Open the gate already chosen.");
+  assert.doesNotMatch(preview.reason!,/First:/);
+});
+
+test("OR feasibility follows alternative prerequisites and inherited branch assignments through actual movements",()=>{
+  const w=branchWorld();
+  for(const branch of ["gate","speed"]){
+    let state=step(w,choiceReady(w),{type:"perform",actionId:`${branch}-route`});
+    const excluded=branch==="gate"?"speed":"gate";
+    const before=state;
+    const blocked=reduceInteraction(w,state,{type:"perform",actionId:`${excluded}-arrival`});
+    assert.equal(blocked.ok,false);assert.equal(blocked.state,before);assert.match(blocked.reason!,/already chosen/);
+    assert.equal(goalProgress(w,state).ready,false,"Selecting a route alone does not earn its later outcome.");
+    state=step(w,step(w,state,{type:"drop"}),{type:"pickup",entityId:"supply"});
+    assert.deepEqual(safeAvailableInteractions(w,state).map(action=>action.id),[`${branch}-arrival`]);
+    state=step(w,state,{type:"perform",actionId:`${branch}-arrival`});
+    assert.equal(goalProgress(w,state).ready,true);
+    assert.equal(interactionEffects(w,state).objectMoves.receiver.x,branch==="gate"?700:900);
+  }
+  // The arrival group is not what proves these moves exclusive: their distinct
+  // ancestor assignments suffice even when the ending actions are ungrouped.
+  const inherited=structuredClone(w);
+  inherited.interactions!.choiceGroups=inherited.interactions!.choiceGroups!.filter(group=>group.id!=="arrival");
+  inherited.goalRules!.requiredChoiceGroupIds=["route"];
+  validateWorld(inherited);
+  const unproven=structuredClone(inherited);
+  unproven.interactions!.actions.find(action=>action.id==="speed-arrival")!.requires=["fill"];
+  assert.throws(()=>validateWorld(unproven),/explicit prerequisite sequence or mutually exclusive branches/);
+  const noOp=structuredClone(w);
+  noOp.interactions!.actions.push({id:"stay",kind:"use",label:"Stay",toolId:"supply",targetId:"receiver",requires:["gate-arrival"],effects:[{kind:"moveObject",entityId:"receiver",x:700,y:120}]});
+  assert.throws(()=>validateWorld(noOp),/different position from the preceding step/);
+});
+
+test("exclusive receipt replay rejects forged dual choices and invalidates changed membership without invalidating labels",()=>{
+  const w=choiceWorld(), before=choiceReady(w);
+  const gate=step(w,before,{type:"perform",actionId:"gate-route"});
+  const speed=step(w,before,{type:"perform",actionId:"speed-route"});
+  const forged=structuredClone(gate);
+  forged.interactions!.completed.push("speed-route");
+  forged.interactions!.completedSignatures!["speed-route"]=speed.interactions!.completedSignatures!["speed-route"];
+  assert.deepEqual(interactionState(w,forged).completed,["fill","gate-route"]);
+  assert.equal(interactionEffects(w,forged).moveSpeedMultiplier,1);
+  const relabelled=structuredClone(w);
+  relabelled.interactions!.choiceGroups![0].label="a different name";
+  relabelled.interactions!.choiceGroups![0].actionIds.reverse();
+  assert.deepEqual(interactionState(relabelled,gate).completed,["fill","gate-route"]);
+  const changed=structuredClone(w);
+  changed.interactions!.actions.push({id:"third-route",kind:"attach",label:"Another speed",toolId:"part",targetId:"receiver",requires:["fill"],effects:[{kind:"moveSpeedBoost",multiplier:1.4}]});
+  changed.interactions!.choiceGroups![0].actionIds.push("third-route");
+  validateWorld(changed);
+  assert.deepEqual(interactionState(changed,gate).completed,["fill"]);
+  assert.deepEqual(interactionEffects(changed,gate).openGateIds,[]);
+  assert.equal(goalProgress(changed,gate).ready,false);
+  assert.deepEqual(interactionState(changed,gate).quantities,{supply:4,receiver:6});
+  const ungrouped=world(), legacy=filled(ungrouped);
+  assert.equal(legacy.interactions!.completedSignatures!.fill,JSON.stringify({kind:"transfer",toolId:"supply",targetId:"receiver",requires:[],effects:[],amount:6}));
+});
+
+test("choice validation rejects malformed memberships, impossible prerequisites and AND goals across alternatives",()=>{
+  for(const mutate of [
+    (w:WorldDefinition)=>{w.interactions!.choiceGroups![0].actionIds=["gate-route"];},
+    (w:WorldDefinition)=>{w.interactions!.choiceGroups![0].actionIds=["gate-route","gate-route"];},
+    (w:WorldDefinition)=>{w.interactions!.choiceGroups![0].actionIds=["gate-route","missing"];},
+    (w:WorldDefinition)=>{w.interactions!.choiceGroups![0].label="";},
+    (w:WorldDefinition)=>{w.interactions!.choiceGroups!.push({id:"other",label:"Other",actionIds:["gate-route","fill"]});},
+    (w:WorldDefinition)=>{w.interactions!.choiceGroups!.push({...w.interactions!.choiceGroups![0]});},
+    (w:WorldDefinition)=>{w.goalRules!.requiredChoiceGroupIds=["missing"];},
+    (w:WorldDefinition)=>{w.goalRules!.requiredChoiceGroupIds=["route","route"];},
+    (w:WorldDefinition)=>{delete w.interactions;},
+    (w:WorldDefinition)=>{w.interactions!.actions[1].requires=["speed-route"];},
+    (w:WorldDefinition)=>{w.interactions!.actions.push({id:"both",kind:"use",label:"Both routes",toolId:"supply",targetId:"receiver",requires:["gate-route","speed-route"],effects:[{kind:"openGate",entityId:"barrier"}]});},
+    (w:WorldDefinition)=>{w.goalRules!.requiredInteractionIds=["gate-route","speed-route"];},
+    (w:WorldDefinition)=>{w.interactions!.objects[0].resource!.initial=0;},
+    (w:WorldDefinition)=>{delete w.interactions!.choiceGroups;w.goalRules!.requiredChoiceGroupIds=[];},
+  ]){const invalid=choiceWorld();mutate(invalid);assert.throws(()=>validateWorld(invalid));}
+  const conflict=branchWorld();conflict.goalRules!.requiredInteractionIds=["gate-arrival","speed-arrival"];
+  assert.throws(()=>validateWorld(conflict),/Required actions choose incompatible branches/);
+  const cycle=choiceWorld();
+  cycle.interactions!.actions.find(action=>action.id==="gate-route")!.toolId="supply";
+  cycle.interactions!.actions.find(action=>action.id==="gate-route")!.targetId="part";
+  cycle.interactions!.actions.find(action=>action.id==="speed-route")!.targetId="supply";
+  assert.throws(()=>validateWorld(cycle),/attach to each other in a circle/,"Attachment cycles remain conservatively rejected across alternatives.");
+});
+
+test("choice goals participate in safety caching and prevent a resource allocation from eliminating every route",()=>{
+  const w=choiceWorld();
+  w.interactions!.objects.find(object=>object.entityId==="part")!.resource={type:"charge",capacity:10,initial:0};
+  w.interactions!.actions.push({id:"waste",kind:"transfer",label:"Spend the charge",toolId:"supply",targetId:"part",amount:5});
+  w.goalRules!.requiredChoiceGroupIds=[];
+  validateWorld(w);
+  const state=step(w,emptyPlayState(),{type:"pickup",entityId:"supply"});
+  assert.ok(safeAvailableInteractions(w,state).some(action=>action.id==="waste"));
+  w.goalRules!.requiredChoiceGroupIds=["route"];
+  assert.equal(safeAvailableInteractions(w,state).some(action=>action.id==="waste"),false,"An in-place OR-goal edit invalidates the availability cache.");
+  const rejected=reduceInteraction(w,state,{type:"perform",actionId:"waste"});
+  assert.equal(rejected.ok,false);assert.equal(rejected.state,state);assert.match(rejected.reason!,/block completion/);
+  const held=choiceReady(w);
+  w.goalRules!.requiredInteractionIds=["gate-route"];
+  assert.deepEqual(safeAvailableInteractions(w,held).map(action=>action.id),["gate-route"],"A fixed required branch takes precedence over the alternative OR goal.");
+});
+
+test("attachments inherit exclusive ancestor assignments while independent OR groups still must be jointly feasible",()=>{
+  const w=branchWorld();
+  w.interactions!.choiceGroups=w.interactions!.choiceGroups!.filter(group=>group.id==="route");
+  w.goalRules!.requiredChoiceGroupIds=["route"];
+  w.interactions!.actions=w.interactions!.actions.map(action=>action.id.endsWith("-arrival")
+    ? {...action,kind:"attach",targetId:action.id==="gate-arrival"?"receiver":"part"}:action);
+  validateWorld(w);
+  for(const branch of ["gate","speed"]){
+    let state=step(w,choiceReady(w),{type:"perform",actionId:`${branch}-route`});
+    state=step(w,step(w,state,{type:"drop"}),{type:"pickup",entityId:"supply"});
+    state=step(w,state,{type:"perform",actionId:`${branch}-arrival`});
+    assert.equal(state.interactions!.attachments.supply,branch==="gate"?"receiver":"part");
+    assert.equal(interactionEffects(w,state).objectMoves.receiver.x,branch==="gate"?700:900);
+  }
+  const impossible=choiceWorld();
+  for(const branch of ["gate","speed"]){
+    const actionIds=[`${branch}-outcome-a`,`${branch}-outcome-b`];
+    impossible.interactions!.choiceGroups!.push({id:`require-${branch}`,label:`${branch} outcome`,actionIds});
+    for(const id of actionIds)impossible.interactions!.actions.push({id,kind:"use",label:id,toolId:"supply",targetId:"receiver",requires:[`${branch}-route`],effects:[{kind:"openGate",entityId:"barrier"}]});
+  }
+  impossible.goalRules!.requiredChoiceGroupIds=["require-gate","require-speed"];
+  assert.throws(()=>validateWorld(impossible),/cannot be completed/,"Individually reachable OR goals cannot require mutually exclusive ancestor choices together.");
 });

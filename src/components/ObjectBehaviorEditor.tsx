@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { validateInteractions, type InteractionAction, type InteractionPlan } from "../../shared/interactions";
-import type { WorldDefinition, WorldEntity } from "../../shared/world";
+import type { GoalRules, WorldDefinition, WorldEntity } from "../../shared/world";
 import { isSourceAlignedScenery, isSourceBackdrop } from "../../shared/source-scenery";
 import { movementMode } from "../../shared/world";
 import "./object-behavior-editor.css";
@@ -8,7 +8,7 @@ import "./object-behavior-editor.css";
 interface AbilityDraft {
   targetId: string; behavior: string; label: string; resourceType: string;
   amount: number; supply: number; capacity: number;
-  destination?: {x:number;y:number}; prerequisites: string[]; resourcePrerequisites?: string[]; dirty: boolean;
+  destination?: {x:number;y:number}; prerequisites: string[]; resourcePrerequisites?: string[]; alternativeTo?: string; dirty: boolean;
 }
 const abilityDrafts = new Map<string, AbilityDraft>();
 export function clearObjectAbilityDrafts(worldId: string, revision: number) {
@@ -26,7 +26,7 @@ export function removeObjectAbilityDraft(worldId: string, revision: number, obje
 /** Author executable object relationships; no source names select mechanics. */
 export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPickDestination, onCancelDestination, onDraftChange }: {
   world: WorldDefinition; item: WorldEntity; plan?: InteractionPlan;
-  onChange: (plan: InteractionPlan | undefined) => void;
+  onChange: (plan: InteractionPlan | undefined, requirements?: Pick<GoalRules, "requiredInteractionIds" | "requiredChoiceGroupIds">) => void;
   onDraw?: () => void;
   onCancelDestination?: () => void;
   onDraftChange?: (dirty: boolean) => void;
@@ -44,13 +44,14 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
   const [destination, setDestination] = useState<{x: number; y: number} | undefined>(draft?.destination);
   const [prerequisites, setPrerequisites] = useState<string[]>(draft?.prerequisites ?? []);
   const [resourcePrerequisites, setResourcePrerequisites] = useState<string[]>(draft?.resourcePrerequisites ?? []);
+  const [alternativeTo, setAlternativeTo] = useState(draft?.alternativeTo ?? "");
   const originalResource = plan?.objects.find(object => object.entityId === item.id)?.resource?.type ?? "energy";
-  const dirty = Boolean(targetId || label.trim() || destination || prerequisites.length || resourcePrerequisites.length || behavior !== "transfer" || resourceType !== originalResource || amount !== 1 || supply !== 1 || capacity !== 1);
+  const dirty = Boolean(alternativeTo || targetId || label.trim() || destination || prerequisites.length || resourcePrerequisites.length || behavior !== "transfer" || resourceType !== originalResource || amount !== 1 || supply !== 1 || capacity !== 1);
   useEffect(() => {
-    abilityDrafts.set(cacheKey, {targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, dirty});
+    abilityDrafts.set(cacheKey, {targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, dirty});
     const prefix = `${world.id}:${world.revision}:`;
     onDraftChange?.([...abilityDrafts].some(([key, value]) => key.startsWith(prefix) && value.dirty));
-  }, [cacheKey, targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, dirty, onDraftChange, world.id, world.revision]);
+  }, [cacheKey, targetId, behavior, label, resourceType, amount, supply, capacity, destination, prerequisites, resourcePrerequisites, alternativeTo, dirty, onDraftChange, world.id, world.revision]);
   const movesObject = behavior === "move" || behavior === "attach-move";
   const [error, setError] = useState("");
   const sourceResource = plan?.objects.find(object => object.entityId === item.id)?.resource;
@@ -73,7 +74,7 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     if (behavior === "transfer" && (!/^[\w-]{1,60}$/.test(resourceType) || !Number.isFinite(amount) || amount <= 0 || amount > 10000)) {
       setError("Choose a resource name and an amount between 1 and 10,000."); return;
     }
-    if ((behavior === "jump" || behavior === "speed" || behavior === "attach-move") && actions.some(a => a.kind === "attach")) {
+    if (!alternativeTo && (behavior === "jump" || behavior === "speed" || behavior === "attach-move") && actions.some(a => a.kind === "attach")) {
       setError("This part already has an attachment. Draw another part for a new ability."); return;
     }
     const placementTarget = targets.find(entity => entity.id === targetId)!;
@@ -111,21 +112,52 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       behavior === "open" ? { ...base, kind: "use", effects: [{ kind: "openGate", entityId: targetId }] } :
       { ...base, kind: "attach", effects: [{ kind: behavior === "jump" ? "jumpBoost" : "moveSpeedBoost", multiplier: 1.5 }] };
     next.actions.push(action);
-    if (behavior === "place") {
-      try { validateInteractions({...world, interactions: next}); }
+    let requirements: Pick<GoalRules, "requiredInteractionIds" | "requiredChoiceGroupIds"> | undefined;
+    if (alternativeTo) {
+      const groups = next.choiceGroups ?? [];
+      const existingGroup = alternativeTo.startsWith("group:") ? groups.find(group => group.id === alternativeTo.slice(6)) : undefined;
+      const previousAction = alternativeTo.startsWith("action:") ? next.actions.find(candidate => candidate.id === alternativeTo.slice(7)) : undefined;
+      if ((!existingGroup && !previousAction) || (previousAction && groups.some(group => group.actionIds.includes(previousAction.id)))) {
+        setError("This alternative has changed. Choose an existing ability or choice again."); return;
+      }
+      if (existingGroup && existingGroup.actionIds.length >= 4) { setError("This choice already has four abilities."); return; }
+      if (!existingGroup && groups.length >= 8) { setError("This world already has eight choices. Add to an existing choice instead."); return; }
+      const group = existingGroup ? {...existingGroup, actionIds: [...existingGroup.actionIds, action.id]} : {
+        id: `choice-${crypto.randomUUID()}`,
+        label: `Choose ${behavior === "place" ? "a destination" : "an ability"} for ${item.label || "this object"}`.slice(0, 80),
+        actionIds: [previousAction!.id, action.id],
+      };
+      next.choiceGroups = existingGroup ? groups.map(candidate => candidate.id === group.id ? group : candidate) : [...groups, group];
+      const requiredActions = world.goalRules?.requiredInteractionIds ?? [];
+      const requiredGroups = world.goalRules?.requiredChoiceGroupIds ?? [];
+      requirements = {
+        requiredInteractionIds: requiredActions.filter(id => !group.actionIds.includes(id)),
+        requiredChoiceGroupIds: requiredActions.some(id => group.actionIds.includes(id))
+          ? [...new Set([...requiredGroups, group.id])] : [...requiredGroups],
+      };
+    }
+    if (behavior === "place" || alternativeTo) {
+      try { validateInteractions({...world, interactions: next, goalRules: {
+        ...(world.goalRules ?? {requiredCollectedIds: [], requiredActivatedIds: []}), ...requirements,
+      }}); }
       catch (cause) {
         const message = cause instanceof Error ? cause.message : "Check this placement and its requirements.";
-        setError(message.includes("explicit prerequisite sequence")
-          ? "Choose the earlier placement under Requirements first."
-          : message);
+        setError(message.includes("incompatible choices")
+          ? "These requirements need two options from the same choice. Remove the conflicting action requirement."
+          : message.includes("explicit prerequisite sequence")
+            ? "Choose an earlier placement under Requirements, or make this an alternative."
+            : message);
         return;
       }
     }
-    onChange(next);
+    onChange(next, requirements);
+    setAlternativeTo("");
     setTargetId(""); setBehavior("transfer"); setLabel(""); setResourceType(source.resource?.type ?? "energy");
     setAmount(1); setSupply(1); setCapacity(1); setPrerequisites([]); setResourcePrerequisites([]); setDestination(undefined); setError("");
   }
   function removeAction(id: string) {
+    const choice = plan?.choiceGroups?.find(group => group.actionIds.includes(id));
+    if (choice) { setError(`This ability belongs to “${choice.label}”. Edit or remove that choice before removing the ability.`); return; }
     if (plan?.actions.some(a => a.requires?.includes(id))) { setError("Another action needs this one. Remove that action first."); return; }
     const remaining = plan?.actions.filter(a => a.id !== id) ?? [];
     const requiredResources = world.goalRules?.requiredResourceIds ?? [];
@@ -138,11 +170,28 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
       ...requiredResources,
       ...remaining.flatMap(a => [a.toolId, a.targetId, ...(a.requiresResourceIds ?? []), ...(a.effects ?? []).flatMap(effect => "entityId" in effect ? [effect.entityId] : [])]),
     ]);
-    onChange({ version: 1, actions: remaining, objects: plan!.objects.filter(o => used.has(o.entityId)) });
+    onChange({ ...plan!, actions: remaining, objects: plan!.objects.filter(o => used.has(o.entityId)) });
+  }
+  function changeLayer(layer: "object" | "surface") {
+    if (!plan) return;
+    const next = structuredClone(plan), object = next.objects.find(object => object.entityId === item.id);
+    if (!object) return;
+    if (layer === "object") delete object.layer;
+    else object.layer = layer;
+    try { validateInteractions({...world, interactions: next}); }
+    catch (error) { setError(error instanceof Error ? error.message : "This arrangement could not be applied."); return; }
+    setError(""); onChange(next);
   }
   return <details className="object-purpose" open={actions.length > 0 || dirty || undefined}>
     <summary>Give it a purpose</summary>
     {actions.length > 0 && <ul>{actions.map(a => <li key={a.id}><strong>{a.label}</strong><span>{world.entities.find(e => e.id === a.targetId)?.label ?? "Object"}</span><button className="text-button" aria-label={`Remove ability ${a.label}`} onClick={() => removeAction(a.id)}>Remove</button></li>)}</ul>}
+    {plan?.objects.some(object => object.entityId === item.id) && <details className="purpose-sequence">
+      <summary>Arrangement</summary>
+      <label>Arrangement layer<select aria-label="Arrangement layer" value={plan.objects.find(object => object.entityId === item.id)?.layer ?? "object"} onChange={event => changeLayer(event.target.value as "object" | "surface")}>
+        <option value="object">Object</option>
+        <option value="surface">Under other objects</option>
+      </select></label>
+    </details>}
     <details className="purpose-new" open={!actions.length}><summary>{actions.length ? "Add another ability" : "New ability"}</summary>
     <label>What can it do?
       <select aria-label="Object ability" value={behavior} onChange={e => { onCancelDestination?.(); setBehavior(e.target.value); setTargetId(""); setDestination(undefined); setError(""); }}>
@@ -175,19 +224,102 @@ export function ObjectBehaviorEditor({ world, item, plan, onChange, onDraw, onPi
     </div>}
     <label>Action name<input aria-label="Action name" placeholder="What should the player do?" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} /></label>
     {Boolean(plan?.actions.length || plan?.objects.some(object=>object.resource)) && <details className="purpose-sequence"><summary>Requirements</summary>
+      {Boolean(plan?.actions.length) && <label style={{display: "grid"}}>Alternative to
+        <select aria-label="Alternative to" value={alternativeTo} onChange={event => {setAlternativeTo(event.target.value); setError("");}}>
+          <option value="">No alternative</option>
+          {plan?.actions.filter(action => !plan.choiceGroups?.some(group => group.actionIds.includes(action.id))).map(action =>
+            <option key={action.id} value={`action:${action.id}`} disabled={(plan.choiceGroups?.length ?? 0) >= 8}>{action.label} · {world.entities.find(entity => entity.id === action.toolId)?.label || "Object"}</option>)}
+          {plan?.choiceGroups?.filter(group => group.actionIds.length < 4).map(group => <option key={group.id} value={`group:${group.id}`}>{group.label}</option>)}
+        </select>
+        {alternativeTo && <span>Players choose one. An existing finishing requirement becomes complete one of these abilities.</span>}
+      </label>}
       {Boolean(plan?.actions.length) && <div className="purpose-requirements-heading">After another action</div>}
-      {plan?.actions.map(action => <label key={action.id}>
-        <input type="checkbox" checked={prerequisites.includes(action.id)} onChange={e => setPrerequisites(ids => e.target.checked ? [...ids, action.id] : ids.filter(id => id !== action.id))} />
+      {plan?.actions.map(action => <label key={action.id} style={{flexDirection: "row"}}>
+        <input type="checkbox" checked={prerequisites.includes(action.id)} disabled={!prerequisites.includes(action.id) && Boolean(plan?.choiceGroups?.some(group => group.actionIds.includes(action.id) && group.actionIds.some(id => prerequisites.includes(id))))}
+          onChange={e => setPrerequisites(ids => e.target.checked ? [...ids, action.id] : ids.filter(id => id !== action.id))} />
         <span>{action.label}</span>
       </label>)}
       {plan?.objects.some(object=>object.resource) && <div className="purpose-requirements-heading">After an object is filled</div>}
-      {plan?.objects.filter(object=>object.resource).map(object=><label key={object.entityId}>
+      {plan?.objects.filter(object=>object.resource).map(object=><label key={object.entityId} style={{flexDirection: "row"}}>
         <input type="checkbox" checked={resourcePrerequisites.includes(object.entityId)} onChange={e=>setResourcePrerequisites(ids=>e.target.checked ? [...ids,object.entityId] : ids.filter(id=>id!==object.entityId))}/>
         <span>{world.entities.find(entity=>entity.id===object.entityId)?.label || "Object"} · {object.resource!.capacity} {object.resource!.type}</span>
       </label>)}
     </details>}
     <button className="secondary-button" onClick={addAction}>Add ability</button>
     </details>
+    {error && <p role="alert">{error}</p>}
+  </details>;
+}
+
+export interface ChoiceDraft {
+  editingId?: string;
+  label: string;
+  actionIds: string[];
+  required: boolean;
+}
+
+/** Advanced authoring stays in the editor, outside ordinary play controls. */
+export function ChoiceGroupEditor({world, plan, requiredIds, draft, onDraftChange, onChange}: {
+  world: WorldDefinition;
+  plan: InteractionPlan;
+  requiredIds: string[];
+  draft?: ChoiceDraft;
+  onDraftChange: (draft: ChoiceDraft | undefined) => void;
+  onChange: (plan: InteractionPlan, requiredIds: string[], convertedActionIds?: string[]) => void;
+}) {
+  const [error, setError] = useState("");
+  const groups = plan.choiceGroups ?? [];
+  const abilityName = (action: InteractionAction) => `${action.label} · ${world.entities.find(entity => entity.id === action.toolId)?.label || "Object"}`;
+  function save() {
+    if (!draft) return;
+    if (!draft.label.trim()) { setError("Name this choice."); return; }
+    if (draft.actionIds.length < 2 || draft.actionIds.length > 4) { setError("Choose two to four abilities."); return; }
+    if (!draft.editingId && groups.length >= 8) { setError("This world already has eight choices."); return; }
+    if (groups.some(group => group.id !== draft.editingId && group.actionIds.some(id => draft.actionIds.includes(id)))) {
+      setError("An ability can belong to only one choice."); return;
+    }
+    const group = {id: draft.editingId ?? `choice-${crypto.randomUUID()}`, label: draft.label.trim(), actionIds: [...draft.actionIds]};
+    const next = {...plan, choiceGroups: [...groups.filter(item => item.id !== group.id), group]};
+    const required = draft.required ? [...new Set([...requiredIds, group.id])] : requiredIds.filter(id => id !== group.id);
+    const previousMembers = groups.find(candidate => candidate.id === draft.editingId)?.actionIds ?? [];
+    const convertedActionIds = draft.actionIds.filter(id => !previousMembers.includes(id));
+    try {
+      validateInteractions({...world, interactions: next, goalRules: {
+        ...(world.goalRules ?? {requiredCollectedIds: [], requiredActivatedIds: []}),
+        requiredInteractionIds: (world.goalRules?.requiredInteractionIds ?? []).filter(id => !convertedActionIds.includes(id)),
+        requiredChoiceGroupIds: required,
+      }});
+      onChange(next, required, convertedActionIds); onDraftChange(undefined); setError("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Check these abilities before saving the choice."); }
+  }
+  return <details className="object-purpose" open={draft ? true : undefined}>
+    <summary>Choices{groups.length ? ` · ${groups.length}` : ""}</summary>
+    <div className="editor-scope">Choose one ability per run. The other options close for this run.</div>
+    {groups.length > 0 && <ul>{groups.map(group => <li key={group.id}>
+      <strong>{group.label}</strong>
+      <span>{group.actionIds.map(id => { const action = plan.actions.find(action => action.id === id); return action ? abilityName(action) : id; }).join(" or ")}{requiredIds.includes(group.id) ? " · Required" : " · Optional"}</span>
+      <button className="text-button" disabled={Boolean(draft)} onClick={() => {onDraftChange({editingId: group.id, label: group.label, actionIds: [...group.actionIds], required: requiredIds.includes(group.id)}); setError("");}}>Edit</button>
+    </li>)}</ul>}
+    {!draft && <button className="secondary-button" disabled={groups.length >= 8 || plan.actions.filter(action => !groups.some(group => group.actionIds.includes(action.id))).length < 2}
+      onClick={() => {onDraftChange({label: "", actionIds: [], required: true}); setError("");}}>Add choice</button>}
+    {draft && <div className="purpose-new">
+      <label>Choice name<input aria-label="Choice name" maxLength={80} value={draft.label} onChange={event => onDraftChange({...draft, label: event.target.value})} /></label>
+      <fieldset className="purpose-sequence" style={{border: 0, padding: 0, minWidth: 0}}><legend>Choose abilities</legend>
+        {plan.actions.filter(action => !groups.some(group => group.id !== draft.editingId && group.actionIds.includes(action.id))).map(action => <label key={action.id} style={{flexDirection: "row"}}>
+          <input type="checkbox" checked={draft.actionIds.includes(action.id)} disabled={draft.actionIds.length >= 4 && !draft.actionIds.includes(action.id)}
+            onChange={event => onDraftChange({...draft, actionIds: event.target.checked ? [...draft.actionIds, action.id] : draft.actionIds.filter(id => id !== action.id)})} />
+          <span>{abilityName(action)}</span>
+        </label>)}
+      </fieldset>
+      <div className="purpose-sequence"><label style={{flexDirection: "row"}}><input type="checkbox" checked={draft.required} onChange={event => onDraftChange({...draft, required: event.target.checked})} />Complete one to finish</label></div>
+      <div className="editor-scope">{draft.editingId ? "Newly added options replace their individual finishing requirements. Existing fixed requirements stay unchanged." : "These abilities become a choice instead of individual finishing requirements."}</div>
+      <button className="secondary-button" onClick={save}>Save choice</button>
+      <button className="text-button" onClick={() => {onDraftChange(undefined); setError("");}}>Cancel</button>
+      {draft.editingId && <button className="text-button" onClick={() => {
+        onChange({...plan, choiceGroups: groups.filter(item => item.id !== draft.editingId)}, requiredIds.filter(id => id !== draft.editingId));
+        onDraftChange(undefined); setError("");
+      }}>Remove choice</button>}
+    </div>}
     {error && <p role="alert">{error}</p>}
   </details>;
 }

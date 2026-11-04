@@ -1005,11 +1005,16 @@ export default function App({ active = true }: { active?: boolean }) {
   const destination = world.entities.find((entity) => entity.kind === "goal");
   const finalClueRemaining = mode === "discover" && !world.interactions && objective.ready && !metrics.completed && Boolean(destination);
   const nextRequiredAction = world.interactions?.actions.find(action => world.goalRules?.requiredInteractionIds?.includes(action.id) && !latestState.current.interactions?.completed.includes(action.id));
+  const chosenOutcomes = (world.goalRules?.requiredChoiceGroupIds ?? []).flatMap(id => {
+    const group = world.interactions?.choiceGroups?.find(group => group.id === id);
+    const selected = world.interactions?.actions.find(action => group?.actionIds.includes(action.id) && latestState.current.interactions?.completed.includes(action.id));
+    return selected ? [selected.label] : [];
+  });
   const completionTitle = objective.ready ? `${world.name} complete` : "Earlier completion retained";
   const completionDetail = objective.ready
     ? destination
       ? `${mode === "discover" && !world.interactions ? "Final clue found" : "Destination reached"}: ${objectName(world, destination.id, 80)}`
-      : world.gameplay?.objectiveTitle ? `${world.gameplay.objectiveTitle} — complete.` : ""
+      : chosenOutcomes.length ? chosenOutcomes.slice(0, 2).join(" · ") : world.gameplay?.objectiveTitle ? `${world.gameplay.objectiveTitle} — complete.` : ""
     : "Your achievement stays with this world after its rules change.";
   const missionText =
     metrics.completed && !metrics.exploring
